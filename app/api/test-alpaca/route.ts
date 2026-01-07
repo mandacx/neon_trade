@@ -26,8 +26,8 @@ export async function GET() {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - 30);
     
-    let historyData = [];
-    let historyError = null;
+    let historyData: any[] = [];
+    let historyError: string | null = null;
     
     try {
       historyData = await getHistoricalBars(
