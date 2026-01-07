@@ -9,12 +9,10 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@klinecharts/pro": "^0.1.1",
     "@neondatabase/serverless": "^0.10.4",
     "axios": "^1.7.9",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
-    "klinecharts": "^10.0.0-beta1",
     "lightweight-charts": "^4.2.2",
     "next": "^15.1.4",
     "react": "^19.0.0",
