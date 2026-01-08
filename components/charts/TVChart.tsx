@@ -485,7 +485,7 @@ export default function TVChart({
       console.log('Setting OI data, count:', oiData.length);
       console.log('Sample OI data (first 3):', oiData.slice(0, 3));
       try {
-        const formattedOiDiff: HistogramData[] = oiData
+        const formattedOiDiff = oiData
           .map((d, index) => {
             // Debug first few items
             if (index < 3) {
