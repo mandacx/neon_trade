@@ -15,7 +15,7 @@ export default function Home() {
             Advanced Stock Analysis Platform
           </p>
           <p className="text-lg text-gray-500 dark:text-gray-400 max-w-2xl mx-auto mb-8">
-            Professional K-line charts with put/call level indicators and 5-quadrant visualization for identifying trading opportunities
+            Professional stock analysis with put/call level indicators and 5-quadrant visualization for identifying trading opportunities
           </p>
           
           <div className="flex justify-center mb-8">
@@ -24,21 +24,21 @@ export default function Home() {
         </div>
 
         <div className="grid md:grid-cols-2 gap-8 max-w-4xl mx-auto">
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-8 border border-gray-200 dark:border-gray-700">
-            <div className="text-3xl mb-4">📊</div>
-            <h2 className="text-2xl font-bold mb-3">K-Line Charts</h2>
-            <p className="text-gray-600 dark:text-gray-300">
-              Interactive candlestick charts with real-time data from Tradier API, featuring put/call level indicators and proximity alerts
-            </p>
-          </div>
-
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-8 border border-gray-200 dark:border-gray-700">
+          <a href="/quadrant" className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-8 border border-gray-200 dark:border-gray-700 hover:shadow-xl hover:border-blue-400 dark:hover:border-blue-500 transition-all cursor-pointer">
             <div className="text-3xl mb-4">🎯</div>
             <h2 className="text-2xl font-bold mb-3">Quadrant Analysis</h2>
             <p className="text-gray-600 dark:text-gray-300">
               5-quadrant scatter plot visualization showing stocks positioned by their proximity to critical price levels
             </p>
-          </div>
+          </a>
+
+          <a href="/stock/AAPL" className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-8 border border-gray-200 dark:border-gray-700 hover:shadow-xl hover:border-green-400 dark:hover:border-green-500 transition-all cursor-pointer">
+            <div className="text-3xl mb-4">📊</div>
+            <h2 className="text-2xl font-bold mb-3">Stock Analysis</h2>
+            <p className="text-gray-600 dark:text-gray-300">
+              Interactive candlestick charts with real-time data from Alpaca API, featuring put/call level indicators and proximity alerts
+            </p>
+          </a>
         </div>
 
         <div className="mt-16 text-center">

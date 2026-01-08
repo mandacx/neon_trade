@@ -509,8 +509,8 @@ export default function StockPage() {
               <h3 className="text-xl font-bold mb-4">Price Levels</h3>
               {!stockData ? (
                 <div className="text-center py-8 text-gray-500">
-                  <p className="mb-2">Level data not available in database</p>
-                  <p className="text-sm">Displaying broker OHLC data only</p>
+                  <p className="mb-2">Level data not available for this symbol</p>
+                  <p className="text-sm">Displaying OHLC data only</p>
                 </div>
               ) : (
                 <div className="space-y-3">
