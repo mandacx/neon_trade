@@ -356,20 +356,6 @@ export default function StockPage() {
           }
         });
 
-        // Process and merge OI data
-        if (oiResponse.ok) {
-          const oiResult = await oiResponse.json();
-          if (oiResult.success && oiResult.data?.data) {
-            setOiData(prevData => {
-              if (direction === 'past') {
-                return [...oiResult.data.data, ...prevData];
-              } else {
-                return [...prevData, ...oiResult.data.data];
-              }
-            });
-          }
-        }
-
         // Track the newly loaded range
         loadedRangesRef.current.push({ from, to });
 
