@@ -503,7 +503,7 @@ export default function TVChart({
               color: (d.oiDiff || 0) > 0 ? 'rgba(34, 197, 94, 0.6)' : 'rgba(239, 68, 68, 0.6)', // green if put>call, red if call>put
             };
           })
-          .filter((item): item is HistogramData => item !== null);
+          .filter(item => item !== null) as HistogramData[];
 
         // Format Call OI, Put OI, and OI Diff line data
         const callOiLineData = oiData
