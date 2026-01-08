@@ -216,8 +216,8 @@ export default function KLineChart({
 
       // Show tooltip with levels
       tooltipRef.current.style.display = 'block';
-      tooltipRef.current.style.left = param.point?.x + 10 + 'px';
-      tooltipRef.current.style.top = param.point?.y + 10 + 'px';
+      tooltipRef.current.style.left = (param.point?.x ?? 0) + 10 + 'px';
+      tooltipRef.current.style.top = (param.point?.y ?? 0) + 10 + 'px';
 
       // Build tooltip content with closest level highlighted
       const levelsWithProximity = dateLevels.map(level => {
