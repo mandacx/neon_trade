@@ -614,7 +614,6 @@ export default function TVChart({
           lineWidth: lineWidth,
           lineStyle: isClosest ? 0 : 2, // 0 = solid, 2 = dashed
           axisLabelVisible: true,
-          axisLabelBackgroundColor: color,
           title: displayName,
         });
 
