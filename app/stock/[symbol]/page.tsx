@@ -109,7 +109,7 @@ export default function StockPage() {
                   
                   // Find the latest date with data
                   let latestDate = '';
-                  let latestLevels = null;
+                  let latestLevels: any = null;
                   
                   histLevelsData.data.history.forEach((item: any) => {
                     console.log(`Adding to map - Date: ${item.date}, Levels:`, item.calculated);
@@ -214,7 +214,7 @@ export default function StockPage() {
             
             // Find the latest date with data
             let latestDate = '';
-            let latestLevels = null;
+            let latestLevels: any = null;
             
             levelsData.data.history.forEach((item: any) => {
               console.log(`Adding to map - Date: ${item.date}, Levels:`, item.calculated);
