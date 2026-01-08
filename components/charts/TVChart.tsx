@@ -188,7 +188,7 @@ export default function TVChart({
     setIsLoading(false);
 
     // Subscribe to visible range changes to detect when to load more data
-    let visibleRangeUnsubscribe: (() => void) | null = null;
+    let visibleRangeUnsubscribe: any = null;
     
     if (onLoadMore) {
       const chartTimeScale = chart.timeScale();
