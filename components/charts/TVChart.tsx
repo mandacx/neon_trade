@@ -211,31 +211,22 @@ export default function TVChart({
         if (!chartRef.current || loadingMoreRef.current) return;
 
         const timeScale = chartRef.current.timeScale();
+        const logicalRange = timeScale.getVisibleLogicalRange();
         const visibleRange = timeScale.getVisibleRange();
-        
-        if (!visibleRange || !candleSeriesRef.current) return;
+        console.log('[TVChart] range change — logical:', JSON.stringify(logicalRange), 'time:', JSON.stringify(visibleRange), 'loadingMore:', loadingMoreRef.current);
+        if (!logicalRange || logicalRange.from >= 0) return;
 
-        // Get actual data from the series
+        if (!candleSeriesRef.current) return;
         const seriesData = candleSeriesRef.current.data();
         if (!seriesData || seriesData.length === 0) return;
 
         const firstDataTime = seriesData[0].time as string;
         const lastDataTime = seriesData[seriesData.length - 1].time as string;
-        
-        const visibleFrom = visibleRange.from;
-        const visibleTo = visibleRange.to;
-        
-        // Convert to comparable format (date strings)
-        const visibleFromStr = typeof visibleFrom === 'string' ? visibleFrom : new Date((visibleFrom as number) * 1000).toISOString().split('T')[0];
-        const visibleToStr = typeof visibleTo === 'string' ? visibleTo : new Date((visibleTo as number) * 1000).toISOString().split('T')[0];
 
-        if (visibleFromStr < firstDataTime && !loadingMoreRef.current) {
-          loadingMoreRef.current = true;
-          onLoadMore('past', firstDataTime, lastDataTime);
-          // Reset guard after a safe delay — handler is only called from real user
-          // scroll (paused during programmatic setData), so no race condition here
-          setTimeout(() => { loadingMoreRef.current = false; }, 3000);
-        }
+        console.log('[TVChart] firing onLoadMore — firstDataTime:', firstDataTime, 'logical.from:', logicalRange.from);
+        loadingMoreRef.current = true;
+        onLoadMore('past', firstDataTime, lastDataTime);
+        setTimeout(() => { loadingMoreRef.current = false; }, 3000);
       };
 
       chartTimeScale.subscribeVisibleTimeRangeChange(handleVisibleTimeRangeChange);
@@ -444,6 +435,7 @@ export default function TVChart({
   useEffect(() => {
     if (!candleSeriesRef.current || !volumeSeriesRef.current || isLoading) return;
 
+    console.log('[TVChart] data effect running — candleData.length:', candleData.length, 'oiData.length:', oiData.length);
     // Pause scroll-trigger handler so programmatic setData/fitContent
     // don't fire onLoadMore — only real user scroll should trigger it
     pauseScrollTriggerRef.current?.();

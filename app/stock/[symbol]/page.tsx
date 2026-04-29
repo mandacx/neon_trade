@@ -227,6 +227,7 @@ export default function StockPage() {
     firstVisibleTime: string,
     lastVisibleTime: string
   ) => {
+    console.log('[page] handleLoadMore called — direction:', direction, 'isLoadingMoreRef:', isLoadingMoreRef.current);
     if (isLoadingMoreRef.current || !symbol) return;
 
     try {
