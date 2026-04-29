@@ -66,6 +66,7 @@ export default function TVChart({
   const [showPrice, setShowPrice] = useState(true);
   const [showOI, setShowOI] = useState(true);
   const loadingMoreRef = useRef(false);
+  const initialFitDoneRef = useRef(false);
 
   useEffect(() => { historicalLevelsRef.current = historicalLevels; }, [historicalLevels]);
   useEffect(() => { levelsRef.current = levels; }, [levels]);
@@ -226,6 +227,7 @@ export default function TVChart({
         const visibleToStr = typeof visibleTo === 'string' ? visibleTo : new Date((visibleTo as number) * 1000).toISOString().split('T')[0];
 
         if (visibleFromStr <= firstDataTime && visibleToStr >= firstDataTime && !loadingMoreRef.current) {
+          loadingMoreRef.current = true; // guard synchronously before async state update
           onLoadMore('past', firstDataTime, lastDataTime);
         }
       };
@@ -422,6 +424,7 @@ export default function TVChart({
       if (visibleRangeUnsubscribe) {
         visibleRangeUnsubscribe();
       }
+      initialFitDoneRef.current = false;
       chart.remove();
     };
   }, [height, onLoadMore]);
@@ -505,9 +508,10 @@ export default function TVChart({
       }
     }
 
-    // Only fit content on initial load, not when loading more data
-    if (!isLoadingMore && chartRef.current) {
+    // Only fit content once on first data load
+    if (!initialFitDoneRef.current && candleData.length > 0 && chartRef.current) {
       chartRef.current.timeScale().fitContent();
+      initialFitDoneRef.current = true;
     }
   }, [candleData, volumeData, oiData, isLoading, isLoadingMore, showPrice, showOI]);
 
