@@ -31,6 +31,14 @@ export default function StockPage() {
   // Track loaded date ranges to avoid duplicate fetches
   const loadedRangesRef = useRef<{ from: string; to: string }[]>([]);
 
+  // Stable refs so handleLoadMore never changes reference (prevents chart recreation)
+  const ohlcDataRef = useRef<any[]>([]);
+  const isLoadingMoreRef = useRef(false);
+  const selectedExpiryRef = useRef('');
+  useEffect(() => { ohlcDataRef.current = ohlcData; }, [ohlcData]);
+  useEffect(() => { isLoadingMoreRef.current = isLoadingMore; }, [isLoadingMore]);
+  useEffect(() => { selectedExpiryRef.current = selectedExpiry; }, [selectedExpiry]);
+
   useEffect(() => {
     if (!symbol) return;
 
@@ -219,7 +227,7 @@ export default function StockPage() {
     firstVisibleTime: string,
     lastVisibleTime: string
   ) => {
-    if (isLoadingMore || !symbol) return;
+    if (isLoadingMoreRef.current || !symbol) return;
 
     try {
       setIsLoadingMore(true);
@@ -227,12 +235,13 @@ export default function StockPage() {
       let from: string;
       let to: string;
 
+      const currentOhlcData = ohlcDataRef.current;
       if (direction === 'past') {
-        const earliestDate = new Date(ohlcData[0]?.date || firstVisibleTime);
+        const earliestDate = new Date(currentOhlcData[0]?.date || firstVisibleTime);
         to = format(subDays(earliestDate, 1), 'yyyy-MM-dd');
         from = format(subDays(earliestDate, 60), 'yyyy-MM-dd');
       } else {
-        const latestDate = new Date(ohlcData[ohlcData.length - 1]?.date || lastVisibleTime);
+        const latestDate = new Date(currentOhlcData[currentOhlcData.length - 1]?.date || lastVisibleTime);
         from = format(new Date(latestDate.getTime() + 86400000), 'yyyy-MM-dd');
         to = format(new Date(), 'yyyy-MM-dd');
       }
@@ -272,9 +281,9 @@ export default function StockPage() {
         // Track the newly loaded range
         loadedRangesRef.current.push({ from, to });
 
-        if (selectedExpiry) {
+        if (selectedExpiryRef.current) {
           const levelsResponse = await fetch(
-            `/api/stocks/${symbol}/levels?expiry=${selectedExpiry}&range=true&from=${from}&to=${to}`
+            `/api/stocks/${symbol}/levels?expiry=${selectedExpiryRef.current}&range=true&from=${from}&to=${to}`
           );
           
           if (levelsResponse.ok) {
@@ -316,7 +325,7 @@ export default function StockPage() {
     } finally {
       setIsLoadingMore(false);
     }
-  }, [symbol, ohlcData, isLoadingMore]);
+  }, [symbol]);
 
 
   if (isLoading) {
