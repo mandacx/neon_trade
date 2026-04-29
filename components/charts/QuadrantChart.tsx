@@ -10,8 +10,7 @@ import {
   Tooltip,
   ResponsiveContainer,
   ReferenceLine,
-  Legend,
-  Cell,
+  ReferenceArea,
 } from 'recharts';
 import { QuadrantStock } from '@/types/stock';
 import { getLevelColor, getLevelDisplayName, formatCurrency, formatPercentage } from '@/lib/utils';
@@ -24,21 +23,25 @@ interface QuadrantChartProps {
 
 type QuadrantLevel = 'put_low' | 'put_int' | 'put_call_int' | 'call_int' | 'call_high' | null;
 
+// Quadrant band boundaries (% distance from closest level)
+const BANDS = [
+  { level: 'put_low',      x1: -100, x2: -15, fill: '#fef2f2', label: 'PUT LOW',      labelX: -57, color: '#dc2626' },
+  { level: 'put_int',      x1:  -15, x2:  -5, fill: '#fff7ed', label: 'PUT INT',       labelX: -10, color: '#ea580c' },
+  { level: 'put_call_int', x1:   -5, x2:   5, fill: '#f0fdf4', label: 'PUT/CALL INT',  labelX:   0, color: '#16a34a' },
+  { level: 'call_int',     x1:    5, x2:  15, fill: '#eff6ff', label: 'CALL INT',      labelX:  10, color: '#2563eb' },
+  { level: 'call_high',    x1:   15, x2: 100, fill: '#faf5ff', label: 'CALL HIGH',     labelX:  57, color: '#9333ea' },
+];
+
 export default function QuadrantChart({ data, onStockClick, height = 600 }: QuadrantChartProps) {
   const [selectedQuadrant, setSelectedQuadrant] = useState<QuadrantLevel>(null);
   const [showGuide, setShowGuide] = useState(false);
 
-  // Transform data for the scatter chart - use actual quadrant positions
+  // Transform: X = actual % distance (closestValue * 100), Y = jitter to spread dots
   const chartData = useMemo(() => {
-    // Group stocks by level first to distribute them evenly
+    // Group by level to assign row positions
     const groupedByLevel: Record<string, typeof data> = {
-      put_low: [],
-      put_int: [],
-      put_call_int: [],
-      call_int: [],
-      call_high: [],
+      put_low: [], put_int: [], put_call_int: [], call_int: [], call_high: [],
     };
-
     data.forEach(stock => {
       if (groupedByLevel[stock.closestLevel]) {
         groupedByLevel[stock.closestLevel].push(stock);
@@ -47,72 +50,49 @@ export default function QuadrantChart({ data, onStockClick, height = 600 }: Quad
 
     const allData: any[] = [];
 
-    // Distribute stocks within each quadrant to avoid overlap
     Object.entries(groupedByLevel).forEach(([level, stocks]) => {
       const count = stocks.length;
       if (count === 0) return;
 
-      // Calculate grid dimensions for better distribution
-      const cols = Math.ceil(Math.sqrt(count));
-      const rows = Math.ceil(count / cols);
-      const xSpacing = 25 / Math.max(cols, 1);
-      const ySpacing = 70 / Math.max(rows, 1);
+      // Sort by closestValue so nearby stocks don't overlap as much
+      const sorted = [...stocks].sort((a, b) => a.closestValue - b.closestValue);
 
-      stocks.forEach((stock, index) => {
+      sorted.forEach((stock, index) => {
+        // Y: distribute rows within -40..40, with multiple rows if many stocks
+        const cols = Math.ceil(Math.sqrt(count));
         const col = index % cols;
         const row = Math.floor(index / cols);
-        
-        let baseX = 0;
-        
-        // Position based on closest level
-        switch (level) {
-          case 'put_low':
-            baseX = -75;
-            break;
-          case 'put_int':
-            baseX = -37.5;
-            break;
-          case 'put_call_int':
-            baseX = 0;
-            break;
-          case 'call_int':
-            baseX = 37.5;
-            break;
-          case 'call_high':
-            baseX = 75;
-            break;
-        }
+        const rowCount = Math.ceil(count / cols);
+        const ySpread = Math.min(70 / Math.max(rowCount, 1), 20);
+        const colSpread = 0.8; // slight x-jitter within the band
 
-        // Calculate position within the quadrant
-        const x = baseX - (cols - 1) * xSpacing / 2 + col * xSpacing;
-        const y = -35 + row * ySpacing;
-        
-        const actualDistance = stock.closestValue * 100;
-        
+        const baseY = (row - (rowCount - 1) / 2) * ySpread;
+        const jitterX = (col - (cols - 1) / 2) * colSpread;
+
         allData.push({
           symbol: stock.symbol,
-          x: x,
-          y: y,
-          actualDistance: actualDistance,
+          x: stock.closestValue * 100 + jitterX,
+          y: baseY,
+          actualDistance: stock.closestValue * 100,
           close: stock.close,
           closestLevel: stock.closestLevel,
           levels: stock.levels,
           tradeDate: stock.tradeDate,
           expiryDate: stock.expiryDate,
+          sector: (stock as any).sector,
+          industry: (stock as any).industry,
+          marketCapTier: (stock as any).marketCapTier,
           color: getLevelColor(stock.closestLevel),
         });
       });
     });
 
-    // Filter by selected quadrant if one is selected
     if (selectedQuadrant) {
-      return allData.filter(stock => stock.closestLevel === selectedQuadrant);
+      return allData.filter(s => s.closestLevel === selectedQuadrant);
     }
-    
     return allData;
   }, [data, selectedQuadrant]);
 
-  // Group by level for legend
   const levelCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     data.forEach(stock => {
@@ -121,36 +101,46 @@ export default function QuadrantChart({ data, onStockClick, height = 600 }: Quad
     return counts;
   }, [data]);
 
+  const xDomain = useMemo(() => {
+    if (chartData.length === 0) return [-100, 100];
+    const xs = chartData.map((d: any) => d.actualDistance);
+    const min = Math.min(...xs);
+    const max = Math.max(...xs);
+    const pad = Math.max((max - min) * 0.1, 5);
+    return [Math.floor(min - pad), Math.ceil(max + pad)];
+  }, [chartData]);
+
   const CustomTooltip = ({ active, payload }: any) => {
     if (active && payload && payload[0]) {
-      const data = payload[0].payload;
+      const d = payload[0].payload;
       return (
-        <div className="bg-white p-4 border-2 border-gray-400 rounded-lg shadow-xl min-w-[300px]">
-          <p className="font-bold text-xl mb-2 text-blue-600">{data.symbol}</p>
-          <div className="text-xs text-gray-500 mb-2 space-y-0.5">
-            <p>Trade Date: {data.tradeDate}</p>
-            <p>Expiry Date: {data.expiryDate}</p>
+        <div className="bg-white p-4 border-2 border-gray-300 rounded-lg shadow-xl min-w-[280px] z-50">
+          <p className="font-bold text-xl mb-1 text-blue-600">{d.symbol}</p>
+          {(d.sector || d.industry) && (
+            <p className="text-xs text-gray-400 mb-1">{[d.sector, d.industry].filter(Boolean).join(' · ')}</p>
+          )}
+          {d.marketCapTier && (
+            <p className="text-xs text-gray-400 mb-2">Market Cap: {d.marketCapTier}</p>
+          )}
+          <div className="text-xs text-gray-500 mb-2">
+            <p>Trade: {d.tradeDate} · Expiry: {d.expiryDate}</p>
           </div>
-          <p className="text-base text-gray-600 mb-2">
-            Close: <span className="font-semibold">{formatCurrency(data.close)}</span>
+          <p className="text-sm text-gray-600 mb-2">
+            Close: <span className="font-semibold">{formatCurrency(d.close)}</span>
           </p>
-          <p className="text-base font-semibold mb-3 pb-2 border-b" style={{ color: data.color }}>
-            Closest: <span className="text-lg">{getLevelDisplayName(data.closestLevel)}</span>
-            <br />
-            <span className="text-sm text-gray-600">Distance: {formatPercentage(data.actualDistance / 100)}</span>
+          <p className="text-sm font-semibold mb-3 pb-2 border-b" style={{ color: d.color }}>
+            Closest: {getLevelDisplayName(d.closestLevel)}
+            <span className="text-xs text-gray-500 font-normal ml-2">
+              {d.actualDistance > 0 ? '+' : ''}{d.actualDistance.toFixed(2)}%
+            </span>
           </p>
-          <div className="text-sm space-y-1 mt-2">
-            <p className="font-bold mb-2 text-gray-700 text-base">All Price Levels:</p>
-            {data.levels.map((level: any) => (
-              <div key={level.name} className="flex justify-between gap-6 items-center">
-                <span className="text-sm font-medium" style={{ color: getLevelColor(level.name) }}>
-                  {getLevelDisplayName(level.name)}
-                </span>
-                <div className="text-right flex items-center gap-2">
-                  <div className="font-semibold text-sm min-w-[60px]">
-                    {level.price !== undefined && level.price !== null ? formatCurrency(level.price) : 'N/A'}
-                  </div>
-                  <div className="font-mono text-xs text-gray-600 min-w-[55px]">{formatPercentage(level.value)}</div>
+          <div className="text-xs space-y-1">
+            {d.levels.map((level: any) => (
+              <div key={level.name} className="flex justify-between gap-4">
+                <span style={{ color: getLevelColor(level.name) }}>{getLevelDisplayName(level.name)}</span>
+                <div className="flex gap-2 text-right">
+                  <span className="font-semibold">{level.price != null ? formatCurrency(level.price) : 'N/A'}</span>
+                  <span className="text-gray-500">{formatPercentage(level.value)}</span>
                 </div>
               </div>
             ))}
@@ -163,28 +153,18 @@ export default function QuadrantChart({ data, onStockClick, height = 600 }: Quad
 
   const CustomDot = (props: any) => {
     const { cx, cy, payload } = props;
-    const size = 8;
-    
     return (
       <g>
         <circle
-          cx={cx}
-          cy={cy}
-          r={size}
-          fill={payload.color}
-          opacity={0.8}
-          stroke="#fff"
-          strokeWidth={2}
-          className="cursor-pointer hover:opacity-100 hover:r-[10]"
+          cx={cx} cy={cy} r={7}
+          fill={payload.color} opacity={0.85}
+          stroke="#fff" strokeWidth={2}
+          className="cursor-pointer"
         />
         <text
-          x={cx}
-          y={cy - size - 3}
-          textAnchor="middle"
-          fontSize="9"
-          fontWeight="600"
-          fill="#374151"
-          className="pointer-events-none"
+          x={cx} y={cy - 11}
+          textAnchor="middle" fontSize="9" fontWeight="700" fill="#1f2937"
+          className="pointer-events-none select-none"
         >
           {payload.symbol}
         </text>
@@ -194,192 +174,104 @@ export default function QuadrantChart({ data, onStockClick, height = 600 }: Quad
 
   return (
     <div className="w-full">
-      <div className="mb-4">
-        <h2 className="text-2xl font-bold mb-2">5-Quadrant Stock Analysis</h2>
-        <p className="text-gray-600">
-          Showing {chartData.length} stocks grouped by their closest price level
-          {selectedQuadrant && (
-            <span className="ml-2 text-sm">
-              (Filtered: <span className="font-semibold" style={{ color: getLevelColor(selectedQuadrant) }}>
-                {getLevelDisplayName(selectedQuadrant)}
-              </span>)
-              <button
-                onClick={() => setSelectedQuadrant(null)}
-                className="ml-2 text-xs bg-gray-200 hover:bg-gray-300 px-2 py-1 rounded"
-              >
-                Clear Filter
-              </button>
-            </span>
-          )}
-        </p>
+      <div className="mb-4 flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold mb-1">5-Quadrant Stock Analysis</h2>
+          <p className="text-gray-500 text-sm">
+            {chartData.length} stocks · X-axis = % distance from closest level
+            {selectedQuadrant && (
+              <>
+                <span className="ml-2 font-semibold" style={{ color: getLevelColor(selectedQuadrant) }}>
+                  [{getLevelDisplayName(selectedQuadrant)}]
+                </span>
+                <button
+                  onClick={() => setSelectedQuadrant(null)}
+                  className="ml-2 text-xs underline text-gray-500 hover:text-gray-800"
+                >
+                  Clear
+                </button>
+              </>
+            )}
+          </p>
+        </div>
       </div>
 
-      <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
         <ResponsiveContainer width="100%" height={height}>
-          <ScatterChart margin={{ top: 40, right: 20, bottom: 80, left: 60 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-            
+          <ScatterChart margin={{ top: 20, right: 20, bottom: 50, left: 40 }}>
+            {/* Colored background bands */}
+            {BANDS.map(band => (
+              <ReferenceArea
+                key={band.level}
+                x1={band.x1} x2={band.x2}
+                fill={band.fill} fillOpacity={1}
+                ifOverflow="visible"
+              />
+            ))}
+
+            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" strokeOpacity={0.6} />
+
             <XAxis
               type="number"
               dataKey="x"
-              name="Quadrant Position"
-              domain={[-100, 100]}
-              ticks={[-75, -37.5, 0, 37.5, 75]}
+              domain={xDomain}
               label={{
-                value: 'Price Level Quadrants',
+                value: '← Below Price · % Distance from Closest Level · Above Price →',
                 position: 'bottom',
-                offset: 60,
-                style: { fontSize: 14, fontWeight: 'bold' },
+                offset: 35,
+                style: { fontSize: 12, fill: '#6b7280' },
               }}
-              tick={{ fontSize: 10 }}
-            />
-            
-            <YAxis
-              type="number"
-              dataKey="y"
-              domain={[-25, 25]}
-              hide
+              tick={{ fontSize: 10, fill: '#6b7280' }}
+              tickFormatter={(v) => `${v > 0 ? '+' : ''}${v.toFixed(0)}%`}
             />
 
-            {/* Quadrant dividing lines */}
-            <ReferenceLine 
-              x={-56.25} 
-              stroke="#9ca3af" 
-              strokeWidth={1} 
-              strokeDasharray="5 5"
-              label={{ value: 'PUT INT', position: 'top', fontSize: 11, fontWeight: 'bold', fill: '#ea580c' }}
-            />
-            <ReferenceLine 
-              x={-18.75} 
-              stroke="#9ca3af" 
-              strokeWidth={1} 
-              strokeDasharray="5 5"
-            />
-            <ReferenceLine 
-              x={18.75} 
-              stroke="#9ca3af" 
-              strokeWidth={1} 
-              strokeDasharray="5 5"
-            />
-            <ReferenceLine 
-              x={56.25} 
-              stroke="#9ca3af" 
-              strokeWidth={1} 
-              strokeDasharray="5 5"
-              label={{ value: 'CALL INT', position: 'top', fontSize: 11, fontWeight: 'bold', fill: '#2563eb' }}
-            />
+            <YAxis type="number" dataKey="y" hide domain={[-60, 60]} />
 
-            {/* Quadrant name labels at extreme positions */}
-            <ReferenceLine 
-              x={-75} 
-              stroke="transparent"
-              label={{ value: 'PUT LOW', position: 'top', fontSize: 11, fontWeight: 'bold', fill: '#dc2626' }}
-            />
-            <ReferenceLine 
-              x={75} 
-              stroke="transparent"
-              label={{ value: 'CALL HIGH', position: 'top', fontSize: 11, fontWeight: 'bold', fill: '#9333ea' }}
-            />
+            {/* Band boundary lines */}
+            <ReferenceLine x={-15} stroke="#9ca3af" strokeWidth={1.5} strokeDasharray="6 3" />
+            <ReferenceLine x={-5}  stroke="#9ca3af" strokeWidth={1.5} strokeDasharray="6 3" />
+            <ReferenceLine x={0}   stroke="#374151" strokeWidth={2} />
+            <ReferenceLine x={5}   stroke="#9ca3af" strokeWidth={1.5} strokeDasharray="6 3" />
+            <ReferenceLine x={15}  stroke="#9ca3af" strokeWidth={1.5} strokeDasharray="6 3" />
 
-            {/* Center line */}
-            <ReferenceLine
-              x={0}
-              stroke="#374151"
-              strokeWidth={2}
-              label={{
-                value: 'PUT/CALL INT',
-                position: 'top',
-                style: { fontSize: 11, fontWeight: 'bold' },
-              }}
-            />
-
-            <Tooltip content={<CustomTooltip />} cursor={{ strokeDasharray: '3 3' }} />
+            <Tooltip content={<CustomTooltip />} cursor={false} />
 
             <Scatter
               data={chartData}
               shape={<CustomDot />}
-              onClick={(data) => {
-                if (onStockClick) {
-                  onStockClick(data.symbol);
-                } else {
-                  // Open in new tab
-                  window.open(`/stock/${data.symbol}`, '_blank');
-                }
+              onClick={(d) => {
+                if (onStockClick) onStockClick(d.symbol);
+                else window.open(`/stock/${d.symbol}`, '_blank');
               }}
             />
           </ScatterChart>
         </ResponsiveContainer>
 
-        {/* Quadrant Labels Below Chart */}
-        <div className="mt-6 grid grid-cols-5 gap-3 text-center">
-          <div 
-            onClick={() => setSelectedQuadrant(selectedQuadrant === 'put_low' ? null : 'put_low')}
-            className={`p-4 bg-gradient-to-br from-red-50 to-red-100 rounded-lg border-2 shadow-sm cursor-pointer transition-all hover:shadow-md ${
-              selectedQuadrant === 'put_low' ? 'border-red-600 ring-2 ring-red-400' : 'border-red-300'
-            }`}
-          >
-            <div className="font-bold text-red-800 text-base mb-1">PUT LOW</div>
-            <div className="text-xs text-red-600 font-medium">Far Below Price</div>
-            <div className="mt-2 text-lg font-bold text-red-900">{levelCounts['put_low'] || 0}</div>
-          </div>
-          <div 
-            onClick={() => setSelectedQuadrant(selectedQuadrant === 'put_int' ? null : 'put_int')}
-            className={`p-4 bg-gradient-to-br from-orange-50 to-orange-100 rounded-lg border-2 shadow-sm cursor-pointer transition-all hover:shadow-md ${
-              selectedQuadrant === 'put_int' ? 'border-orange-600 ring-2 ring-orange-400' : 'border-orange-300'
-            }`}
-          >
-            <div className="font-bold text-orange-800 text-base mb-1">PUT INT</div>
-            <div className="text-xs text-orange-600 font-medium">Below Price</div>
-            <div className="mt-2 text-lg font-bold text-orange-900">{levelCounts['put_int'] || 0}</div>
-          </div>
-          <div 
-            onClick={() => setSelectedQuadrant(selectedQuadrant === 'put_call_int' ? null : 'put_call_int')}
-            className={`p-4 bg-gradient-to-br from-green-50 to-green-100 rounded-lg border-2 shadow-sm cursor-pointer transition-all hover:shadow-md ${
-              selectedQuadrant === 'put_call_int' ? 'border-green-600 ring-2 ring-green-400' : 'border-green-300'
-            }`}
-          >
-            <div className="font-bold text-green-800 text-base mb-1">PUT/CALL INT</div>
-            <div className="text-xs text-green-600 font-medium">At Price</div>
-            <div className="mt-2 text-lg font-bold text-green-900">{levelCounts['put_call_int'] || 0}</div>
-          </div>
-          <div 
-            onClick={() => setSelectedQuadrant(selectedQuadrant === 'call_int' ? null : 'call_int')}
-            className={`p-4 bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg border-2 shadow-sm cursor-pointer transition-all hover:shadow-md ${
-              selectedQuadrant === 'call_int' ? 'border-blue-600 ring-2 ring-blue-400' : 'border-blue-300'
-            }`}
-          >
-            <div className="font-bold text-blue-800 text-base mb-1">CALL INT</div>
-            <div className="text-xs text-blue-600 font-medium">Above Price</div>
-            <div className="mt-2 text-lg font-bold text-blue-900">{levelCounts['call_int'] || 0}</div>
-          </div>
-          <div 
-            onClick={() => setSelectedQuadrant(selectedQuadrant === 'call_high' ? null : 'call_high')}
-            className={`p-4 bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg border-2 shadow-sm cursor-pointer transition-all hover:shadow-md ${
-              selectedQuadrant === 'call_high' ? 'border-purple-600 ring-2 ring-purple-400' : 'border-purple-300'
-            }`}
-          >
-            <div className="font-bold text-purple-800 text-base mb-1">CALL HIGH</div>
-            <div className="text-xs text-purple-600 font-medium">Far Above Price</div>
-            <div className="mt-2 text-lg font-bold text-purple-900">{levelCounts['call_high'] || 0}</div>
-          </div>
-        </div>
-
-        {/* Custom Legend */}
-        <div className="mt-6 flex flex-wrap gap-4 justify-center">
-          {Object.entries(levelCounts).map(([levelName, count]) => (
-            <div
-              key={levelName}
-              className="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded"
+        {/* Band labels overlay */}
+        <div className="mt-1 grid grid-cols-5 gap-2 text-center px-[40px]">
+          {BANDS.map(band => (
+            <button
+              key={band.level}
+              onClick={() => setSelectedQuadrant(selectedQuadrant === band.level as QuadrantLevel ? null : band.level as QuadrantLevel)}
+              className={`py-3 rounded-lg border-2 transition-all cursor-pointer hover:shadow-md ${
+                selectedQuadrant === band.level
+                  ? 'ring-2 shadow-md'
+                  : selectedQuadrant !== null
+                  ? 'opacity-40'
+                  : ''
+              }`}
+              style={{
+                backgroundColor: band.fill,
+                borderColor: band.color,
+                ...(selectedQuadrant === band.level ? { ringColor: band.color } : {}),
+              }}
             >
-              <div
-                className="w-4 h-4 rounded-full"
-                style={{ backgroundColor: getLevelColor(levelName) }}
-              />
-              <span className="text-sm font-medium">
-                {getLevelDisplayName(levelName)}
-              </span>
-              <span className="text-xs text-gray-600">({count})</span>
-            </div>
+              <div className="font-bold text-sm" style={{ color: band.color }}>{band.label}</div>
+              <div className="text-2xl font-bold mt-1" style={{ color: band.color }}>
+                {levelCounts[band.level] || 0}
+              </div>
+              <div className="text-xs text-gray-500 mt-0.5">stocks</div>
+            </button>
           ))}
         </div>
       </div>
@@ -389,29 +281,17 @@ export default function QuadrantChart({ data, onStockClick, height = 600 }: Quad
           onClick={() => setShowGuide(!showGuide)}
           className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-gray-100 transition-colors rounded-lg"
         >
-          <h3 className="font-semibold text-gray-800">How to Read This Chart</h3>
-          <svg
-            className={`w-5 h-5 transform transition-transform ${showGuide ? 'rotate-180' : ''}`}
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
+          <h3 className="font-semibold text-gray-800 text-sm">How to Read This Chart</h3>
+          <svg className={`w-4 h-4 transform transition-transform ${showGuide ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
           </svg>
         </button>
-        
         {showGuide && (
-          <div className="px-4 pb-4 pt-2">
-            <ul className="text-sm text-gray-700 space-y-1">
-              <li>• Each dot represents a stock positioned in its corresponding price level quadrant</li>
-              <li>• <strong>Put Low</strong>: Stocks where Put Low level is closest (far from current price)</li>
-              <li>• <strong>Put Int</strong>: Stocks where Put Intermediate level is closest</li>
-              <li>• <strong>Put/Call Int</strong>: Stocks at the combined intermediate level (center)</li>
-              <li>• <strong>Call Int</strong>: Stocks where Call Intermediate level is closest</li>
-              <li>• <strong>Call High</strong>: Stocks where Call High level is closest (far from current price)</li>
-              <li>• Hover over dots to see detailed level information and actual distance</li>
-              <li>• Click on a dot to view the stock&apos;s detailed chart</li>
-            </ul>
+          <div className="px-4 pb-4 pt-2 text-sm text-gray-600 space-y-1">
+            <p>• X-axis shows actual % distance from the stock&apos;s closest price level (negative = below, positive = above)</p>
+            <p>• Colored bands indicate quadrant zones; stocks are positioned by their true distance</p>
+            <p>• Click a quadrant card to isolate stocks in that zone</p>
+            <p>• Hover dots for detailed level info · Click dot to open chart</p>
           </div>
         )}
       </div>

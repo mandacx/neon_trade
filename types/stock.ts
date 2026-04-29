@@ -58,8 +58,10 @@ export interface QuadrantStock {
   levels: LevelCalculation[];
   closestLevel: string;
   closestValue: number;
-  sector?: string;
-  marketCap?: number;
+  sector?: string | null;
+  industry?: string | null;
+  marketCapTier?: string | null;
+  marketCap?: number | null;
 }
 
 // Quadrant filters
