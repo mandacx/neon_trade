@@ -427,6 +427,9 @@ export default function TVChart({
       loadingMoreRef.current = false;
       pauseScrollTriggerRef.current = null;
       resumeScrollTriggerRef.current = null;
+      // Clear price line refs before destroying chart so the levels cleanup
+      // effect doesn't try to removePriceLine on a disposed series
+      priceLineRefs.current = [];
       chart.remove();
     };
   }, [height, onLoadMore]);
@@ -435,19 +438,18 @@ export default function TVChart({
   useEffect(() => {
     if (!candleSeriesRef.current || !volumeSeriesRef.current || isLoading) return;
 
-    console.log('[TVChart] data effect running — candleData.length:', candleData.length, 'oiData.length:', oiData.length);
-    // Pause scroll-trigger handler so programmatic setData/fitContent
-    // don't fire onLoadMore — only real user scroll should trigger it
     pauseScrollTriggerRef.current?.();
 
-    // Format candlestick data
-    const formattedCandles: CandlestickData[] = candleData.map(d => ({
-      time: d.time as any,
-      open: d.open,
-      high: d.high,
-      low: d.low,
-      close: d.close,
-    }));
+    // Filter out bars with null OHLC values — lightweight-charts throws "Value is null" otherwise
+    const formattedCandles: CandlestickData[] = candleData
+      .filter(d => d.open != null && d.high != null && d.low != null && d.close != null)
+      .map(d => ({
+        time: d.time as any,
+        open: d.open,
+        high: d.high,
+        low: d.low,
+        close: d.close,
+      }));
 
     const candleByTime = new Map(candleData.map(d => [d.time, d]));
     const formattedVolume: HistogramData[] = volumeData.map(d => {
@@ -525,24 +527,27 @@ export default function TVChart({
     resumeScrollTriggerRef.current?.();
   }, [candleData, volumeData, oiData, isLoading, showPrice, showOI]);
 
-  // Add level lines
-  useEffect(() => {
-    if (!candleSeriesRef.current || !levels.length) {
-      priceLineRefs.current.forEach(line => {
+  const clearPriceLines = () => {
+    priceLineRefs.current.forEach(line => {
+      try {
         if (line && candleSeriesRef.current) {
           candleSeriesRef.current.removePriceLine(line);
         }
-      });
-      priceLineRefs.current = [];
-      return;
-    }
-
-    priceLineRefs.current.forEach(line => {
-      if (line && candleSeriesRef.current) {
-        candleSeriesRef.current.removePriceLine(line);
+      } catch {
+        // series may be disposed after chart recreation
       }
     });
     priceLineRefs.current = [];
+  };
+
+  // Add level lines
+  useEffect(() => {
+    if (!candleSeriesRef.current || !levels.length) {
+      clearPriceLines();
+      return;
+    }
+
+    clearPriceLines();
 
     levels.forEach(level => {
       const priceValue = typeof level.price === 'string' ? parseFloat(level.price) : level.price;
@@ -572,15 +577,7 @@ export default function TVChart({
       }
     });
 
-    // Cleanup function to remove price lines when component unmounts or levels change
-    return () => {
-      priceLineRefs.current.forEach(line => {
-        if (line && candleSeriesRef.current) {
-          candleSeriesRef.current.removePriceLine(line);
-        }
-      });
-      priceLineRefs.current = [];
-    };
+    return () => { clearPriceLines(); };
   }, [levels, closestLevel]);
 
   // Handle visibility toggles
