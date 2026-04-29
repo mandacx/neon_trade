@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { useParams } from 'next/navigation';
 import TVChart from '@/components/charts/TVChart';
 import StockSearch from '@/components/ui/StockSearch';
@@ -307,9 +307,9 @@ export default function StockPage() {
                 .filter((item: any) => item.oi)
                 .map((item: any) => ({
                   time: item.date,
-                  callOi: item.oi.callOi,
-                  putOi: item.oi.putOi,
-                  oiDiff: item.oi.oiDiff,
+                  callOi: item.oi.callOi ?? 0,
+                  putOi: item.oi.putOi ?? 0,
+                  oiDiff: item.oi.oiDiff ?? 0,
                 }));
 
               setOiData(prevData => direction === 'past'
@@ -327,6 +327,26 @@ export default function StockPage() {
     }
   }, [symbol]);
 
+
+  const candleData = useMemo(() => ohlcData.map(d => ({
+    time: d.date,
+    open: d.open,
+    high: d.high,
+    low: d.low,
+    close: d.close,
+  })), [ohlcData]);
+
+  const volumeData = useMemo(() => ohlcData.map(d => ({
+    time: d.date,
+    value: d.volume,
+  })), [ohlcData]);
+
+  const chartOiData = useMemo(() => oiData.map(d => ({
+    time: d.time,
+    callOi: d.callOi,
+    putOi: d.putOi,
+    oiDiff: d.oiDiff,
+  })), [oiData]);
 
   if (isLoading) {
     return (
@@ -381,23 +401,9 @@ export default function StockPage() {
           <div className="mb-8">
             <TVChart
               symbol={symbol.toUpperCase()}
-              candleData={ohlcData.map(d => ({
-                time: d.date,
-                open: d.open,
-                high: d.high,
-                low: d.low,
-                close: d.close,
-              }))}
-              volumeData={ohlcData.map(d => ({
-                time: d.date,
-                value: d.volume,
-              }))}
-              oiData={oiData.map(d => ({
-                time: d.time,  // OI data already has 'time' field from extraction
-                callOi: d.callOi,
-                putOi: d.putOi,
-                oiDiff: d.oiDiff,
-              }))}
+              candleData={candleData}
+              volumeData={volumeData}
+              oiData={chartOiData}
               levels={levels}
               closestLevel={closestLevel}
               historicalLevels={historicalLevels}
