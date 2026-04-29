@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 
 export default function Header() {
@@ -15,10 +16,8 @@ export default function Header() {
       <div className="container mx-auto px-4">
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
-          <Link href="/" className="flex items-center space-x-2">
-            <div className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-green-600">
-              Neon Trade
-            </div>
+          <Link href="/" className="flex items-center">
+            <Image src="/logo.svg" alt="Neon Trade" width={160} height={38} priority />
           </Link>
 
           {/* Navigation */}
