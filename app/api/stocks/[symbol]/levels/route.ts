@@ -95,6 +95,7 @@ export async function GET(
             name: l.name,
             price: l.price,
             value: l.value,
+            distance: l.distance,
             percentage: formatPercentage(l.value),
           })),
           closestLevel: closest.name,

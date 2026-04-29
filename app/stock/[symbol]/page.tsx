@@ -427,15 +427,15 @@ export default function StockPage() {
             {/* Level Details Table */}
             <div className="bg-white rounded-lg shadow-md p-6">
               <h3 className="text-xl font-bold mb-4">Price Levels</h3>
-              {!stockData ? (
+              {levels.length === 0 ? (
                 <div className="text-center py-8 text-gray-500">
                   <p className="mb-2">Level data not available in database</p>
                   <p className="text-sm">Displaying broker OHLC data only</p>
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {stockData?.levels?.map((level: any) => {
-                  const isClosest = level.name === (stockData?.closestLevel?.name || closestLevelName);
+                  {levels.map((level: any) => {
+                  const isClosest = level.name === closestLevelName;
                   const color = isClosest ? '#3B82F6' : getLevelColor(level.name);
 
                   return (
@@ -499,7 +499,7 @@ export default function StockPage() {
                     </div>
                     <div className="flex justify-between pb-2 border-b border-gray-200">
                       <span className="text-gray-600">Expiry Date:</span>
-                      <span className="font-medium">{stockData?.expiryDate || 'N/A'}</span>
+                      <span className="font-medium">{selectedExpiry || stockData?.expiryDate || 'N/A'}</span>
                     </div>
                   </>
                 )}
