@@ -328,6 +328,14 @@ export default function StockPage() {
   }, [symbol]);
 
 
+  // Always derive closest level from the current levels array (avoids stale/mismatched string state)
+  const closestLevelName = useMemo(() => {
+    if (levels.length > 0) {
+      return levels.reduce((c, l) => Math.abs(l.value) < Math.abs(c.value) ? l : c).name;
+    }
+    return stockData?.closestLevel?.name || closestLevel || '';
+  }, [levels, stockData, closestLevel]);
+
   const candleData = useMemo(() => ohlcData.map(d => ({
     time: d.date,
     open: d.open,
@@ -405,7 +413,7 @@ export default function StockPage() {
               volumeData={volumeData}
               oiData={chartOiData}
               levels={levels}
-              closestLevel={closestLevel}
+              closestLevel={closestLevelName}
               historicalLevels={historicalLevels}
               currentPrice={stockData?.close}
               height={600}
@@ -427,7 +435,7 @@ export default function StockPage() {
               ) : (
                 <div className="space-y-3">
                   {stockData?.levels?.map((level: any) => {
-                  const isClosest = level.name === closestLevel;
+                  const isClosest = level.name === (stockData?.closestLevel?.name || closestLevelName);
                   const color = isClosest ? '#3B82F6' : getLevelColor(level.name);
 
                   return (
@@ -504,21 +512,21 @@ export default function StockPage() {
                   </div>
                 )}
 
-                {stockData?.closestLevel && (
-                  <div className="mt-6 p-4 bg-gradient-to-r from-blue-50 to-green-50 rounded-lg">
-                    <p className="text-sm text-gray-700 mb-2">
-                      <strong>Analysis:</strong>
-                    </p>
-                    <p className="text-sm">
-                      The current price is closest to the{' '}
-                      <strong className="text-blue-700">
-                        {getLevelDisplayName(stockData.closestLevel.name)}
-                      </strong>{' '}
-                      level at {formatCurrency(stockData.closestLevel.price)}, with a distance
-                      of {stockData.closestLevel.percentage}.
-                    </p>
-                  </div>
-                )}
+                {closestLevelName && (() => {
+                  const closestLvl = levels.find(l => l.name === closestLevelName)
+                    || stockData?.levels?.find((l: any) => l.name === closestLevelName);
+                  return closestLvl ? (
+                    <div className="mt-6 p-4 bg-gradient-to-r from-blue-50 to-green-50 rounded-lg">
+                      <p className="text-sm text-gray-700 mb-2"><strong>Analysis:</strong></p>
+                      <p className="text-sm">
+                        The current price is closest to the{' '}
+                        <strong className="text-blue-700">{getLevelDisplayName(closestLevelName)}</strong>{' '}
+                        level at {formatCurrency(closestLvl.price)}, with a distance
+                        of {formatPercentage(closestLvl.value)}.
+                      </p>
+                    </div>
+                  ) : null;
+                })()}
               </div>
             </div>
           </div>

@@ -3,27 +3,33 @@ import { getAllStocksLatest, getAllStocksByDate, getAllStocksByDateAndExpiry, ge
 import { calculateLevels, findClosestLevel } from '@/lib/calculations';
 import { format } from 'date-fns';
 
-async function getSecuritiesFilterOptions() {
-  try {
-    const [sectors, industries, marketCapTiers, indices] = await Promise.all([
-      sql`SELECT DISTINCT sector FROM public.securities WHERE sector IS NOT NULL ORDER BY sector`,
-      sql`SELECT DISTINCT industry FROM public.securities WHERE industry IS NOT NULL ORDER BY industry`,
-      sql`SELECT DISTINCT market_cap_tier FROM public.securities WHERE market_cap_tier IS NOT NULL ORDER BY market_cap_tier`,
-      sql`SELECT DISTINCT elem->>'code' as code, elem->>'name' as name
-          FROM public.securities, jsonb_array_elements(indices::jsonb) as elem
-          WHERE indices IS NOT NULL AND indices != 'null'::jsonb
-          ORDER BY elem->>'name'`,
-    ]);
+async function safeQuery<T>(fn: () => Promise<T[]>): Promise<T[]> {
+  try { return await fn(); } catch { return []; }
+}
 
-    return {
-      sectors: sectors.map((r: any) => r.sector as string),
-      industries: industries.map((r: any) => r.industry as string),
-      marketCapTiers: marketCapTiers.map((r: any) => r.market_cap_tier as string),
-      indices: indices.map((r: any) => ({ code: r.code as string, name: r.name as string })),
-    };
-  } catch {
-    return { sectors: [], industries: [], marketCapTiers: [], indices: [] };
-  }
+async function getSecuritiesFilterOptions() {
+  const [sectors, industries, marketCapTiers, indices] = await Promise.all([
+    safeQuery(() => sql`SELECT DISTINCT sector FROM public.securities WHERE sector IS NOT NULL ORDER BY sector`),
+    safeQuery(() => sql`SELECT DISTINCT industry FROM public.securities WHERE industry IS NOT NULL ORDER BY industry`),
+    safeQuery(() => sql`SELECT DISTINCT market_cap_tier FROM public.securities WHERE market_cap_tier IS NOT NULL ORDER BY market_cap_tier`),
+    safeQuery(() => sql`
+      SELECT DISTINCT elem->>'code' as code, elem->>'name' as name
+      FROM public.securities,
+           jsonb_array_elements(
+             CASE WHEN indices IS NOT NULL AND indices::text NOT IN ('null', '[]', '')
+             THEN indices::jsonb ELSE '[]'::jsonb END
+           ) as elem
+      WHERE elem->>'code' IS NOT NULL
+      ORDER BY elem->>'name'
+    `),
+  ]);
+
+  return {
+    sectors: sectors.map((r: any) => r.sector as string),
+    industries: industries.map((r: any) => r.industry as string),
+    marketCapTiers: marketCapTiers.map((r: any) => r.market_cap_tier as string),
+    indices: indices.map((r: any) => ({ code: r.code as string, name: r.name as string })),
+  };
 }
 
 async function getSecuritiesMeta(symbols: string[]) {
