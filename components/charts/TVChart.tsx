@@ -195,47 +195,25 @@ export default function TVChart({
       
       const handleVisibleTimeRangeChange = () => {
         if (!chartRef.current || loadingMoreRef.current) return;
+        if (!candleSeriesRef.current) return;
 
         const timeScale = chartRef.current.timeScale();
-        const visibleRange = timeScale.getVisibleRange();
-        
-        if (!visibleRange || !candleSeriesRef.current) return;
+        const logicalRange = timeScale.getVisibleLogicalRange();
 
-        // Get actual data from the series
+        // logicalRange.from < 0 means user scrolled left past the first bar (bar index negative)
+        if (!logicalRange || logicalRange.from >= 0) return;
+
         const seriesData = candleSeriesRef.current.data();
         if (!seriesData || seriesData.length === 0) return;
 
         const firstDataTime = seriesData[0].time as string;
         const lastDataTime = seriesData[seriesData.length - 1].time as string;
-        
-        const visibleFrom = visibleRange.from;
-        const visibleTo = visibleRange.to;
-        
-        // Convert to comparable format (date strings)
-        const visibleFromStr = typeof visibleFrom === 'string' ? visibleFrom : new Date((visibleFrom as number) * 1000).toISOString().split('T')[0];
-        const visibleToStr = typeof visibleTo === 'string' ? visibleTo : new Date((visibleTo as number) * 1000).toISOString().split('T')[0];
-        
-        console.log('📊 Scroll check:', {
-          visibleFrom: visibleFromStr,
-          visibleTo: visibleToStr,
-          firstDataTime: firstDataTime,
-          lastDataTime: lastDataTime,
-          isNearStart: visibleFromStr <= firstDataTime,
-          loadingMore: loadingMoreRef.current
-        });
-        
-        // Only trigger if we're actually VIEWING the first data point (visible range includes it)
-        // Not just if visible range is before it
-        if (visibleFromStr <= firstDataTime && visibleToStr >= firstDataTime && !loadingMoreRef.current) {
-          console.log('🔄 SCROLL TRIGGER FIRED - viewing the earliest data point');
-          loadingMoreRef.current = true;
-          onLoadMore('past', firstDataTime, lastDataTime);
-          // Reset after a delay to prevent multiple triggers
-          setTimeout(() => {
-            console.log('✅ Reset loadingMoreRef to false');
-            loadingMoreRef.current = false;
-          }, 5000);
-        }
+
+        loadingMoreRef.current = true;
+        onLoadMore('past', firstDataTime, lastDataTime);
+        setTimeout(() => {
+          loadingMoreRef.current = false;
+        }, 3000);
       };
 
       chartTimeScale.subscribeVisibleTimeRangeChange(handleVisibleTimeRangeChange);
