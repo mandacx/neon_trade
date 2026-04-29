@@ -10,7 +10,7 @@ interface SearchResult {
   exchange: string;
 }
 
-export default function StockSearch() {
+export default function StockSearch({ compact }: { compact?: boolean }) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -79,7 +79,7 @@ export default function StockSearch() {
   };
 
   return (
-    <div ref={wrapperRef} className="relative w-full max-w-md">
+    <div ref={wrapperRef} className={`relative ${compact ? 'w-full' : 'w-full max-w-md'}`}>
       <div className="relative">
         <input
           type="text"
@@ -87,15 +87,17 @@ export default function StockSearch() {
           onChange={handleInputChange}
           onKeyDown={handleKeyDown}
           onFocus={() => query && setIsOpen(true)}
-          placeholder="Search stocks (e.g., AAPL, TSLA...)"
-          className="w-full px-4 py-3 pr-10 text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          placeholder={compact ? 'Search stocks...' : 'Search stocks (e.g., AAPL, TSLA...)'}
+          className={`w-full pr-8 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+            compact ? 'px-3 py-1.5 text-sm' : 'px-4 py-3 text-base border-gray-300'
+          }`}
         />
-        <div className="absolute right-3 top-3.5">
+        <div className={`absolute right-2.5 ${compact ? 'top-1.5' : 'top-3.5'}`}>
           {isLoading ? (
-            <div className="animate-spin h-5 w-5 border-2 border-blue-600 border-t-transparent rounded-full" />
+            <div className={`animate-spin border-2 border-blue-600 border-t-transparent rounded-full ${compact ? 'h-3.5 w-3.5' : 'h-5 w-5'}`} />
           ) : (
             <svg
-              className="h-5 w-5 text-gray-400"
+              className={`text-gray-400 ${compact ? 'h-3.5 w-3.5' : 'h-5 w-5'}`}
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
