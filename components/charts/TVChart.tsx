@@ -229,7 +229,7 @@ export default function TVChart({
         const visibleFromStr = typeof visibleFrom === 'string' ? visibleFrom : new Date((visibleFrom as number) * 1000).toISOString().split('T')[0];
         const visibleToStr = typeof visibleTo === 'string' ? visibleTo : new Date((visibleTo as number) * 1000).toISOString().split('T')[0];
 
-        if (visibleFromStr <= firstDataTime && visibleToStr >= firstDataTime && !loadingMoreRef.current) {
+        if (visibleFromStr < firstDataTime && !loadingMoreRef.current) {
           loadingMoreRef.current = true;
           onLoadMore('past', firstDataTime, lastDataTime);
           // Reset guard after a safe delay — handler is only called from real user
