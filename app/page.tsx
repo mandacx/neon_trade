@@ -137,29 +137,31 @@ function MoverRow({ s, onClick }: { s: any; onClick: () => void }) {
   return (
     <button
       onClick={onClick}
-      className="w-full px-4 py-2.5 flex items-center gap-2 hover:bg-gray-50 transition-colors text-left border-b border-gray-50 last:border-0"
+      className="w-full px-4 py-2 flex items-center gap-2 hover:bg-gray-50 transition-colors text-left border-b border-gray-50 last:border-0"
     >
-      <div className="shrink-0 w-[72px]">
+      <div className="shrink-0 w-[60px]">
         <div className="font-bold text-gray-800 text-sm">{s.symbol}</div>
         {s.name && (
-          <div className="text-[10px] text-gray-400 leading-tight truncate max-w-[72px]" title={s.name}>
+          <div className="text-[10px] text-gray-400 leading-tight truncate max-w-[60px]" title={s.name}>
             {s.name}
           </div>
         )}
       </div>
-      <div className="flex-1 min-w-0">
+      <div className="w-[68px] shrink-0 text-right">
         <div className="text-xs text-gray-700 font-medium">
-          {s.price != null ? `$${s.price.toFixed(2)}` : ''}
+          {s.price != null ? `$${s.price.toFixed(2)}` : '—'}
         </div>
-        {s.volume && <div className="text-[10px] text-gray-400">{fmt(s.volume)}</div>}
       </div>
-      <div className="text-right shrink-0">
-        <div className={`text-sm font-semibold ${color}`}>{pct(s.changePercent)}</div>
-        {s.change != null && (
-          <div className={`text-[10px] ${color}`}>
-            {s.change >= 0 ? '+' : ''}${s.change.toFixed(2)}
-          </div>
-        )}
+      <div className="w-[44px] shrink-0 text-right">
+        <div className="text-xs text-gray-400">{s.volume ? fmt(s.volume) : '—'}</div>
+      </div>
+      <div className="w-[58px] shrink-0 text-right">
+        <div className={`text-xs font-semibold ${color}`}>{pct(s.changePercent)}</div>
+      </div>
+      <div className="w-[58px] shrink-0 text-right">
+        <div className={`text-xs font-semibold ${color}`}>
+          {s.change != null ? `${s.change >= 0 ? '+' : ''}$${s.change.toFixed(2)}` : '—'}
+        </div>
       </div>
     </button>
   );
@@ -365,12 +367,11 @@ export default function Home() {
                   ))}
                 </div>
                 <div className="flex items-center gap-2 px-1">
-                  <SortHeader label="Symbol" sortKey="symbol" current={moverSort.key} dir={moverSort.dir} onSort={toggleMoverSort} className="w-[72px] shrink-0" />
-                  <SortHeader label="Price/Vol" sortKey="price" current={moverSort.key} dir={moverSort.dir} onSort={toggleMoverSort} className="flex-1" />
-                  <div className="text-right shrink-0 flex flex-col items-end gap-0.5">
-                    <SortHeader label="%" sortKey="changePercent" current={moverSort.key} dir={moverSort.dir} onSort={toggleMoverSort} />
-                    <SortHeader label="$" sortKey="change" current={moverSort.key} dir={moverSort.dir} onSort={toggleMoverSort} />
-                  </div>
+                  <SortHeader label="Symbol" sortKey="symbol" current={moverSort.key} dir={moverSort.dir} onSort={toggleMoverSort} className="w-[60px] shrink-0" />
+                  <SortHeader label="Price" sortKey="price" current={moverSort.key} dir={moverSort.dir} onSort={toggleMoverSort} className="w-[68px] shrink-0 justify-end" />
+                  <SortHeader label="Vol" sortKey="volume" current={moverSort.key} dir={moverSort.dir} onSort={toggleMoverSort} className="w-[44px] shrink-0 justify-end" />
+                  <SortHeader label="%" sortKey="changePercent" current={moverSort.key} dir={moverSort.dir} onSort={toggleMoverSort} className="w-[58px] shrink-0 justify-end" />
+                  <SortHeader label="$Chg" sortKey="change" current={moverSort.key} dir={moverSort.dir} onSort={toggleMoverSort} className="w-[58px] shrink-0 justify-end" />
                 </div>
               </div>
               {loading || !topMovers
