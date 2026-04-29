@@ -9,48 +9,41 @@ const ETF_SYMBOLS = [
   'ARKK', 'VXX', 'IBIT', 'AVGO',
 ];
 
+async function alpacaFetch(path: string, params: Record<string, string>) {
+  const apiKey = process.env.ALPACA_API_KEY;
+  const secretKey = process.env.ALPACA_SECRET_KEY;
+  const baseUrl = process.env.ALPACA_BASE_URL || 'https://data.alpaca.markets';
+  if (!apiKey || !secretKey) return null;
+  const url = `${baseUrl}${path}?${new URLSearchParams(params)}`;
+  const res = await fetch(url, {
+    headers: { 'APCA-API-KEY-ID': apiKey, 'APCA-API-SECRET-KEY': secretKey },
+    next: { revalidate: 300 },
+  });
+  if (!res.ok) return null;
+  return res.json();
+}
+
 async function getIndexData() {
   try {
-    const apiKey = process.env.ALPACA_API_KEY;
-    const secretKey = process.env.ALPACA_SECRET_KEY;
-    const baseUrl = process.env.ALPACA_BASE_URL || 'https://data.alpaca.markets';
-
-    if (!apiKey || !secretKey) return [];
-
     const end = new Date();
     const start = new Date();
-    start.setDate(start.getDate() - 5); // 5 days back to ensure 2 trading days
-
-    const params = new URLSearchParams({
+    start.setDate(start.getDate() - 7);
+    const data = await alpacaFetch('/v2/stocks/bars', {
       symbols: INDEX_SYMBOLS.join(','),
       timeframe: '1Day',
       start: start.toISOString().split('T')[0],
       end: end.toISOString().split('T')[0],
       adjustment: 'split',
       feed: 'iex',
-      limit: '10',
+      limit: '20',
     });
-
-    const res = await fetch(`${baseUrl}/v2/stocks/bars?${params}`, {
-      headers: {
-        'APCA-API-KEY-ID': apiKey,
-        'APCA-API-SECRET-KEY': secretKey,
-      },
-      next: { revalidate: 300 }, // cache 5 min
-    });
-
-    if (!res.ok) return [];
-
-    const data = await res.json();
+    if (!data) return [];
     const bars = data.bars || {};
-
     return INDEX_SYMBOLS.map(symbol => {
       const symbolBars: any[] = bars[symbol] || [];
       if (symbolBars.length === 0) return { symbol, price: null, change: null, changePercent: null };
       const latest = symbolBars[symbolBars.length - 1];
       const prev = symbolBars.length > 1 ? symbolBars[symbolBars.length - 2] : null;
-      const change = prev ? latest.c - prev.c : null;
-      const changePercent = prev ? ((latest.c - prev.c) / prev.c) * 100 : null;
       return {
         symbol,
         price: latest.c,
@@ -58,106 +51,179 @@ async function getIndexData() {
         high: latest.h,
         low: latest.l,
         volume: latest.v,
-        change,
-        changePercent,
+        change: prev ? latest.c - prev.c : null,
+        changePercent: prev ? ((latest.c - prev.c) / prev.c) * 100 : null,
+        date: latest.t?.split('T')[0] ?? null,
       };
     });
-  } catch {
-    return [];
-  }
+  } catch { return []; }
 }
 
-async function getTopByOI(symbols: string[] | null, limit: number) {
+async function getSecuritiesNames(symbols: string[]): Promise<Record<string, string>> {
+  if (symbols.length === 0) return {};
+  try {
+    const rows = await sql`
+      SELECT symbol, name FROM public.securities WHERE symbol = ANY(${symbols})
+    `;
+    const map: Record<string, string> = {};
+    rows.forEach((r: any) => { if (r.name) map[r.symbol] = r.name; });
+    return map;
+  } catch { return {}; }
+}
+
+async function getTopByOI(etfMode: boolean, limit: number) {
   try {
     const latestDateRows = await sql`
       SELECT MAX(trade_date)::text as max_date FROM public.eod_usmkts_price
     `;
     const latestDate = latestDateRows[0]?.max_date;
-    if (!latestDate) return [];
+    if (!latestDate) return { items: [], asOfDate: null };
 
+    // DISTINCT ON symbol — pick row with highest total OI per symbol
     let rows;
-    if (symbols && symbols.length > 0) {
+    if (etfMode) {
       rows = await sql`
-        SELECT
+        SELECT DISTINCT ON (p.symbol)
           p.symbol,
+          p.trade_date::text as trade_date,
+          p.expiry_dt::text as expiry_dt,
           COALESCE(p.call_oi, 0) as call_oi,
           COALESCE(p.put_oi, 0) as put_oi,
           COALESCE(p.call_oi + p.put_oi, 0) as total_oi,
-          COALESCE(p.close, 0) as close,
-          COALESCE(p.call_oi - p.put_oi, 0) as oi_diff,
-          s.name,
-          s.sector,
-          s.market_cap_tier
+          COALESCE(p.close, 0) as close
         FROM public.eod_usmkts_price p
-        LEFT JOIN public.securities s ON s.symbol = p.symbol
         WHERE p.trade_date = ${latestDate}
-          AND p.symbol = ANY(${symbols})
+          AND p.symbol = ANY(${ETF_SYMBOLS})
           AND (p.call_oi + p.put_oi) > 0
-        ORDER BY total_oi DESC
-        LIMIT ${limit}
+        ORDER BY p.symbol, (p.call_oi + p.put_oi) DESC
+        LIMIT ${limit * 3}
       `;
     } else {
       rows = await sql`
-        SELECT
+        SELECT DISTINCT ON (p.symbol)
           p.symbol,
+          p.trade_date::text as trade_date,
+          p.expiry_dt::text as expiry_dt,
           COALESCE(p.call_oi, 0) as call_oi,
           COALESCE(p.put_oi, 0) as put_oi,
           COALESCE(p.call_oi + p.put_oi, 0) as total_oi,
-          COALESCE(p.close, 0) as close,
-          COALESCE(p.call_oi - p.put_oi, 0) as oi_diff,
-          s.name,
-          s.sector,
-          s.market_cap_tier
+          COALESCE(p.close, 0) as close
         FROM public.eod_usmkts_price p
-        LEFT JOIN public.securities s ON s.symbol = p.symbol
         WHERE p.trade_date = ${latestDate}
+          AND p.symbol != ALL(${ETF_SYMBOLS})
           AND (p.call_oi + p.put_oi) > 0
-          AND p.symbol NOT IN (${ETF_SYMBOLS})
-        ORDER BY total_oi DESC
-        LIMIT ${limit}
+        ORDER BY p.symbol, (p.call_oi + p.put_oi) DESC
+        LIMIT ${limit * 3}
       `;
     }
 
-    return rows.map((r: any) => ({
-      symbol: r.symbol,
-      name: r.name || r.symbol,
-      callOi: Number(r.call_oi),
-      putOi: Number(r.put_oi),
-      totalOi: Number(r.total_oi),
-      close: Number(r.close),
-      oiDiff: Number(r.oi_diff),
-      sector: r.sector || null,
-      marketCapTier: r.market_cap_tier || null,
-    }));
-  } catch {
-    return [];
-  }
+    // Sort by total_oi DESC and take limit
+    const sorted = [...rows].sort((a: any, b: any) => Number(b.total_oi) - Number(a.total_oi)).slice(0, limit);
+
+    // Fetch names from securities
+    const symbols = sorted.map((r: any) => r.symbol);
+    const nameMap = await getSecuritiesNames(symbols);
+
+    return {
+      asOfDate: latestDate,
+      items: sorted.map((r: any) => ({
+        symbol: r.symbol,
+        name: nameMap[r.symbol] || null,
+        callOi: Number(r.call_oi),
+        putOi: Number(r.put_oi),
+        totalOi: Number(r.total_oi),
+        close: Number(r.close),
+        tradeDate: r.trade_date,
+        expiryDate: r.expiry_dt,
+      })),
+    };
+  } catch { return { items: [], asOfDate: null }; }
+}
+
+async function getTopMovers() {
+  try {
+    // Get S&P 500 symbols from securities table
+    const sp500Rows = await sql`
+      SELECT symbol FROM public.securities
+      WHERE indices IS NOT NULL
+        AND indices::text LIKE '%"code":"SPY"%'
+        AND market_cap IS NOT NULL
+      ORDER BY market_cap DESC
+      LIMIT 150
+    `;
+    if (sp500Rows.length === 0) return null;
+
+    const symbols: string[] = sp500Rows.map((r: any) => r.symbol);
+
+    // Batch snapshots from Alpaca (max ~100 per call)
+    const batch1 = symbols.slice(0, 100);
+    const batch2 = symbols.slice(100);
+
+    const [snap1, snap2] = await Promise.all([
+      alpacaFetch('/v2/stocks/snapshots', { symbols: batch1.join(','), feed: 'iex' }),
+      batch2.length > 0
+        ? alpacaFetch('/v2/stocks/snapshots', { symbols: batch2.join(','), feed: 'iex' })
+        : Promise.resolve({}),
+    ]);
+
+    const snapshots: Record<string, any> = { ...(snap1 || {}), ...(snap2 || {}) };
+
+    // Get names for all symbols
+    const nameMap = await getSecuritiesNames(symbols);
+
+    // Build enriched list
+    const enriched = Object.entries(snapshots)
+      .map(([sym, snap]: [string, any]) => {
+        const daily = snap.dailyBar;
+        const prev = snap.prevDailyBar;
+        if (!daily || !prev) return null;
+        const changePercent = ((daily.c - prev.c) / prev.c) * 100;
+        return {
+          symbol: sym,
+          name: nameMap[sym] || null,
+          price: daily.c,
+          changePercent,
+          change: daily.c - prev.c,
+          volume: daily.v,
+          vwap: daily.vw ?? null,
+        };
+      })
+      .filter(Boolean) as any[];
+
+    const byGain = [...enriched].sort((a, b) => b.changePercent - a.changePercent);
+    const byVolume = [...enriched].sort((a, b) => b.volume - a.volume);
+
+    // "Hot" = top volume with significant move (|change%| > 1%)
+    const hot = [...enriched]
+      .filter(s => Math.abs(s.changePercent) > 1)
+      .sort((a, b) => b.volume - a.volume);
+
+    return {
+      gainers: byGain.slice(0, 10),
+      losers: byGain.slice(-10).reverse(),
+      volume: byVolume.slice(0, 10),
+      hot: hot.slice(0, 10),
+    };
+  } catch { return null; }
 }
 
 async function getSectorBreakdown() {
   try {
-    const latestDateRows = await sql`
-      SELECT trade_date::text, MAX(trade_date)::text as max_date
+    const dateRows = await sql`
+      SELECT DISTINCT trade_date::text as td
       FROM public.eod_usmkts_price
-      GROUP BY trade_date
-      ORDER BY trade_date DESC
-      LIMIT 2
+      ORDER BY trade_date DESC LIMIT 2
     `;
-
-    if (latestDateRows.length === 0) return [];
-    const latestDate = latestDateRows[0].max_date || latestDateRows[0].trade_date;
-    const prevDate = latestDateRows.length > 1
-      ? (latestDateRows[1].max_date || latestDateRows[1].trade_date)
-      : null;
+    if (dateRows.length === 0) return [];
+    const latestDate = dateRows[0].td;
+    const prevDate = dateRows[1]?.td || latestDate;
 
     const rows = await sql`
-      SELECT
+      SELECT DISTINCT ON (p.symbol)
         s.sector,
-        COUNT(DISTINCT p.symbol) as count,
-        AVG(p.close) as avg_close,
-        p2.close as prev_close,
         p.symbol,
         p.close,
+        p2.close as prev_close,
         COALESCE(p.put_low, 0) as put_low,
         COALESCE(p.put_int, 0) as put_int,
         COALESCE(p.comb_int, 0) as put_call_int,
@@ -166,39 +232,24 @@ async function getSectorBreakdown() {
       FROM public.eod_usmkts_price p
       JOIN public.securities s ON s.symbol = p.symbol
       LEFT JOIN public.eod_usmkts_price p2
-        ON p2.symbol = p.symbol AND p2.trade_date = ${prevDate || latestDate}
+        ON p2.symbol = p.symbol AND p2.trade_date = ${prevDate}
       WHERE p.trade_date = ${latestDate}
         AND s.sector IS NOT NULL
-      GROUP BY s.sector, p.symbol, p.close, p2.close,
-               p.put_low, p.put_int, p.comb_int, p.call_int, p.call_high
+      ORDER BY p.symbol, (p.call_oi + p.put_oi) DESC
     `;
 
-    // Aggregate by sector
-    const sectorMap: Record<string, {
-      sector: string;
-      symbols: string[];
-      closestLevels: Record<string, number>;
-      gainers: number;
-      losers: number;
-      unchanged: number;
-    }> = {};
-
+    const sectorMap: Record<string, any> = {};
     rows.forEach((r: any) => {
       const sector = r.sector;
       if (!sectorMap[sector]) {
         sectorMap[sector] = {
-          sector,
-          symbols: [],
+          sector, count: 0,
           closestLevels: { put_low: 0, put_int: 0, put_call_int: 0, call_int: 0, call_high: 0 },
-          gainers: 0,
-          losers: 0,
-          unchanged: 0,
+          gainers: 0, losers: 0, unchanged: 0,
         };
       }
+      sectorMap[sector].count++;
 
-      sectorMap[sector].symbols.push(r.symbol);
-
-      // Calculate closest level for this stock
       const mockData = {
         SYMBOL: r.symbol, EXPIRY_DT: '', TRADE_DATE: '',
         OPEN: 0, HIGH: 0, LOW: 0,
@@ -206,48 +257,49 @@ async function getSectorBreakdown() {
         PUT_INT: Number(r.put_int), CALL_INT: Number(r.call_int),
         PUT_CALL_INT: Number(r.put_call_int),
         call_low: 0, put_HIGH: 0,
-        call_HIGH: Number(r.call_high),
-        put_LOW: Number(r.put_low),
-        UNUSED_PC: 0, UNUSED_PC_REV: 0,
-        CALL_OI: 0, PUT_OI: 0, OI_DIFF: 0,
+        call_HIGH: Number(r.call_high), put_LOW: Number(r.put_low),
+        UNUSED_PC: 0, UNUSED_PC_REV: 0, CALL_OI: 0, PUT_OI: 0, OI_DIFF: 0,
       };
       const levels = calculateLevels(mockData);
       if (levels.length > 0) {
         const closest = findClosestLevel(levels);
-        sectorMap[sector].closestLevels[closest.name] =
-          (sectorMap[sector].closestLevels[closest.name] || 0) + 1;
+        sectorMap[sector].closestLevels[closest.name]++;
       }
 
-      // Gainers/losers
       const close = Number(r.close);
       const prev = Number(r.prev_close);
-      if (prev && prev > 0) {
+      if (prev > 0) {
         if (close > prev) sectorMap[sector].gainers++;
         else if (close < prev) sectorMap[sector].losers++;
         else sectorMap[sector].unchanged++;
       }
     });
 
-    return Object.values(sectorMap)
-      .map(s => ({ ...s, count: s.symbols.length }))
-      .sort((a, b) => b.count - a.count);
-  } catch {
-    return [];
-  }
+    return Object.values(sectorMap).sort((a, b) => b.count - a.count);
+  } catch { return []; }
 }
 
 export async function GET() {
   try {
-    const [indices, topStocks, topETFs, sectorBreakdown] = await Promise.all([
+    const [indices, topStocksResult, topETFsResult, sectorBreakdown, topMovers] = await Promise.all([
       getIndexData(),
-      getTopByOI(null, 15),
-      getTopByOI(ETF_SYMBOLS, 10),
+      getTopByOI(false, 12),
+      getTopByOI(true, 10),
       getSectorBreakdown(),
+      getTopMovers(),
     ]);
 
     return NextResponse.json({
       success: true,
-      data: { indices, topStocks, topETFs, sectorBreakdown },
+      data: {
+        indices,
+        topStocks: topStocksResult.items,
+        topStocksDate: topStocksResult.asOfDate,
+        topETFs: topETFsResult.items,
+        topETFsDate: topETFsResult.asOfDate,
+        sectorBreakdown,
+        topMovers,
+      },
     });
   } catch (error) {
     return NextResponse.json(
