@@ -72,7 +72,10 @@ export default function TVChart({
   useEffect(() => { levelsRef.current = levels; }, [levels]);
   useEffect(() => { closestLevelRef.current = closestLevel; }, [closestLevel]);
   useEffect(() => { oiDataRef.current = oiData; }, [oiData]);
-  useEffect(() => { loadingMoreRef.current = isLoadingMore; }, [isLoadingMore]);
+  // loadingMoreRef is NOT synced from isLoadingMore prop — it is managed manually:
+  // set to true synchronously in the scroll handler, reset to false at the end of
+  // the data update effect (after setData). This prevents a race where the sync
+  // effect resets the guard before setData fires its visible-range-change event.
 
   useEffect(() => {
     if (!chartContainerRef.current) return;
@@ -425,6 +428,7 @@ export default function TVChart({
         visibleRangeUnsubscribe();
       }
       initialFitDoneRef.current = false;
+      loadingMoreRef.current = false;
       chart.remove();
     };
   }, [height, onLoadMore]);
@@ -513,6 +517,10 @@ export default function TVChart({
       chartRef.current.timeScale().fitContent();
       initialFitDoneRef.current = true;
     }
+
+    // Reset scroll guard AFTER setData — prevents race where isLoadingMore prop
+    // sync effect resets the guard before setData fires its visible-range-change event
+    loadingMoreRef.current = false;
   }, [candleData, volumeData, oiData, isLoading, isLoadingMore, showPrice, showOI]);
 
   // Add level lines
