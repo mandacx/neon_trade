@@ -238,7 +238,8 @@ export default function TVChart({
         }
       };
 
-      visibleRangeUnsubscribe = chartTimeScale.subscribeVisibleTimeRangeChange(handleVisibleTimeRangeChange);
+      chartTimeScale.subscribeVisibleTimeRangeChange(handleVisibleTimeRangeChange);
+      visibleRangeUnsubscribe = () => chartTimeScale.unsubscribeVisibleTimeRangeChange(handleVisibleTimeRangeChange);
     }
 
     // Add crosshair move handler for tooltip and OHLC display
