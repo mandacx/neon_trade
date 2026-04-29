@@ -57,6 +57,7 @@ export default function TVChart({
   const putOiLineRef = useRef<ISeriesApi<'Line'> | null>(null);
   const oiDiffLineRef = useRef<ISeriesApi<'Line'> | null>(null);
   const priceLineRefs = useRef<IPriceLine[]>([]);
+  const levelSeriesRefs = useRef<Record<string, ISeriesApi<'Line'>>>({});
   const historicalLevelsRef = useRef(historicalLevels);
   const levelsRef = useRef(levels);
   const closestLevelRef = useRef(closestLevel);
@@ -194,6 +195,29 @@ export default function TVChart({
     });
 
     oiDiffLineRef.current = oiDiffLine;
+
+    // Add historical level line series (one per level type, on right price scale)
+    const LEVEL_CONFIGS: Array<{ name: string; color: string; title: string }> = [
+      { name: 'call_high', color: '#22C55E', title: 'Call High' },
+      { name: 'call_int',  color: '#84CC16', title: 'Call Int'  },
+      { name: 'put_call_int', color: '#EAB308', title: 'Put/Call Int' },
+      { name: 'put_int',  color: '#F97316', title: 'Put Int'   },
+      { name: 'put_low',  color: '#EF4444', title: 'Put Low'   },
+    ];
+    const newLevelSeries: Record<string, ISeriesApi<'Line'>> = {};
+    LEVEL_CONFIGS.forEach(cfg => {
+      const s = chart.addLineSeries({
+        color: cfg.color,
+        lineWidth: 1,
+        title: cfg.title,
+        priceScaleId: 'right',
+        lastValueVisible: true,
+        priceLineVisible: false,
+        crosshairMarkerVisible: false,
+      });
+      newLevelSeries[cfg.name] = s;
+    });
+    levelSeriesRefs.current = newLevelSeries;
 
     setIsLoading(false);
 
@@ -411,6 +435,7 @@ export default function TVChart({
       if (visibleRangeUnsubscribe) {
         visibleRangeUnsubscribe();
       }
+      levelSeriesRefs.current = {};
       chart.remove();
     };
   }, [height, onLoadMore]);
@@ -586,10 +611,36 @@ export default function TVChart({
     };
   }, [levels, closestLevel]);
 
+  // Populate historical level line series from historicalLevels map
+  useEffect(() => {
+    const refs = levelSeriesRefs.current;
+    if (!historicalLevels || historicalLevels.size === 0 || Object.keys(refs).length === 0) return;
+
+    const buckets: Record<string, { time: string; value: number }[]> = {
+      call_high: [], call_int: [], put_call_int: [], put_int: [], put_low: [],
+    };
+
+    historicalLevels.forEach((dateData, date) => {
+      dateData.levels.forEach(level => {
+        const price = typeof level.price === 'string' ? parseFloat(level.price) : level.price;
+        if (buckets[level.name] && Number.isFinite(price) && price > 0) {
+          buckets[level.name].push({ time: date, value: price });
+        }
+      });
+    });
+
+    Object.entries(buckets).forEach(([name, data]) => {
+      const s = refs[name];
+      if (!s || data.length === 0) return;
+      data.sort((a, b) => (a.time < b.time ? -1 : 1));
+      s.setData(data as any);
+    });
+  }, [historicalLevels]);
+
   // Handle visibility toggles
   useEffect(() => {
     if (!candleSeriesRef.current || !volumeSeriesRef.current) return;
-    
+
     candleSeriesRef.current.applyOptions({ visible: showPrice });
     volumeSeriesRef.current.applyOptions({ visible: showPrice });
   }, [showPrice]);

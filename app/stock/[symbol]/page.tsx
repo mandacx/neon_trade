@@ -125,12 +125,12 @@ export default function StockPage() {
                   setHistoricalLevels(levelsMap);
 
                   const oiDataFromLevels = histLevelsData.data.history
-                    .filter((item: any) => item.oi && (item.oi.callOi || item.oi.putOi || item.oi.oiDiff))
+                    .filter((item: any) => item.oi != null)
                     .map((item: any) => ({
                       time: item.date || item.tradeDate || item.TRADE_DATE,
-                      callOi: item.oi.callOi || 0,
-                      putOi: item.oi.putOi || 0,
-                      oiDiff: item.oi.oiDiff || 0,
+                      callOi: Number(item.oi.callOi) || 0,
+                      putOi: Number(item.oi.putOi) || 0,
+                      oiDiff: Number(item.oi.oiDiff) || 0,
                     }));
 
                   setOiData(oiDataFromLevels);
@@ -192,12 +192,12 @@ export default function StockPage() {
             setHistoricalLevels(levelsMap);
 
             const oiDataFromLevels = levelsData.data.history
-              .filter((item: any) => item.oi && (item.oi.callOi || item.oi.putOi || item.oi.oiDiff))
+              .filter((item: any) => item.oi != null)
               .map((item: any) => ({
                 time: item.date || item.tradeDate || item.TRADE_DATE,
-                callOi: item.oi.callOi || 0,
-                putOi: item.oi.putOi || 0,
-                oiDiff: item.oi.oiDiff || 0,
+                callOi: Number(item.oi.callOi) || 0,
+                putOi: Number(item.oi.putOi) || 0,
+                oiDiff: Number(item.oi.oiDiff) || 0,
               }));
 
             setOiData(oiDataFromLevels);
@@ -304,12 +304,12 @@ export default function StockPage() {
               });
 
               const newOiData = historyData
-                .filter((item: any) => item.oi)
+                .filter((item: any) => item.oi != null)
                 .map((item: any) => ({
                   time: item.date,
-                  callOi: item.oi.callOi ?? 0,
-                  putOi: item.oi.putOi ?? 0,
-                  oiDiff: item.oi.oiDiff ?? 0,
+                  callOi: Number(item.oi.callOi) || 0,
+                  putOi: Number(item.oi.putOi) || 0,
+                  oiDiff: Number(item.oi.oiDiff) || 0,
                 }));
 
               setOiData(prevData => direction === 'past'
