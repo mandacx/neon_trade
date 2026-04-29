@@ -7,6 +7,8 @@ import { StockData, LevelCalculation, StockWithLevels } from '@/types/stock';
 export function calculateLevels(data: StockData): LevelCalculation[] {
   const { CLOSE, put_LOW, PUT_INT, PUT_CALL_INT, CALL_INT, call_HIGH } = data;
 
+  if (!CLOSE) return [];
+
   return [
     {
       name: 'put_low',

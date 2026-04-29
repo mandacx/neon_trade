@@ -1,11 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getLatestStockData, getHistoricalStockData, getStockDataByExpiry } from '@/lib/db';
+import { getLatestStockData, getHistoricalStockData, getStockDataByExpiry, sql } from '@/lib/db';
 import { calculateLevels, findClosestLevel } from '@/lib/calculations';
 import { formatPercentage } from '@/lib/utils';
 import { format, subDays } from 'date-fns';
-import { neon } from '@neondatabase/serverless';
-
-const sql = neon(process.env.DATABASE_URL!);
 
 export async function GET(
   request: NextRequest,
@@ -27,8 +24,9 @@ export async function GET(
 
     if (range) {
       // Return historical levels
-      const to = searchParams.get('to') || format(new Date(), 'yyyy-MM-dd');
-      const from = searchParams.get('from') || format(subDays(new Date(), 30), 'yyyy-MM-dd');
+      const now = new Date();
+      const to = searchParams.get('to') || format(now, 'yyyy-MM-dd');
+      const from = searchParams.get('from') || format(subDays(now, 30), 'yyyy-MM-dd');
       
       let historicalData;
       if (expiryDate) {
@@ -49,7 +47,7 @@ export async function GET(
             COALESCE(put_oi - call_oi, 0) as "OI_DIFF"
           FROM public.eod_usmkts_price
           WHERE symbol = ${symbol.toUpperCase()}
-            AND expiry_dt::text = ${expiryDate}
+            AND expiry_dt = ${expiryDate}::date
             AND trade_date >= ${from}
             AND trade_date <= ${to}
           ORDER BY trade_date ASC
@@ -101,9 +99,9 @@ export async function GET(
           })),
           closestLevel: closest.name,
           oi: {
-            callOi: parseInt(data.CALL_OI) || 0,
-            putOi: parseInt(data.PUT_OI) || 0,
-            oiDiff: parseInt(data.OI_DIFF) || 0,
+            callOi: data.CALL_OI,
+            putOi: data.PUT_OI,
+            oiDiff: data.OI_DIFF,
           },
         };
       });

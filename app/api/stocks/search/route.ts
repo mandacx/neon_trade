@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
     try {
       tradierResults = await searchSymbols(query);
     } catch (error) {
-      console.warn('Tradier search failed, using DB results only');
+      console.warn('Tradier search failed, using DB results only:', error);
     }
 
     // Combine and deduplicate results
