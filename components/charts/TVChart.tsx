@@ -427,9 +427,15 @@ export default function TVChart({
       loadingMoreRef.current = false;
       pauseScrollTriggerRef.current = null;
       resumeScrollTriggerRef.current = null;
-      // Clear price line refs before destroying chart so the levels cleanup
-      // effect doesn't try to removePriceLine on a disposed series
+      // Null series refs BEFORE chart.remove() so levels/data cleanup effects
+      // see null and skip removePriceLine/setData on the disposed series
       priceLineRefs.current = [];
+      candleSeriesRef.current = null;
+      volumeSeriesRef.current = null;
+      oiDiffSeriesRef.current = null;
+      callOiLineRef.current = null;
+      putOiLineRef.current = null;
+      oiDiffLineRef.current = null;
       chart.remove();
     };
   }, [height, onLoadMore]);
@@ -440,9 +446,9 @@ export default function TVChart({
 
     pauseScrollTriggerRef.current?.();
 
-    // Filter out bars with null OHLC values — lightweight-charts throws "Value is null" otherwise
+    // Filter bars where any OHLC value is not a finite number (null/undefined/NaN all crash the chart)
     const formattedCandles: CandlestickData[] = candleData
-      .filter(d => d.open != null && d.high != null && d.low != null && d.close != null)
+      .filter(d => Number.isFinite(d.open) && Number.isFinite(d.high) && Number.isFinite(d.low) && Number.isFinite(d.close))
       .map(d => ({
         time: d.time as any,
         open: d.open,
@@ -452,15 +458,17 @@ export default function TVChart({
       }));
 
     const candleByTime = new Map(candleData.map(d => [d.time, d]));
-    const formattedVolume: HistogramData[] = volumeData.map(d => {
-      const candle = candleByTime.get(d.time);
-      const isGreen = candle ? candle.close >= candle.open : true;
-      return {
-        time: d.time as any,
-        value: d.value,
-        color: isGreen ? 'rgba(34, 197, 94, 0.5)' : 'rgba(239, 68, 68, 0.5)',
-      };
-    });
+    const formattedVolume: HistogramData[] = volumeData
+      .filter(d => Number.isFinite(d.value))
+      .map(d => {
+        const candle = candleByTime.get(d.time);
+        const isGreen = candle ? candle.close >= candle.open : true;
+        return {
+          time: d.time as any,
+          value: d.value,
+          color: isGreen ? 'rgba(34, 197, 94, 0.5)' : 'rgba(239, 68, 68, 0.5)',
+        };
+      });
 
     // Use setData to replace all data (handles both initial load and updates)
     candleSeriesRef.current.setData(formattedCandles);
