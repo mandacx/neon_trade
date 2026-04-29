@@ -212,8 +212,8 @@ export default function TVChart({
         const visibleTo = visibleRange.to;
         
         // Convert to comparable format (date strings)
-        const visibleFromStr = typeof visibleFrom === 'string' ? visibleFrom : new Date(visibleFrom * 1000).toISOString().split('T')[0];
-        const visibleToStr = typeof visibleTo === 'string' ? visibleTo : new Date(visibleTo * 1000).toISOString().split('T')[0];
+        const visibleFromStr = typeof visibleFrom === 'string' ? visibleFrom : new Date((visibleFrom as number) * 1000).toISOString().split('T')[0];
+        const visibleToStr = typeof visibleTo === 'string' ? visibleTo : new Date((visibleTo as number) * 1000).toISOString().split('T')[0];
         
         console.log('📊 Scroll check:', {
           visibleFrom: visibleFromStr,
