@@ -305,8 +305,7 @@ async function getSectorBreakdown() {
 
 export async function GET() {
   try {
-    const [indices, topStocksResult, topETFsResult, sectorBreakdown, topMovers] = await Promise.all([
-      getIndexData(),
+    const [topStocksResult, topETFsResult, sectorBreakdown, topMovers] = await Promise.all([
       getTopByOI(false, 12),
       getTopByOI(true, 10),
       getSectorBreakdown(),
@@ -316,7 +315,6 @@ export async function GET() {
     return NextResponse.json({
       success: true,
       data: {
-        indices,
         topStocks: topStocksResult.items,
         topStocksDate: topStocksResult.asOfDate,
         topETFs: topETFsResult.items,

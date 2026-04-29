@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Header from '@/components/layout/Header';
 import StockSearch from '@/components/ui/StockSearch';
@@ -31,16 +31,114 @@ const MOVER_TABS = [
   { key: 'hot',     label: '🔥 Hot',     color: 'text-orange-500'},
 ];
 
+type SortDir = 'asc' | 'desc';
+type OISortKey = 'totalOi' | 'symbol' | 'callRatio';
+type MoverSortKey = 'changePercent' | 'change' | 'price' | 'volume' | 'symbol';
+
+function sortOI(list: any[], key: OISortKey, dir: SortDir) {
+  return [...list].sort((a, b) => {
+    let av: number | string, bv: number | string;
+    if (key === 'symbol') { av = a.symbol; bv = b.symbol; }
+    else if (key === 'callRatio') { av = a.totalOi > 0 ? a.callOi / a.totalOi : 0; bv = b.totalOi > 0 ? b.callOi / b.totalOi : 0; }
+    else { av = a.totalOi; bv = b.totalOi; }
+    if (typeof av === 'string') return dir === 'asc' ? av.localeCompare(bv as string) : (bv as string).localeCompare(av);
+    return dir === 'asc' ? (av as number) - (bv as number) : (bv as number) - (av as number);
+  });
+}
+
+function sortMovers(list: any[], key: MoverSortKey, dir: SortDir) {
+  return [...list].sort((a, b) => {
+    let av: number | string, bv: number | string;
+    if (key === 'symbol') { av = a.symbol; bv = b.symbol; }
+    else if (key === 'change') { av = a.change ?? 0; bv = b.change ?? 0; }
+    else if (key === 'price') { av = a.price ?? 0; bv = b.price ?? 0; }
+    else if (key === 'volume') { av = a.volume ?? 0; bv = b.volume ?? 0; }
+    else { av = a.changePercent ?? 0; bv = b.changePercent ?? 0; }
+    if (typeof av === 'string') return dir === 'asc' ? av.localeCompare(bv as string) : (bv as string).localeCompare(av);
+    return dir === 'asc' ? (av as number) - (bv as number) : (bv as number) - (av as number);
+  });
+}
+
+function SortHeader({ label, sortKey, current, dir, onSort, className }: {
+  label: string; sortKey: string; current: string; dir: SortDir;
+  onSort: (k: any) => void; className?: string;
+}) {
+  const active = current === sortKey;
+  return (
+    <button
+      onClick={() => onSort(sortKey)}
+      className={`text-[10px] font-semibold text-gray-400 uppercase tracking-wide flex items-center gap-0.5 hover:text-gray-600 transition-colors ${className ?? ''}`}
+    >
+      {label}
+      <span className="text-[9px]">{active ? (dir === 'asc' ? '▲' : '▼') : '⇅'}</span>
+    </button>
+  );
+}
+
 function OIRow({ s, i, onClick }: { s: any; i: number; onClick: () => void }) {
+  const [tooltip, setTooltip] = useState(false);
   const putRatio = s.totalOi > 0 ? s.putOi / s.totalOi : 0;
   const sentiment = putRatio > 0.6 ? 'bearish' : putRatio < 0.4 ? 'bullish' : 'neutral';
   const sc = sentiment === 'bullish' ? 'text-green-600' : sentiment === 'bearish' ? 'text-red-600' : 'text-yellow-600';
+  return (
+    <div className="relative">
+      <button
+        onClick={onClick}
+        onMouseEnter={() => setTooltip(true)}
+        onMouseLeave={() => setTooltip(false)}
+        className="w-full px-4 py-2.5 flex items-center gap-2 hover:bg-gray-50 transition-colors text-left border-b border-gray-50 last:border-0"
+      >
+        <span className="text-xs text-gray-300 w-4 shrink-0">{i + 1}</span>
+        <div className="shrink-0 w-[72px]">
+          <div className="font-bold text-gray-800 text-sm">{s.symbol}</div>
+          {s.name && (
+            <div className="text-[10px] text-gray-400 leading-tight truncate max-w-[72px]" title={s.name}>
+              {s.name}
+            </div>
+          )}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden flex">
+            <div className="h-full bg-green-400" style={{ width: `${(1 - putRatio) * 100}%` }} />
+            <div className="h-full bg-red-400" style={{ width: `${putRatio * 100}%` }} />
+          </div>
+          {s.expiryDate && (
+            <div className="text-[10px] text-gray-500 mt-0.5">exp {s.expiryDate}</div>
+          )}
+        </div>
+        <div className="text-right shrink-0">
+          <div className="text-sm font-semibold text-gray-700">{fmt(s.totalOi)}</div>
+          <div className={`text-[10px] ${sc}`}>{sentiment}</div>
+        </div>
+      </button>
+      {tooltip && (
+        <div className="absolute right-2 top-full z-20 bg-gray-900 text-white text-[11px] rounded-lg px-3 py-2 shadow-lg pointer-events-none whitespace-nowrap">
+          <div className="flex items-center gap-1.5 mb-1">
+            <span className="w-2 h-2 rounded-full bg-green-400 inline-block" />
+            <span>Call OI: <strong>{fmt(s.callOi)}</strong></span>
+          </div>
+          <div className="flex items-center gap-1.5 mb-1">
+            <span className="w-2 h-2 rounded-full bg-red-400 inline-block" />
+            <span>Put OI: <strong>{fmt(s.putOi)}</strong></span>
+          </div>
+          <div className="border-t border-gray-600 pt-1 mt-1 text-gray-300">
+            Total: <strong className="text-white">{fmt(s.totalOi)}</strong>
+            &nbsp;·&nbsp;P/C {(putRatio * 100).toFixed(0)}%/{((1 - putRatio) * 100).toFixed(0)}%
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MoverRow({ s, onClick }: { s: any; onClick: () => void }) {
+  const up = s.changePercent >= 0;
+  const color = up ? 'text-green-600' : 'text-red-600';
   return (
     <button
       onClick={onClick}
       className="w-full px-4 py-2.5 flex items-center gap-2 hover:bg-gray-50 transition-colors text-left border-b border-gray-50 last:border-0"
     >
-      <span className="text-xs text-gray-300 w-4 shrink-0">{i + 1}</span>
       <div className="shrink-0 w-[72px]">
         <div className="font-bold text-gray-800 text-sm">{s.symbol}</div>
         {s.name && (
@@ -50,43 +148,18 @@ function OIRow({ s, i, onClick }: { s: any; i: number; onClick: () => void }) {
         )}
       </div>
       <div className="flex-1 min-w-0">
-        <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden flex">
-          <div className="h-full bg-green-400" style={{ width: `${(1 - putRatio) * 100}%` }} />
-          <div className="h-full bg-red-400" style={{ width: `${putRatio * 100}%` }} />
+        <div className="text-xs text-gray-700 font-medium">
+          {s.price != null ? `$${s.price.toFixed(2)}` : ''}
         </div>
-        {s.expiryDate && (
-          <div className="text-[10px] text-gray-300 mt-0.5">exp {s.expiryDate}</div>
-        )}
+        {s.volume && <div className="text-[10px] text-gray-400">{fmt(s.volume)}</div>}
       </div>
       <div className="text-right shrink-0">
-        <div className="text-sm font-semibold text-gray-700">{fmt(s.totalOi)}</div>
-        <div className={`text-[10px] ${sc}`}>{sentiment}</div>
-      </div>
-    </button>
-  );
-}
-
-function MoverRow({ s, onClick }: { s: any; onClick: () => void }) {
-  const up = s.changePercent >= 0;
-  return (
-    <button
-      onClick={onClick}
-      className="w-full px-4 py-2.5 flex items-center gap-2 hover:bg-gray-50 transition-colors text-left border-b border-gray-50 last:border-0"
-    >
-      <div className="shrink-0 w-[72px]">
-        <div className="font-bold text-gray-800 text-sm">{s.symbol}</div>
-        {s.name && (
-          <div className="text-[10px] text-gray-400 leading-tight truncate max-w-[72px]" title={s.name}>
-            {s.name}
+        <div className={`text-sm font-semibold ${color}`}>{pct(s.changePercent)}</div>
+        {s.change != null && (
+          <div className={`text-[10px] ${color}`}>
+            {s.change >= 0 ? '+' : ''}${s.change.toFixed(2)}
           </div>
         )}
-      </div>
-      <div className="flex-1 min-w-0 text-xs text-gray-400">
-        {s.price != null ? `$${s.price.toFixed(2)}` : ''}
-        {s.volume && <span className="ml-2">{fmt(s.volume)}</span>}
-      </div>
-      <div className={`text-sm font-semibold shrink-0 ${up ? 'text-green-600' : 'text-red-600'}`}>
-        {pct(s.changePercent)}
       </div>
     </button>
   );
@@ -98,6 +171,27 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [moverTab, setMoverTab] = useState('gainers');
 
+  // Indices — separate poll
+  const [indices, setIndices] = useState<any[]>([]);
+  const [indicesLoading, setIndicesLoading] = useState(true);
+  const indicesIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Sort state
+  const [stockSort, setStockSort] = useState<{ key: OISortKey; dir: SortDir }>({ key: 'totalOi', dir: 'desc' });
+  const [etfSort, setEtfSort] = useState<{ key: OISortKey; dir: SortDir }>({ key: 'totalOi', dir: 'desc' });
+  const [moverSort, setMoverSort] = useState<{ key: MoverSortKey; dir: SortDir }>({ key: 'changePercent', dir: 'desc' });
+
+  function toggleOISort(list: 'stocks' | 'etfs', key: OISortKey) {
+    const setter = list === 'stocks' ? setStockSort : setEtfSort;
+    const current = list === 'stocks' ? stockSort : etfSort;
+    setter(current.key === key ? { key, dir: current.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: key === 'symbol' ? 'asc' : 'desc' });
+  }
+
+  function toggleMoverSort(key: MoverSortKey) {
+    setMoverSort(s => s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: key === 'symbol' ? 'asc' : 'desc' });
+  }
+
+  // Main data load
   useEffect(() => {
     fetch('/api/home/data')
       .then(r => r.json())
@@ -105,12 +199,29 @@ export default function Home() {
       .finally(() => setLoading(false));
   }, []);
 
-  const indices: any[] = data?.indices || [];
+  // Indices — fetch + poll every 30s
+  useEffect(() => {
+    function fetchIndices() {
+      fetch('/api/market/indices')
+        .then(r => r.json())
+        .then(res => { if (res.success) setIndices(res.data); })
+        .catch(() => {})
+        .finally(() => setIndicesLoading(false));
+    }
+    fetchIndices();
+    indicesIntervalRef.current = setInterval(fetchIndices, 30_000);
+    return () => { if (indicesIntervalRef.current) clearInterval(indicesIntervalRef.current); };
+  }, []);
+
   const topStocks: any[] = data?.topStocks || [];
   const topETFs: any[] = data?.topETFs || [];
   const sectors: any[] = data?.sectorBreakdown || [];
   const topMovers: any = data?.topMovers;
-  const moverList: any[] = topMovers?.[moverTab] || [];
+  const rawMoverList: any[] = topMovers?.[moverTab] || [];
+
+  const sortedStocks = sortOI(topStocks, stockSort.key, stockSort.dir);
+  const sortedETFs = sortOI(topETFs, etfSort.key, etfSort.dir);
+  const sortedMovers = sortMovers(rawMoverList, moverSort.key, moverSort.dir);
 
   return (
     <>
@@ -144,30 +255,30 @@ export default function Home() {
           {/* Index Tiles */}
           <section>
             <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Market Indices</h2>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              {loading
-                ? Array(4).fill(0).map((_, i) => <div key={i} className="bg-white rounded-xl border border-gray-200 p-4 animate-pulse h-24" />)
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+              {indicesLoading
+                ? Array(6).fill(0).map((_, i) => <div key={i} className="bg-white rounded-xl border border-gray-200 p-4 animate-pulse h-24" />)
                 : indices.map((idx: any) => {
                     const up = idx.changePercent != null && idx.changePercent >= 0;
                     const color = idx.changePercent == null ? 'text-gray-500' : up ? 'text-green-600' : 'text-red-600';
-                    const bg = up ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200';
+                    const bg = idx.changePercent == null ? 'bg-white border-gray-200' : up ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200';
                     return (
                       <button key={idx.symbol} onClick={() => router.push(`/stock/${idx.symbol}`)}
-                        className={`${idx.changePercent == null ? 'bg-white border-gray-200' : bg} border rounded-xl p-4 text-left hover:shadow-md transition-all`}>
-                        <div className="flex justify-between items-start">
-                          <span className="font-bold text-gray-800">{idx.symbol}</span>
-                          <span className={`text-xs font-semibold ${color}`}>{pct(idx.changePercent)}</span>
+                        className={`${bg} border rounded-xl p-3 text-left hover:shadow-md transition-all`}>
+                        <div className="flex justify-between items-start mb-0.5">
+                          <span className="font-bold text-gray-800 text-sm">{idx.symbol}</span>
+                          <span className={`text-[10px] font-semibold ${color}`}>{pct(idx.changePercent)}</span>
                         </div>
-                        <div className="text-2xl font-bold text-gray-900 mt-1">
+                        <div className="text-xs text-gray-400 mb-1">{idx.label}</div>
+                        <div className="text-xl font-bold text-gray-900">
                           {idx.price != null ? `$${idx.price.toFixed(2)}` : '—'}
                         </div>
                         <div className="flex justify-between mt-1">
                           <span className={`text-xs ${color}`}>
                             {idx.change != null ? `${idx.change >= 0 ? '+' : ''}$${idx.change.toFixed(2)}` : ''}
                           </span>
-                          {idx.volume && <span className="text-xs text-gray-400">Vol {fmt(idx.volume)}</span>}
+                          {idx.volume && <span className="text-[10px] text-gray-400">Vol {fmt(idx.volume)}</span>}
                         </div>
-                        {idx.date && <div className="text-[10px] text-gray-300 mt-0.5">{idx.date}</div>}
                       </button>
                     );
                   })}
@@ -179,43 +290,59 @@ export default function Home() {
 
             {/* Top Stocks OI */}
             <section className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-              <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-                <div>
-                  <h2 className="font-bold text-gray-800 text-sm">Top Stocks by OI</h2>
-                  {data?.topStocksDate && (
-                    <div className="text-[10px] text-gray-400">As of {data.topStocksDate}</div>
-                  )}
+              <div className="px-4 py-3 border-b border-gray-100">
+                <div className="flex items-center justify-between mb-2">
+                  <div>
+                    <h2 className="font-bold text-gray-800 text-sm">Top Stocks by OI</h2>
+                    {data?.topStocksDate && (
+                      <div className="text-[10px] text-gray-400">As of {data.topStocksDate}</div>
+                    )}
+                  </div>
+                  <div className="text-[10px] text-gray-300 text-right">
+                    <div className="text-green-500">█ Call</div>
+                    <div className="text-red-400">█ Put</div>
+                  </div>
                 </div>
-                <div className="text-[10px] text-gray-300 text-right">
-                  <div className="text-green-500">█ Call</div>
-                  <div className="text-red-400">█ Put</div>
+                <div className="flex items-center gap-3 px-1">
+                  <span className="text-[10px] text-gray-300 w-4 shrink-0">#</span>
+                  <SortHeader label="Symbol" sortKey="symbol" current={stockSort.key} dir={stockSort.dir} onSort={k => toggleOISort('stocks', k)} className="w-[72px] shrink-0" />
+                  <SortHeader label="Call/Put" sortKey="callRatio" current={stockSort.key} dir={stockSort.dir} onSort={k => toggleOISort('stocks', k)} className="flex-1" />
+                  <SortHeader label="Total OI" sortKey="totalOi" current={stockSort.key} dir={stockSort.dir} onSort={k => toggleOISort('stocks', k)} className="shrink-0" />
                 </div>
               </div>
               {loading
                 ? Array(8).fill(0).map((_, i) => <div key={i} className="px-4 py-2.5 animate-pulse h-10 border-b border-gray-50"><div className="h-3 bg-gray-200 rounded w-3/4" /></div>)
-                : topStocks.map((s: any, i: number) => (
+                : sortedStocks.map((s: any, i: number) => (
                     <OIRow key={s.symbol} s={s} i={i} onClick={() => router.push(`/stock/${s.symbol}`)} />
                   ))}
             </section>
 
             {/* Top ETFs OI */}
             <section className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-              <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-                <div>
-                  <h2 className="font-bold text-gray-800 text-sm">Top ETFs by OI</h2>
-                  {data?.topETFsDate && (
-                    <div className="text-[10px] text-gray-400">As of {data.topETFsDate}</div>
-                  )}
+              <div className="px-4 py-3 border-b border-gray-100">
+                <div className="flex items-center justify-between mb-2">
+                  <div>
+                    <h2 className="font-bold text-gray-800 text-sm">Top ETFs by OI</h2>
+                    {data?.topETFsDate && (
+                      <div className="text-[10px] text-gray-400">As of {data.topETFsDate}</div>
+                    )}
+                  </div>
+                  <div className="text-[10px] text-gray-300 text-right">
+                    <div className="text-green-500">█ Call</div>
+                    <div className="text-red-400">█ Put</div>
+                  </div>
                 </div>
-                <div className="text-[10px] text-gray-300 text-right">
-                  <div className="text-green-500">█ Call</div>
-                  <div className="text-red-400">█ Put</div>
+                <div className="flex items-center gap-3 px-1">
+                  <span className="text-[10px] text-gray-300 w-4 shrink-0">#</span>
+                  <SortHeader label="Symbol" sortKey="symbol" current={etfSort.key} dir={etfSort.dir} onSort={k => toggleOISort('etfs', k)} className="w-[72px] shrink-0" />
+                  <SortHeader label="Call/Put" sortKey="callRatio" current={etfSort.key} dir={etfSort.dir} onSort={k => toggleOISort('etfs', k)} className="flex-1" />
+                  <SortHeader label="Total OI" sortKey="totalOi" current={etfSort.key} dir={etfSort.dir} onSort={k => toggleOISort('etfs', k)} className="shrink-0" />
                 </div>
               </div>
               {loading
                 ? Array(8).fill(0).map((_, i) => <div key={i} className="px-4 py-2.5 animate-pulse h-10 border-b border-gray-50"><div className="h-3 bg-gray-200 rounded w-3/4" /></div>)
-                : topETFs.length > 0
-                  ? topETFs.map((s: any, i: number) => (
+                : sortedETFs.length > 0
+                  ? sortedETFs.map((s: any, i: number) => (
                       <OIRow key={s.symbol} s={s} i={i} onClick={() => router.push(`/stock/${s.symbol}`)} />
                     ))
                   : <div className="px-4 py-8 text-center text-sm text-gray-400">No ETF data</div>}
@@ -225,7 +352,7 @@ export default function Home() {
             <section className="bg-white rounded-xl border border-gray-200 overflow-hidden">
               <div className="px-4 py-3 border-b border-gray-100">
                 <h2 className="font-bold text-gray-800 text-sm mb-2">S&amp;P 500 Movers</h2>
-                <div className="flex gap-1 flex-wrap">
+                <div className="flex gap-1 flex-wrap mb-2">
                   {MOVER_TABS.map(t => (
                     <button key={t.key} onClick={() => setMoverTab(t.key)}
                       className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
@@ -237,11 +364,19 @@ export default function Home() {
                     </button>
                   ))}
                 </div>
+                <div className="flex items-center gap-2 px-1">
+                  <SortHeader label="Symbol" sortKey="symbol" current={moverSort.key} dir={moverSort.dir} onSort={toggleMoverSort} className="w-[72px] shrink-0" />
+                  <SortHeader label="Price/Vol" sortKey="price" current={moverSort.key} dir={moverSort.dir} onSort={toggleMoverSort} className="flex-1" />
+                  <div className="text-right shrink-0 flex flex-col items-end gap-0.5">
+                    <SortHeader label="%" sortKey="changePercent" current={moverSort.key} dir={moverSort.dir} onSort={toggleMoverSort} />
+                    <SortHeader label="$" sortKey="change" current={moverSort.key} dir={moverSort.dir} onSort={toggleMoverSort} />
+                  </div>
+                </div>
               </div>
               {loading || !topMovers
                 ? Array(8).fill(0).map((_, i) => <div key={i} className="px-4 py-2.5 animate-pulse h-10 border-b border-gray-50"><div className="h-3 bg-gray-200 rounded w-3/4" /></div>)
-                : moverList.length > 0
-                  ? moverList.map((s: any) => (
+                : sortedMovers.length > 0
+                  ? sortedMovers.map((s: any) => (
                       <MoverRow key={s.symbol} s={s} onClick={() => router.push(`/stock/${s.symbol}`)} />
                     ))
                   : <div className="px-4 py-8 text-center text-sm text-gray-400">No data available</div>}
