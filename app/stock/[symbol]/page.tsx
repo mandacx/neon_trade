@@ -263,10 +263,13 @@ export default function StockPage() {
       }
 
       const result = await ohlcResponse.json();
-      
+
+      // Always mark range as loaded to prevent re-fetching empty ranges
+      loadedRangesRef.current.push({ from, to });
+
       if (result.success && result.data.data.length > 0) {
         const newData = result.data.data;
-        
+
         // Merge new data with existing data
         setOhlcData(prevData => {
           if (direction === 'past') {
@@ -277,9 +280,6 @@ export default function StockPage() {
             return [...prevData, ...newData];
           }
         });
-
-        // Track the newly loaded range
-        loadedRangesRef.current.push({ from, to });
 
         if (selectedExpiryRef.current) {
           const levelsResponse = await fetch(

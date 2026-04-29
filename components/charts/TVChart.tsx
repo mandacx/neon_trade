@@ -67,15 +67,15 @@ export default function TVChart({
   const [showOI, setShowOI] = useState(true);
   const loadingMoreRef = useRef(false);
   const initialFitDoneRef = useRef(false);
+  // Unsubscribe fn stored in ref so the data-update effect can temporarily
+  // pause the visible-range handler during programmatic setData/fitContent calls.
+  const pauseScrollTriggerRef = useRef<(() => void) | null>(null);
+  const resumeScrollTriggerRef = useRef<(() => void) | null>(null);
 
   useEffect(() => { historicalLevelsRef.current = historicalLevels; }, [historicalLevels]);
   useEffect(() => { levelsRef.current = levels; }, [levels]);
   useEffect(() => { closestLevelRef.current = closestLevel; }, [closestLevel]);
   useEffect(() => { oiDataRef.current = oiData; }, [oiData]);
-  // loadingMoreRef is NOT synced from isLoadingMore prop — it is managed manually:
-  // set to true synchronously in the scroll handler, reset to false at the end of
-  // the data update effect (after setData). This prevents a race where the sync
-  // effect resets the guard before setData fires its visible-range-change event.
 
   useEffect(() => {
     if (!chartContainerRef.current) return;
@@ -230,13 +230,18 @@ export default function TVChart({
         const visibleToStr = typeof visibleTo === 'string' ? visibleTo : new Date((visibleTo as number) * 1000).toISOString().split('T')[0];
 
         if (visibleFromStr <= firstDataTime && visibleToStr >= firstDataTime && !loadingMoreRef.current) {
-          loadingMoreRef.current = true; // guard synchronously before async state update
+          loadingMoreRef.current = true;
           onLoadMore('past', firstDataTime, lastDataTime);
+          // Reset guard after a safe delay — handler is only called from real user
+          // scroll (paused during programmatic setData), so no race condition here
+          setTimeout(() => { loadingMoreRef.current = false; }, 3000);
         }
       };
 
       chartTimeScale.subscribeVisibleTimeRangeChange(handleVisibleTimeRangeChange);
       visibleRangeUnsubscribe = () => chartTimeScale.unsubscribeVisibleTimeRangeChange(handleVisibleTimeRangeChange);
+      pauseScrollTriggerRef.current = () => chartTimeScale.unsubscribeVisibleTimeRangeChange(handleVisibleTimeRangeChange);
+      resumeScrollTriggerRef.current = () => chartTimeScale.subscribeVisibleTimeRangeChange(handleVisibleTimeRangeChange);
     }
 
     // Add crosshair move handler for tooltip and OHLC display
@@ -429,6 +434,8 @@ export default function TVChart({
       }
       initialFitDoneRef.current = false;
       loadingMoreRef.current = false;
+      pauseScrollTriggerRef.current = null;
+      resumeScrollTriggerRef.current = null;
       chart.remove();
     };
   }, [height, onLoadMore]);
@@ -436,6 +443,10 @@ export default function TVChart({
   // Update data
   useEffect(() => {
     if (!candleSeriesRef.current || !volumeSeriesRef.current || isLoading) return;
+
+    // Pause scroll-trigger handler so programmatic setData/fitContent
+    // don't fire onLoadMore — only real user scroll should trigger it
+    pauseScrollTriggerRef.current?.();
 
     // Format candlestick data
     const formattedCandles: CandlestickData[] = candleData.map(d => ({
@@ -518,10 +529,9 @@ export default function TVChart({
       initialFitDoneRef.current = true;
     }
 
-    // Reset scroll guard AFTER setData — prevents race where isLoadingMore prop
-    // sync effect resets the guard before setData fires its visible-range-change event
-    loadingMoreRef.current = false;
-  }, [candleData, volumeData, oiData, isLoading, isLoadingMore, showPrice, showOI]);
+    // Resume scroll-trigger handler now that all programmatic updates are done
+    resumeScrollTriggerRef.current?.();
+  }, [candleData, volumeData, oiData, isLoading, showPrice, showOI]);
 
   // Add level lines
   useEffect(() => {
