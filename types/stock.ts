@@ -52,6 +52,7 @@ export interface OHLCData {
 // Quadrant stock data point
 export interface QuadrantStock {
   symbol: string;
+  name?: string | null;
   close: number;
   tradeDate: string;
   expiryDate?: string;
@@ -62,6 +63,7 @@ export interface QuadrantStock {
   industry?: string | null;
   marketCapTier?: string | null;
   marketCap?: number | null;
+  indices?: string[];
 }
 
 // Quadrant filters

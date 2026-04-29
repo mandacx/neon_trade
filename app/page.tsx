@@ -153,7 +153,10 @@ export default function Home() {
                           className="w-full px-5 py-3 flex items-center gap-3 hover:bg-gray-50 transition-colors text-left"
                         >
                           <span className="text-xs text-gray-400 w-5 text-right">{i + 1}</span>
-                          <span className="font-bold text-gray-800 w-14 shrink-0">{s.symbol}</span>
+                          <div className="shrink-0 w-16">
+                            <div className="font-bold text-gray-800">{s.symbol}</div>
+                            {s.name && <div className="text-[10px] text-gray-400 truncate w-16" title={s.name}>{s.name}</div>}
+                          </div>
                           <div className="flex-1 min-w-0">
                             <div className="text-xs text-gray-400 truncate">{s.sector || ''}</div>
                             {/* OI bar */}
@@ -205,7 +208,10 @@ export default function Home() {
                           className="w-full px-5 py-3 flex items-center gap-3 hover:bg-gray-50 transition-colors text-left"
                         >
                           <span className="text-xs text-gray-400 w-5 text-right">{i + 1}</span>
-                          <span className="font-bold text-gray-800 w-14 shrink-0">{s.symbol}</span>
+                          <div className="shrink-0 w-16">
+                            <div className="font-bold text-gray-800">{s.symbol}</div>
+                            {s.name && <div className="text-[10px] text-gray-400 truncate w-16" title={s.name}>{s.name}</div>}
+                          </div>
                           <div className="flex-1 min-w-0">
                             <div className="h-1.5 rounded-full bg-gray-100 mt-1 overflow-hidden">
                               <div className="h-full bg-green-400 float-left" style={{ width: `${(1 - putRatio) * 100}%` }} />
@@ -252,9 +258,10 @@ export default function Home() {
                     : sentimentScore < -0.3 ? 'text-red-600' : 'text-yellow-600';
 
                   return (
-                    <div
+                    <button
                       key={s.sector}
-                      className="bg-white rounded-xl border border-gray-200 p-4"
+                      onClick={() => router.push(`/quadrant?sector=${encodeURIComponent(s.sector)}`)}
+                      className="bg-white rounded-xl border border-gray-200 p-4 text-left hover:shadow-md hover:border-blue-300 transition-all w-full"
                     >
                       <div className="flex items-center justify-between mb-2">
                         <span className="font-semibold text-gray-800 text-sm">{s.sector}</span>
@@ -294,7 +301,8 @@ export default function Home() {
                           {s.unchanged > 0 && <span className="text-gray-400">— {s.unchanged}</span>}
                         </div>
                       )}
-                    </div>
+                      <div className="mt-2 text-[10px] text-blue-400 font-medium">View in Quadrant →</div>
+                    </button>
                   );
                 })}
               </div>

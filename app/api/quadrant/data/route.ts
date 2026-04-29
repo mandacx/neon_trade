@@ -170,6 +170,7 @@ export async function GET(request: NextRequest) {
       }
       return {
         ...s,
+        name: m?.name ?? null,
         sector: m?.sector ?? null,
         industry: m?.industry ?? null,
         marketCapTier: m?.market_cap_tier ?? null,

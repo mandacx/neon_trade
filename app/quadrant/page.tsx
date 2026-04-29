@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import QuadrantChart from '@/components/charts/QuadrantChart';
 import Header from '@/components/layout/Header';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
@@ -15,6 +16,7 @@ interface FilterOptions {
 }
 
 export default function QuadrantPage() {
+  const searchParams = useSearchParams();
   const [stocks, setStocks] = useState<QuadrantStock[]>([]);
   const [filteredStocks, setFilteredStocks] = useState<QuadrantStock[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -26,13 +28,13 @@ export default function QuadrantPage() {
   const [expiryDates, setExpiryDates] = useState<string[]>([]);
   const [filterOptions, setFilterOptions] = useState<FilterOptions>({});
 
-  // Filters
+  // Filters — pre-populate from URL params (e.g. ?sector=Technology)
   const [searchQuery, setSearchQuery] = useState('');
   const [threshold, setThreshold] = useState<number>(0.5);
-  const [sector, setSector] = useState('');
-  const [industry, setIndustry] = useState('');
-  const [marketCapTier, setMarketCapTier] = useState('');
-  const [indexCode, setIndexCode] = useState('');
+  const [sector, setSector] = useState(searchParams.get('sector') || '');
+  const [industry, setIndustry] = useState(searchParams.get('industry') || '');
+  const [marketCapTier, setMarketCapTier] = useState(searchParams.get('marketCapTier') || '');
+  const [indexCode, setIndexCode] = useState(searchParams.get('index') || '');
 
   useEffect(() => {
     const fetchMetadata = async () => {
@@ -265,6 +267,7 @@ export default function QuadrantPage() {
                 <thead className="bg-gray-50 border-b-2 border-gray-200">
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Symbol</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Name</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Close</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Closest Level</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Distance</th>
@@ -281,6 +284,9 @@ export default function QuadrantPage() {
                   {filteredStocks.slice(0, 50).map((stock) => (
                     <tr key={stock.symbol} className="hover:bg-gray-50">
                       <td className="px-4 py-3 text-sm font-bold">{stock.symbol}</td>
+                      <td className="px-4 py-3 text-sm text-gray-600 max-w-[180px] truncate" title={(stock as any).name || ''}>
+                        {(stock as any).name || '—'}
+                      </td>
                       <td className="px-4 py-3 text-sm text-right font-mono">${stock.close.toFixed(2)}</td>
                       <td className="px-4 py-3 text-sm">
                         <span className="px-2 py-0.5 rounded text-xs font-medium text-white"

@@ -83,6 +83,7 @@ export default function QuadrantChart({ data, onStockClick, height = 600 }: Quad
           industry: (stock as any).industry,
           marketCapTier: (stock as any).marketCapTier,
           indices: (stock as any).indices,
+          name: (stock as any).name,
           color: getLevelColor(stock.closestLevel),
         });
       });
@@ -116,7 +117,8 @@ export default function QuadrantChart({ data, onStockClick, height = 600 }: Quad
       const d = payload[0].payload;
       return (
         <div className="bg-white p-4 border-2 border-gray-300 rounded-lg shadow-xl min-w-[280px] z-50">
-          <p className="font-bold text-xl mb-1 text-blue-600">{d.symbol}</p>
+          <p className="font-bold text-xl mb-0 text-blue-600">{d.symbol}</p>
+          {d.name && <p className="text-xs text-gray-500 mb-1 font-medium">{d.name}</p>}
           {(d.sector || d.industry) && (
             <p className="text-xs text-gray-400 mb-0.5">{[d.sector, d.industry].filter(Boolean).join(' · ')}</p>
           )}
