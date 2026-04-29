@@ -150,7 +150,6 @@ async function getTopMovers() {
       WHERE (
         indices::text LIKE ${'%"code":"SPY"%'}
         OR indices::text LIKE ${'%"code": "SPY"%'}
-        OR indices @> '[{"code":"SPY"}]'
       )
         AND symbol IS NOT NULL
       ORDER BY COALESCE(market_cap, 0) DESC
