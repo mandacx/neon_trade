@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { createChart, IChartApi, ISeriesApi, CandlestickData, HistogramData, MouseEventParams } from 'lightweight-charts';
+import { createChart, IChartApi, ISeriesApi, IPriceLine, CandlestickData, HistogramData, MouseEventParams } from 'lightweight-charts';
 import { LevelCalculation } from '@/types/stock';
 import { getLevelColor, getLevelDisplayName, formatCurrency, formatPercentage } from '@/lib/utils';
 
@@ -56,12 +56,22 @@ export default function TVChart({
   const callOiLineRef = useRef<ISeriesApi<'Line'> | null>(null);
   const putOiLineRef = useRef<ISeriesApi<'Line'> | null>(null);
   const oiDiffLineRef = useRef<ISeriesApi<'Line'> | null>(null);
-  const priceLineRefs = useRef<any[]>([]);
+  const priceLineRefs = useRef<IPriceLine[]>([]);
+  const historicalLevelsRef = useRef(historicalLevels);
+  const levelsRef = useRef(levels);
+  const closestLevelRef = useRef(closestLevel);
+  const oiDataRef = useRef(oiData);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedPeriod, setSelectedPeriod] = useState<string>('ALL');
   const [showPrice, setShowPrice] = useState(true);
   const [showOI, setShowOI] = useState(true);
   const loadingMoreRef = useRef(false);
+
+  useEffect(() => { historicalLevelsRef.current = historicalLevels; }, [historicalLevels]);
+  useEffect(() => { levelsRef.current = levels; }, [levels]);
+  useEffect(() => { closestLevelRef.current = closestLevel; }, [closestLevel]);
+  useEffect(() => { oiDataRef.current = oiData; }, [oiData]);
+  useEffect(() => { loadingMoreRef.current = isLoadingMore; }, [isLoadingMore]);
 
   useEffect(() => {
     if (!chartContainerRef.current) return;
@@ -195,50 +205,29 @@ export default function TVChart({
       
       const handleVisibleTimeRangeChange = () => {
         if (!chartRef.current || loadingMoreRef.current) return;
+        if (!candleSeriesRef.current) return;
 
         const timeScale = chartRef.current.timeScale();
-        const visibleRange = timeScale.getVisibleRange();
-        
-        if (!visibleRange || !candleSeriesRef.current) return;
+        const logicalRange = timeScale.getVisibleLogicalRange();
 
-        // Get actual data from the series
+        // logicalRange.from < 0 means user scrolled left past the first bar (bar index negative)
+        if (!logicalRange || logicalRange.from >= 0) return;
+
         const seriesData = candleSeriesRef.current.data();
         if (!seriesData || seriesData.length === 0) return;
 
         const firstDataTime = seriesData[0].time as string;
         const lastDataTime = seriesData[seriesData.length - 1].time as string;
-        
-        const visibleFrom = visibleRange.from;
-        const visibleTo = visibleRange.to;
-        
-        // Convert to comparable format (date strings)
-        const visibleFromStr = typeof visibleFrom === 'string' ? visibleFrom : new Date(visibleFrom * 1000).toISOString().split('T')[0];
-        const visibleToStr = typeof visibleTo === 'string' ? visibleTo : new Date(visibleTo * 1000).toISOString().split('T')[0];
-        
-        console.log('📊 Scroll check:', {
-          visibleFrom: visibleFromStr,
-          visibleTo: visibleToStr,
-          firstDataTime: firstDataTime,
-          lastDataTime: lastDataTime,
-          isNearStart: visibleFromStr <= firstDataTime,
-          loadingMore: loadingMoreRef.current
-        });
-        
-        // Only trigger if we're actually VIEWING the first data point (visible range includes it)
-        // Not just if visible range is before it
-        if (visibleFromStr <= firstDataTime && visibleToStr >= firstDataTime && !loadingMoreRef.current) {
-          console.log('🔄 SCROLL TRIGGER FIRED - viewing the earliest data point');
-          loadingMoreRef.current = true;
-          onLoadMore('past', firstDataTime, lastDataTime);
-          // Reset after a delay to prevent multiple triggers
-          setTimeout(() => {
-            console.log('✅ Reset loadingMoreRef to false');
-            loadingMoreRef.current = false;
-          }, 5000);
-        }
+
+        loadingMoreRef.current = true;
+        onLoadMore('past', firstDataTime, lastDataTime);
+        setTimeout(() => {
+          loadingMoreRef.current = false;
+        }, 3000);
       };
 
-      visibleRangeUnsubscribe = chartTimeScale.subscribeVisibleTimeRangeChange(handleVisibleTimeRangeChange);
+      chartTimeScale.subscribeVisibleTimeRangeChange(handleVisibleTimeRangeChange);
+      visibleRangeUnsubscribe = () => chartTimeScale.unsubscribeVisibleTimeRangeChange(handleVisibleTimeRangeChange);
     }
 
     // Add crosshair move handler for tooltip and OHLC display
@@ -268,16 +257,10 @@ export default function TVChart({
       const close = candleData.close;
       const dateStr = param.time as string;
 
-      // Get volume data for this time
       const volumeData = param.seriesData.get(volumeSeriesRef.current!);
       const volume = volumeData ? (volumeData as any).value : 0;
 
-      // Get OI data for this time
-      const oiSeriesData = param.seriesData.get(oiDiffSeriesRef.current!);
-      const oiDiffValue = oiSeriesData ? (oiSeriesData as any).value : null;
-      
-      // Find the full OI data for this date from oiData prop
-      const currentOiData = oiData.find(d => d.time === dateStr);
+      const currentOiData = oiDataRef.current.find(d => d.time === dateStr);
 
       // Update OHLC display in top-left corner
       if (ohlcDisplayRef.current) {
@@ -311,36 +294,25 @@ export default function TVChart({
         `;
       }
 
-      console.log(`Tooltip for date: ${dateStr} (type: ${typeof dateStr}), historicalLevels size: ${historicalLevels?.size || 0}`);
-      
       if (!tooltipRef.current) return;
-      
-      if (historicalLevels && historicalLevels.size > 0) {
-        console.log('Available dates in map:', Array.from(historicalLevels.keys()));
-      }
 
-      // Get levels for this specific date from historical data
       let dateLevels: LevelCalculation[] = [];
       let dateClosestLevel: string | undefined = undefined;
       let hasHistoricalData = false;
-      
-      if (historicalLevels && historicalLevels.size > 0) {
-        const historicalData = historicalLevels.get(dateStr);
-        console.log(`Looking up date "${dateStr}" in map:`, historicalData);
+
+      const hLevels = historicalLevelsRef.current;
+      if (hLevels && hLevels.size > 0) {
+        const historicalData = hLevels.get(dateStr);
         if (historicalData && historicalData.levels && historicalData.levels.length > 0) {
           dateLevels = historicalData.levels;
           dateClosestLevel = historicalData.closestLevel;
           hasHistoricalData = true;
-          console.log(`Using historical levels for ${dateStr}:`, dateLevels);
-        } else {
-          console.log(`No historical data found for "${dateStr}"`);
         }
       }
 
-      // Show tooltip with OHLC data (always visible)
       tooltipRef.current.style.display = 'block';
-      tooltipRef.current.style.left = param.point?.x + 10 + 'px';
-      tooltipRef.current.style.top = param.point?.y + 10 + 'px';
+      tooltipRef.current.style.left = ((param.point?.x ?? 0) + 10) + 'px';
+      tooltipRef.current.style.top = ((param.point?.y ?? 0) + 10) + 'px';
 
       // Build tooltip content with closest level highlighted (only if historical data available)
       const levelsWithProximity = hasHistoricalData ? dateLevels.map(level => {
@@ -358,8 +330,6 @@ export default function TVChart({
           isProximity
         };
       }).reverse() : []; // Reverse the order: Call High -> Call Int -> Put/Call Int -> Put Int -> Put Low
-
-      console.log('Rendering tooltip with levels:', levelsWithProximity, 'hasHistoricalData:', hasHistoricalData);
 
       // Build OI section for tooltip
       const oiTooltipHtml = currentOiData ? `
@@ -443,7 +413,7 @@ export default function TVChart({
       }
       chart.remove();
     };
-  }, [height, onLoadMore, historicalLevels, levels, closestLevel]);
+  }, [height, onLoadMore]);
 
   // Update data
   useEffect(() => {
@@ -452,25 +422,42 @@ export default function TVChart({
     console.log('Updating chart data, candle count:', candleData.length);
     console.log('Date range:', candleData[0]?.time, 'to', candleData[candleData.length - 1]?.time);
 
-    // Format candlestick data
-    const formattedCandles: CandlestickData[] = candleData.map(d => ({
-      time: d.time as any,
-      open: d.open,
-      high: d.high,
-      low: d.low,
-      close: d.close,
-    }));
+    // Deduplicate by time (keep last) and sort ascending — duplicates crash lightweight-charts
+    const candleByTimeMap = new Map<string, typeof candleData[0]>();
+    for (const d of candleData) { if (d.time) candleByTimeMap.set(d.time, d); }
+    const candleDeduped = Array.from(candleByTimeMap.values()).sort((a, b) =>
+      a.time < b.time ? -1 : a.time > b.time ? 1 : 0
+    );
 
-    // Format volume data with colors based on candle direction
-    const formattedVolume: HistogramData[] = volumeData.map((d, index) => {
-      const candle = candleData[index];
-      const isGreen = candle && candle.close >= candle.open;
-      return {
+    // Filter bars where any OHLC value is not a finite number
+    const formattedCandles: CandlestickData[] = candleDeduped
+      .filter(d => Number.isFinite(d.open) && Number.isFinite(d.high) && Number.isFinite(d.low) && Number.isFinite(d.close))
+      .map(d => ({
         time: d.time as any,
-        value: d.value,
-        color: isGreen ? 'rgba(34, 197, 94, 0.5)' : 'rgba(239, 68, 68, 0.5)', // green or red with transparency
-      };
-    });
+        open: d.open,
+        high: d.high,
+        low: d.low,
+        close: d.close,
+      }));
+
+    // Deduplicate volume data
+    const volByTimeMap = new Map<string, typeof volumeData[0]>();
+    for (const d of volumeData) { if (d.time) volByTimeMap.set(d.time, d); }
+    const volumeDeduped = Array.from(volByTimeMap.values()).sort((a, b) =>
+      a.time < b.time ? -1 : a.time > b.time ? 1 : 0
+    );
+
+    const formattedVolume: HistogramData[] = volumeDeduped
+      .filter(d => Number.isFinite(d.value))
+      .map(d => {
+        const candle = candleByTimeMap.get(d.time);
+        const isGreen = candle ? candle.close >= candle.open : true;
+        return {
+          time: d.time as any,
+          value: d.value,
+          color: isGreen ? 'rgba(34, 197, 94, 0.5)' : 'rgba(239, 68, 68, 0.5)',
+        };
+      });
 
     // Use setData to replace all data (handles both initial load and updates)
     candleSeriesRef.current.setData(formattedCandles);
@@ -482,72 +469,58 @@ export default function TVChart({
 
     // Format and set OI Diff data if available
     if (oiDiffSeriesRef.current && callOiLineRef.current && putOiLineRef.current && oiDiffLineRef.current && oiData.length > 0) {
-      console.log('Setting OI data, count:', oiData.length);
-      console.log('Sample OI data (first 3):', oiData.slice(0, 3));
       try {
-        const formattedOiDiff: HistogramData[] = oiData
-          .map((d, index) => {
-            // Debug first few items
-            if (index < 3) {
-              console.log(`Item ${index}:`, d, 'time type:', typeof d.time, 'time value:', d.time);
-            }
-            // Ensure time is in the correct format (YYYY-MM-DD string)
-            const timeValue = d.time ? (typeof d.time === 'string' ? d.time : String(d.time)) : null;
-            if (!timeValue) {
-              console.warn('Skipping OI item with invalid time:', d);
-              return null;
-            }
-            return {
-              time: timeValue as any,
-              value: Math.abs(d.oiDiff || 0),
-              color: (d.oiDiff || 0) > 0 ? 'rgba(34, 197, 94, 0.6)' : 'rgba(239, 68, 68, 0.6)', // green if put>call, red if call>put
-            };
-          })
-          .filter((item): item is HistogramData => item !== null);
+        // Deduplicate OI data by time, sort ascending
+        const oiByTime = new Map<string, typeof oiData[0]>();
+        for (const d of oiData) {
+          if (d.time) oiByTime.set(typeof d.time === 'string' ? d.time : String(d.time), d);
+        }
+        const oiDeduped = Array.from(oiByTime.values()).sort((a, b) =>
+          String(a.time) < String(b.time) ? -1 : String(a.time) > String(b.time) ? 1 : 0
+        );
 
-        // Format Call OI, Put OI, and OI Diff line data
-        const callOiLineData = oiData
-          .filter(d => d.time)
+        const formattedOiDiff: HistogramData[] = oiDeduped
+          .filter(d => Number.isFinite(d.oiDiff))
           .map(d => ({
             time: (typeof d.time === 'string' ? d.time : String(d.time)) as any,
-            value: d.callOi || 0,
+            value: Math.abs(d.oiDiff),
+            color: d.oiDiff > 0 ? 'rgba(34, 197, 94, 0.6)' : 'rgba(239, 68, 68, 0.6)',
           }));
 
-        const putOiLineData = oiData
-          .filter(d => d.time)
+        const callOiLineData = oiDeduped
+          .filter(d => Number.isFinite(d.callOi))
           .map(d => ({
             time: (typeof d.time === 'string' ? d.time : String(d.time)) as any,
-            value: d.putOi || 0,
+            value: d.callOi,
           }));
 
-        const oiDiffLineData = oiData
-          .filter(d => d.time)
+        const putOiLineData = oiDeduped
+          .filter(d => Number.isFinite(d.putOi))
           .map(d => ({
             time: (typeof d.time === 'string' ? d.time : String(d.time)) as any,
-            value: d.oiDiff || 0,
+            value: d.putOi,
           }));
 
-        console.log('Formatted OI data (first 3):', formattedOiDiff.slice(0, 3));
+        const oiDiffLineData = oiDeduped
+          .filter(d => Number.isFinite(d.oiDiff))
+          .map(d => ({
+            time: (typeof d.time === 'string' ? d.time : String(d.time)) as any,
+            value: d.oiDiff,
+          }));
+
         oiDiffSeriesRef.current.setData(formattedOiDiff);
         callOiLineRef.current.setData(callOiLineData);
         putOiLineRef.current.setData(putOiLineData);
         oiDiffLineRef.current.setData(oiDiffLineData);
-        
-        // Reapply visibility state for OI series after data update
+
         oiDiffSeriesRef.current.applyOptions({ visible: showOI });
         callOiLineRef.current.applyOptions({ visible: showOI });
         putOiLineRef.current.applyOptions({ visible: showOI });
         oiDiffLineRef.current.applyOptions({ visible: showOI });
-        
-        console.log('OI data set successfully, bars:', formattedOiDiff.length, 'Call OI line:', callOiLineData.length, 'Put OI line:', putOiLineData.length, 'OI Diff line:', oiDiffLineData.length);
       } catch (error) {
-        console.error('Error setting OI data:', error, 'Data:', oiData.slice(0, 2));
+        console.error('Error setting OI data:', error);
       }
-    } else {
-      console.log('No OI data to display. oiData length:', oiData.length, 'oiDiffSeriesRef exists:', !!oiDiffSeriesRef.current);
     }
-
-    console.log('Chart data updated');
 
     // Only fit content on initial load, not when loading more data
     if (!isLoadingMore && chartRef.current) {
@@ -557,12 +530,7 @@ export default function TVChart({
 
   // Add level lines
   useEffect(() => {
-    console.log('Price lines effect triggered. Levels:', levels, 'ClosestLevel:', closestLevel);
-    console.log('candleSeriesRef.current:', candleSeriesRef.current);
-    
     if (!candleSeriesRef.current || !levels.length) {
-      console.log('Skipping price lines - no series or no levels');
-      // Clear existing price lines if no levels
       priceLineRefs.current.forEach(line => {
         if (line && candleSeriesRef.current) {
           candleSeriesRef.current.removePriceLine(line);
@@ -572,8 +540,6 @@ export default function TVChart({
       return;
     }
 
-    // Clear all existing price lines before adding new ones
-    console.log('Clearing existing price lines. Count:', priceLineRefs.current.length);
     priceLineRefs.current.forEach(line => {
       if (line && candleSeriesRef.current) {
         candleSeriesRef.current.removePriceLine(line);
@@ -581,55 +547,33 @@ export default function TVChart({
     });
     priceLineRefs.current = [];
 
-    console.log('Adding price lines for levels:', JSON.stringify(levels, null, 2));
-    console.log('Closest level:', closestLevel);
-
     levels.forEach(level => {
-      console.log('Processing level:', level);
-      console.log('Level price type:', typeof level.price, 'Value:', level.price);
-      
-      // Convert price to number if it's a string
       const priceValue = typeof level.price === 'string' ? parseFloat(level.price) : level.price;
-      
-      console.log('Converted price:', priceValue, 'Type:', typeof priceValue);
-      console.log('Is NaN check:', isNaN(priceValue));
-      
-      // Skip if level doesn't have a valid price
-      if (!level || !priceValue || isNaN(priceValue) || priceValue === 0) {
-        console.warn('Skipping invalid level:', level, 'Converted price:', priceValue);
-        return;
-      }
+
+      if (!priceValue || isNaN(priceValue) || priceValue === 0) return;
 
       const isClosest = level.name === closestLevel;
       const color = isClosest ? '#3B82F6' : getLevelColor(level.name);
       const lineWidth = isClosest ? 2 : 1;
       const displayName = getLevelDisplayName(level.name);
 
-      console.log(`Creating price line for ${displayName} at ${priceValue} with color ${color}`);
-
       try {
         const priceLine = candleSeriesRef.current?.createPriceLine({
           price: priceValue,
           color: color,
           lineWidth: lineWidth,
-          lineStyle: isClosest ? 0 : 2, // 0 = solid, 2 = dashed
+          lineStyle: isClosest ? 0 : 2,
           axisLabelVisible: true,
-          axisLabelBackgroundColor: color,
           title: displayName,
         });
 
         if (priceLine) {
           priceLineRefs.current.push(priceLine);
-          console.log(`Successfully created price line for ${displayName}`);
-        } else {
-          console.error(`Failed to create price line for ${displayName}`);
         }
       } catch (err) {
         console.error(`Error creating price line for ${displayName}:`, err);
       }
     });
-
-    console.log('Total price lines created:', priceLineRefs.current.length);
 
     // Cleanup function to remove price lines when component unmounts or levels change
     return () => {

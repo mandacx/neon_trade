@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { query } from '@/lib/db';
-import { format, subDays } from 'date-fns';
+import { sql } from '@/lib/db';
+import { format, subDays } from 'date-fns'; // format used for default date params
 
 export async function GET(
   request: NextRequest,
@@ -21,26 +21,24 @@ export async function GET(
       );
     }
 
-    // Query database for OI data
-    const result = await query(
-      `SELECT 
-        trade_date as "date",
+    const rows = await sql`
+      SELECT
+        trade_date::text as "date",
         COALESCE(call_oi, 0) as "callOi",
         COALESCE(put_oi, 0) as "putOi",
         COALESCE((put_oi - call_oi), 0) as "oiDiff"
-      FROM eod_usmkts_price
-      WHERE UPPER(symbol) = UPPER($1)
-        AND trade_date >= $2
-        AND trade_date <= $3
-      ORDER BY trade_date ASC`,
-      [symbol, from, to]
-    );
+      FROM public.eod_usmkts_price
+      WHERE symbol = ${symbol.toUpperCase()}
+        AND trade_date >= ${from}
+        AND trade_date <= ${to}
+      ORDER BY trade_date ASC
+    `;
 
-    const oiData = result.rows.map(row => ({
-      date: typeof row.date === 'string' ? row.date : format(new Date(row.date), 'yyyy-MM-dd'),
-      callOi: parseInt(row.callOi) || 0,
-      putOi: parseInt(row.putOi) || 0,
-      oiDiff: parseInt(row.oiDiff) || 0,
+    const oiData = rows.map((row: any) => ({
+      date: row.date,
+      callOi: row.callOi,
+      putOi: row.putOi,
+      oiDiff: row.oiDiff,
     }));
 
     return NextResponse.json({

@@ -26,7 +26,7 @@ export async function GET() {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - 30);
     
-    let historyData = [];
+    let historyData: Awaited<ReturnType<typeof getHistoricalBars>> = [];
     let historyError = null;
     
     try {

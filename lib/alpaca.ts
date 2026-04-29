@@ -1,19 +1,12 @@
 import axios, { AxiosInstance } from 'axios';
 
-const ALPACA_API_KEY = process.env.ALPACA_API_KEY || '';
-const ALPACA_SECRET_KEY = process.env.ALPACA_SECRET_KEY || '';
-// Use market data endpoint (same for both paper and live trading)
+const ALPACA_API_KEY = process.env.ALPACA_API_KEY;
+const ALPACA_SECRET_KEY = process.env.ALPACA_SECRET_KEY;
 const ALPACA_BASE_URL = process.env.ALPACA_BASE_URL || 'https://data.alpaca.markets';
 
 if (!ALPACA_API_KEY || !ALPACA_SECRET_KEY) {
   console.warn('Warning: ALPACA_API_KEY or ALPACA_SECRET_KEY is not set. Alpaca API calls will fail.');
 }
-
-console.log('Alpaca configuration:', {
-  baseURL: ALPACA_BASE_URL,
-  hasApiKey: !!ALPACA_API_KEY,
-  hasSecretKey: !!ALPACA_SECRET_KEY,
-});
 
 // Create axios instance with default config
 const alpacaClient: AxiosInstance = axios.create({
@@ -67,32 +60,17 @@ export async function getHistoricalBars(
     if (start) params.start = start;
     if (end) params.end = end;
 
-    console.log(`Fetching bars for ${symbol}:`, { params, url: '/v2/stocks/bars' });
-
-    // Use the multi-symbol bars endpoint
     const response = await alpacaClient.get<AlpacaHistoryResponse>(
       '/v2/stocks/bars',
       { params }
     );
 
-    console.log(`Alpaca response for ${symbol}:`, {
-      status: response.status,
-      hasData: !!response.data,
-      barsKeys: Object.keys(response.data?.bars || {}),
-    });
-
-    const bars = response.data?.bars?.[symbol.toUpperCase()] || [];
-    
-    console.log(`Retrieved ${bars.length} bars for ${symbol}`);
-    
-    return bars;
+    return response.data?.bars?.[symbol.toUpperCase()] || [];
   } catch (error) {
-    console.error('Error fetching historical data from Alpaca:', error);
     if (axios.isAxiosError(error)) {
-      console.error('Response data:', error.response?.data);
-      console.error('Response status:', error.response?.status);
-      console.error('Request URL:', error.config?.url);
-      console.error('Request params:', error.config?.params);
+      console.error('Alpaca API error:', error.response?.status, error.response?.data);
+    } else {
+      console.error('Error fetching historical data from Alpaca:', error);
     }
     throw error;
   }

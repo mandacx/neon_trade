@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { useParams } from 'next/navigation';
 import TVChart from '@/components/charts/TVChart';
 import StockSearch from '@/components/ui/StockSearch';
@@ -30,6 +30,14 @@ export default function StockPage() {
   
   // Track loaded date ranges to avoid duplicate fetches
   const loadedRangesRef = useRef<{ from: string; to: string }[]>([]);
+
+  // Stable refs so handleLoadMore never changes reference (prevents chart recreation)
+  const ohlcDataRef = useRef<any[]>([]);
+  const isLoadingMoreRef = useRef(false);
+  const selectedExpiryRef = useRef('');
+  useEffect(() => { ohlcDataRef.current = ohlcData; }, [ohlcData]);
+  useEffect(() => { isLoadingMoreRef.current = isLoadingMore; }, [isLoadingMore]);
+  useEffect(() => { selectedExpiryRef.current = selectedExpiry; }, [selectedExpiry]);
 
   useEffect(() => {
     if (!symbol) return;
@@ -87,94 +95,55 @@ export default function StockPage() {
           const firstExpiry = expiryData.data.expiryDates[0];
           setSelectedExpiry(firstExpiry);
           
-          // Fetch historical levels for the first expiry immediately
           const dates = (ohlc.data.data || []).map((d: any) => d.date).sort();
           if (dates.length > 0) {
             const from = dates[0];
             const to = dates[dates.length - 1];
-            
-            console.log(`Fetching initial historical levels for ${symbol} with expiry: ${firstExpiry}, from ${from} to ${to}`);
+
             try {
               const histResponse = await fetch(`/api/stocks/${symbol}/levels?expiry=${firstExpiry}&range=true&from=${from}&to=${to}`);
-              
-              console.log('Historical API response status:', histResponse.status);
-              
+
               if (histResponse.ok) {
                 const histLevelsData = await histResponse.json();
-                console.log('Initial historical levels data received:', histLevelsData);
-                
+
                 if (histLevelsData.success && histLevelsData.data && histLevelsData.data.history) {
                   const levelsMap = new Map();
-                  console.log('Processing initial historical data, count:', histLevelsData.data.history.length);
-                  
-                  // Find the latest date with data
                   let latestDate = '';
-                  let latestLevels = null;
-                  
+                  let latestLevels: any = null;
+
                   histLevelsData.data.history.forEach((item: any) => {
-                    console.log(`Adding to map - Date: ${item.date}, Levels:`, item.calculated);
                     levelsMap.set(item.date, {
                       levels: item.calculated,
                       closestLevel: item.closestLevel
                     });
-                    
-                    // Track the latest date
                     if (!latestDate || item.date > latestDate) {
                       latestDate = item.date;
                       latestLevels = item;
                     }
                   });
-                  
-                  console.log('Initial historical levels map size:', levelsMap.size);
-                  console.log('Map keys:', Array.from(levelsMap.keys()));
-                  console.log('Latest date with data:', latestDate);
-                  console.log('Latest levels data:', latestLevels);
-                  
+
                   setHistoricalLevels(levelsMap);
-                  
-                  // Extract OI data from the levels response
-                  console.log('Sample history item:', JSON.stringify(histLevelsData.data.history[0], null, 2));
+
                   const oiDataFromLevels = histLevelsData.data.history
-                    .filter((item: any) => {
-                      const hasOi = item.oi && (item.oi.callOi || item.oi.putOi || item.oi.oiDiff);
-                      if (!hasOi) console.log('Item missing OI:', item.date || item.tradeDate, item);
-                      return hasOi;
-                    })
-                    .map((item: any) => {
-                      // Try multiple possible date field names
-                      const dateValue = item.date || item.tradeDate || item.TRADE_DATE;
-                      if (!dateValue) {
-                        console.warn('No date field found in item:', Object.keys(item));
-                      }
-                      return {
-                        time: dateValue,
-                        callOi: item.oi.callOi || 0,
-                        putOi: item.oi.putOi || 0,
-                        oiDiff: item.oi.oiDiff || 0,
-                      };
-                    });
-                  
-                  console.log(`Extracted ${oiDataFromLevels.length} OI data points from initial levels response`);
-                  console.log('Sample extracted OI data:', oiDataFromLevels.slice(0, 3));
+                    .filter((item: any) => item.oi && (item.oi.callOi || item.oi.putOi || item.oi.oiDiff))
+                    .map((item: any) => ({
+                      time: item.date || item.tradeDate || item.TRADE_DATE,
+                      callOi: item.oi.callOi || 0,
+                      putOi: item.oi.putOi || 0,
+                      oiDiff: item.oi.oiDiff || 0,
+                    }));
+
                   setOiData(oiDataFromLevels);
-                  
-                  // Set the latest levels for display (price lines) - use the latest available date
+
                   if (latestLevels) {
-                    console.log('Setting levels from latest date:', latestDate, 'Levels:', latestLevels.calculated);
                     setLevels(latestLevels.calculated || []);
                     setClosestLevel(latestLevels.closestLevel);
                   }
-                } else {
-                  console.error('Historical levels data structure invalid:', histLevelsData);
                 }
-              } else {
-                console.error('Historical API failed with status:', histResponse.status);
               }
             } catch (histErr) {
               console.error('Error fetching initial historical levels:', histErr);
             }
-          } else {
-            console.warn('No OHLC dates available for historical levels fetch');
           }
         }
       } catch (err) {
@@ -195,80 +164,49 @@ export default function StockPage() {
 
     const fetchHistoricalLevels = async () => {
       try {
-        // Get date range from OHLC data
         const dates = ohlcData.map(d => d.date).sort();
         const from = dates[0];
         const to = dates[dates.length - 1];
-        
-        console.log(`Fetching historical levels for ${symbol} with expiry: ${selectedExpiry}, from ${from} to ${to}`);
+
         const response = await fetch(`/api/stocks/${symbol}/levels?expiry=${selectedExpiry}&range=true&from=${from}&to=${to}`);
-        
+
         if (response.ok) {
           const levelsData = await response.json();
-          console.log('Historical levels data received:', levelsData);
-          
+
           if (levelsData.success && levelsData.data && levelsData.data.history) {
-            // Build a map of date -> levels
             const levelsMap = new Map();
-            console.log('Processing historical data, count:', levelsData.data.history.length);
-            
-            // Find the latest date with data
             let latestDate = '';
-            let latestLevels = null;
-            
+            let latestLevels: any = null;
+
             levelsData.data.history.forEach((item: any) => {
-              console.log(`Adding to map - Date: ${item.date}, Levels:`, item.calculated);
               levelsMap.set(item.date, {
                 levels: item.calculated,
                 closestLevel: item.closestLevel
               });
-              
-              // Track the latest date
               if (!latestDate || item.date > latestDate) {
                 latestDate = item.date;
                 latestLevels = item;
               }
             });
-            
-            console.log('Historical levels map size:', levelsMap.size);
-            console.log('Map keys:', Array.from(levelsMap.keys()));
-            console.log('Latest date with data:', latestDate);
-            console.log('Latest levels data:', latestLevels);
-            
+
             setHistoricalLevels(levelsMap);
-            
-            // Extract OI data from the levels response
+
             const oiDataFromLevels = levelsData.data.history
-              .filter((item: any) => {
-                const hasOi = item.oi && (item.oi.callOi || item.oi.putOi || item.oi.oiDiff);
-                if (!hasOi) console.log('Item missing OI:', item.date || item.tradeDate, item);
-                return hasOi;
-              })
-              .map((item: any) => {
-                const dateValue = item.date || item.tradeDate || item.TRADE_DATE;
-                if (!dateValue) {
-                  console.warn('No date field found in item:', Object.keys(item));
-                }
-                return {
-                  time: dateValue,
-                  callOi: item.oi.callOi || 0,
-                  putOi: item.oi.putOi || 0,
-                  oiDiff: item.oi.oiDiff || 0,
-                };
-              });
-            
-            console.log(`Extracted ${oiDataFromLevels.length} OI data points from expiry change`);
-            console.log('Sample extracted OI data:', oiDataFromLevels.slice(0, 3));
+              .filter((item: any) => item.oi && (item.oi.callOi || item.oi.putOi || item.oi.oiDiff))
+              .map((item: any) => ({
+                time: item.date || item.tradeDate || item.TRADE_DATE,
+                callOi: item.oi.callOi || 0,
+                putOi: item.oi.putOi || 0,
+                oiDiff: item.oi.oiDiff || 0,
+              }));
+
             setOiData(oiDataFromLevels);
-            
-            // Set the latest levels for display (price lines) - use the latest available date
+
             if (latestLevels) {
-              console.log('Setting levels from latest date:', latestDate, 'Levels:', latestLevels.calculated);
               setLevels(latestLevels.calculated || []);
               setClosestLevel(latestLevels.closestLevel);
             }
           } else {
-            console.log('No historical levels data available');
             setHistoricalLevels(new Map());
             setLevels([]);
             setClosestLevel('');
@@ -289,37 +227,23 @@ export default function StockPage() {
     firstVisibleTime: string,
     lastVisibleTime: string
   ) => {
-    console.log('===== handleLoadMore called =====');
-    console.log('Direction:', direction);
-    console.log('First visible time:', firstVisibleTime);
-    console.log('Last visible time:', lastVisibleTime);
-    console.log('isLoadingMore:', isLoadingMore);
-    console.log('symbol:', symbol);
-    
-    if (isLoadingMore || !symbol) {
-      console.log('Skipping load - already loading or no symbol');
-      return;
-    }
+    if (isLoadingMoreRef.current || !symbol) return;
 
     try {
       setIsLoadingMore(true);
-      console.log('Set isLoadingMore to true');
 
       let from: string;
       let to: string;
 
+      const currentOhlcData = ohlcDataRef.current;
       if (direction === 'past') {
-        // Load 60 more days before the earliest data
-        const earliestDate = new Date(ohlcData[0]?.date || firstVisibleTime);
+        const earliestDate = new Date(currentOhlcData[0]?.date || firstVisibleTime);
         to = format(subDays(earliestDate, 1), 'yyyy-MM-dd');
         from = format(subDays(earliestDate, 60), 'yyyy-MM-dd');
-        console.log('Loading PAST data from', from, 'to', to);
       } else {
-        // Load more recent data (if needed in future)
-        const latestDate = new Date(ohlcData[ohlcData.length - 1]?.date || lastVisibleTime);
+        const latestDate = new Date(currentOhlcData[currentOhlcData.length - 1]?.date || lastVisibleTime);
         from = format(new Date(latestDate.getTime() + 86400000), 'yyyy-MM-dd');
         to = format(new Date(), 'yyyy-MM-dd');
-        console.log('Loading FUTURE data from', from, 'to', to);
       }
 
       // Check if this range is already loaded
@@ -332,8 +256,6 @@ export default function StockPage() {
         return;
       }
 
-      console.log(`Loading more ${direction} data from ${from} to ${to}`);
-
       const ohlcResponse = await fetch(`/api/stocks/${symbol}/ohlc?from=${from}&to=${to}`);
       
       if (!ohlcResponse.ok) {
@@ -341,10 +263,13 @@ export default function StockPage() {
       }
 
       const result = await ohlcResponse.json();
-      
+
+      // Always mark range as loaded to prevent re-fetching empty ranges
+      loadedRangesRef.current.push({ from, to });
+
       if (result.success && result.data.data.length > 0) {
         const newData = result.data.data;
-        
+
         // Merge new data with existing data
         setOhlcData(prevData => {
           if (direction === 'past') {
@@ -356,29 +281,9 @@ export default function StockPage() {
           }
         });
 
-        // Process and merge OI data
-        if (oiResponse.ok) {
-          const oiResult = await oiResponse.json();
-          if (oiResult.success && oiResult.data?.data) {
-            setOiData(prevData => {
-              if (direction === 'past') {
-                return [...oiResult.data.data, ...prevData];
-              } else {
-                return [...prevData, ...oiResult.data.data];
-              }
-            });
-          }
-        }
-
-        // Track the newly loaded range
-        loadedRangesRef.current.push({ from, to });
-
-        // Fetch historical levels for the newly loaded date range if we have a selected expiry
-        if (selectedExpiry) {
-          console.log(`Fetching historical levels for newly loaded data (${from} to ${to})`);
-          
+        if (selectedExpiryRef.current) {
           const levelsResponse = await fetch(
-            `/api/stocks/${symbol}/levels?expiry=${selectedExpiry}&range=true&from=${from}&to=${to}`
+            `/api/stocks/${symbol}/levels?expiry=${selectedExpiryRef.current}&range=true&from=${from}&to=${to}`
           );
           
           if (levelsResponse.ok) {
@@ -386,44 +291,31 @@ export default function StockPage() {
             
             if (levelsResult.success && levelsResult.data?.history) {
               const historyData = levelsResult.data.history;
-              console.log(`Received ${historyData.length} level records for date range ${from} to ${to}`);
 
-              // Update the historical levels map with new dates
               setHistoricalLevels(prevMap => {
                 const newMap = new Map(prevMap);
-                
                 historyData.forEach((item: any) => {
-                  const calculatedLevels = item.calculated || [];
                   newMap.set(item.date, {
-                    levels: calculatedLevels,
+                    levels: item.calculated || [],
                     closestLevel: item.closestLevel || ''
                   });
                 });
-
-                console.log(`Historical levels map updated, now has ${newMap.size} entries`);
                 return newMap;
               });
 
-              // Extract and merge OI data
               const newOiData = historyData
                 .filter((item: any) => item.oi)
                 .map((item: any) => ({
                   time: item.date,
-                  callOi: item.oi.callOi,
-                  putOi: item.oi.putOi,
-                  oiDiff: item.oi.oiDiff,
+                  callOi: item.oi.callOi ?? 0,
+                  putOi: item.oi.putOi ?? 0,
+                  oiDiff: item.oi.oiDiff ?? 0,
                 }));
 
-              setOiData(prevData => {
-                if (direction === 'past') {
-                  return [...newOiData, ...prevData];
-                } else {
-                  return [...prevData, ...newOiData];
-                }
-              });
-              console.log(`Added ${newOiData.length} OI data points from levels`);
-            } else {
-              console.log('No historical data in response or unexpected format:', levelsResult);
+              setOiData(prevData => direction === 'past'
+                ? [...newOiData, ...prevData]
+                : [...prevData, ...newOiData]
+              );
             }
           }
         }
@@ -433,8 +325,28 @@ export default function StockPage() {
     } finally {
       setIsLoadingMore(false);
     }
-  }, [symbol, ohlcData, isLoadingMore]);
+  }, [symbol]);
 
+
+  const candleData = useMemo(() => ohlcData.map(d => ({
+    time: d.date,
+    open: d.open,
+    high: d.high,
+    low: d.low,
+    close: d.close,
+  })), [ohlcData]);
+
+  const volumeData = useMemo(() => ohlcData.map(d => ({
+    time: d.date,
+    value: d.volume,
+  })), [ohlcData]);
+
+  const chartOiData = useMemo(() => oiData.map(d => ({
+    time: d.time,
+    callOi: d.callOi,
+    putOi: d.putOi,
+    oiDiff: d.oiDiff,
+  })), [oiData]);
 
   if (isLoading) {
     return (
@@ -489,23 +401,9 @@ export default function StockPage() {
           <div className="mb-8">
             <TVChart
               symbol={symbol.toUpperCase()}
-              candleData={ohlcData.map(d => ({
-                time: d.date,
-                open: d.open,
-                high: d.high,
-                low: d.low,
-                close: d.close,
-              }))}
-              volumeData={ohlcData.map(d => ({
-                time: d.date,
-                value: d.volume,
-              }))}
-              oiData={oiData.map(d => ({
-                time: d.time,  // OI data already has 'time' field from extraction
-                callOi: d.callOi,
-                putOi: d.putOi,
-                oiDiff: d.oiDiff,
-              }))}
+              candleData={candleData}
+              volumeData={volumeData}
+              oiData={chartOiData}
               levels={levels}
               closestLevel={closestLevel}
               historicalLevels={historicalLevels}
