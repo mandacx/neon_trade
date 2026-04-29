@@ -36,7 +36,7 @@ async function getSecuritiesMeta(symbols: string[]) {
   if (symbols.length === 0) return {};
   try {
     const rows = await sql`
-      SELECT symbol, sector, industry, market_cap_tier, market_cap, exchange, indices
+      SELECT symbol, name, sector, industry, market_cap_tier, market_cap, exchange, indices
       FROM public.securities
       WHERE symbol = ANY(${symbols})
     `;
