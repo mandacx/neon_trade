@@ -340,8 +340,8 @@ export default function TVChart({
 
       // Show tooltip with OHLC data (always visible)
       tooltipRef.current.style.display = 'block';
-      tooltipRef.current.style.left = param.point?.x + 10 + 'px';
-      tooltipRef.current.style.top = param.point?.y + 10 + 'px';
+      tooltipRef.current.style.left = ((param.point?.x ?? 0) + 10) + 'px';
+      tooltipRef.current.style.top = ((param.point?.y ?? 0) + 10) + 'px';
 
       // Build tooltip content with closest level highlighted (only if historical data available)
       const levelsWithProximity = hasHistoricalData ? dateLevels.map(level => {
@@ -628,7 +628,6 @@ export default function TVChart({
           lineWidth: lineWidth,
           lineStyle: isClosest ? 0 : 2, // 0 = solid, 2 = dashed
           axisLabelVisible: true,
-          axisLabelBackgroundColor: color,
           title: displayName,
         });
 
