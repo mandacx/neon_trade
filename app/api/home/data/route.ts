@@ -213,7 +213,7 @@ async function getSectorBreakdown() {
     // Get latest 2 distinct trade dates
     const dateRows = await sql`
       SELECT DISTINCT trade_date::text as td FROM public.eod_usmkts_price
-      ORDER BY trade_date DESC LIMIT 2
+      ORDER BY td DESC LIMIT 2
     `;
     if (dateRows.length === 0) return [];
     const latestDate = dateRows[0].td as string;
