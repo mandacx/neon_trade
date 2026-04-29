@@ -66,6 +66,7 @@ export default function TVChart({
   const [selectedPeriod, setSelectedPeriod] = useState<string>('ALL');
   const [showPrice, setShowPrice] = useState(true);
   const [showOI, setShowOI] = useState(true);
+  const [activeLevelFilter, setActiveLevelFilter] = useState<string | null>(null);
   const loadingMoreRef = useRef(false);
 
   useEffect(() => { historicalLevelsRef.current = historicalLevels; }, [historicalLevels]);
@@ -161,11 +162,10 @@ export default function TVChart({
     const callOiLine = chart.addLineSeries({
       color: '#ef4444',
       lineWidth: 2,
+      lineType: 2,
       title: 'Call OI',
       priceScaleId: 'left',
-      priceFormat: {
-        type: 'volume',
-      },
+      priceFormat: { type: 'volume' },
     });
 
     callOiLineRef.current = callOiLine;
@@ -174,11 +174,10 @@ export default function TVChart({
     const putOiLine = chart.addLineSeries({
       color: '#22c55e',
       lineWidth: 2,
+      lineType: 2,
       title: 'Put OI',
       priceScaleId: 'left',
-      priceFormat: {
-        type: 'volume',
-      },
+      priceFormat: { type: 'volume' },
     });
 
     putOiLineRef.current = putOiLine;
@@ -187,11 +186,10 @@ export default function TVChart({
     const oiDiffLine = chart.addLineSeries({
       color: '#f59e0b',
       lineWidth: 2,
+      lineType: 2,
       title: 'OI Diff',
       priceScaleId: 'left',
-      priceFormat: {
-        type: 'volume',
-      },
+      priceFormat: { type: 'volume' },
     });
 
     oiDiffLineRef.current = oiDiffLine;
@@ -209,6 +207,7 @@ export default function TVChart({
       const s = chart.addLineSeries({
         color: cfg.color,
         lineWidth: 1,
+        lineType: 2,
         title: cfg.title,
         priceScaleId: 'right',
         lastValueVisible: true,
@@ -588,7 +587,7 @@ export default function TVChart({
           color: color,
           lineWidth: lineWidth,
           lineStyle: isClosest ? 0 : 2,
-          axisLabelVisible: true,
+          axisLabelVisible: false,
           title: displayName,
         });
 
@@ -636,6 +635,14 @@ export default function TVChart({
       s.setData(data as any);
     });
   }, [historicalLevels]);
+
+  // Level filter toggle: show only selected level, or all if none selected
+  useEffect(() => {
+    const refs = levelSeriesRefs.current;
+    Object.entries(refs).forEach(([name, s]) => {
+      s.applyOptions({ visible: activeLevelFilter === null || activeLevelFilter === name });
+    });
+  }, [activeLevelFilter]);
 
   // Handle visibility toggles
   useEffect(() => {
@@ -803,19 +810,43 @@ export default function TVChart({
         )}
       </div>
 
-      {levels.length > 0 && closestLevel && (
-        <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-          <h3 className="font-semibold text-blue-900 mb-2">Proximity Analysis</h3>
-          {levels.find(l => l.name === closestLevel) && (
-            <div className="text-sm">
-              <p className="text-blue-800">
-                <span className="font-semibold">Proximity ({getLevelDisplayName(closestLevel)})</span> is the nearest level at{' '}
-                <span className="font-semibold">
-                  {formatCurrency(levels.find(l => l.name === closestLevel)!.price)}
+      {levels.length > 0 && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          {['call_high', 'call_int', 'put_call_int', 'put_int', 'put_low'].map(name => {
+            const level = levels.find(l => l.name === name);
+            if (!level) return null;
+            const color = getLevelColor(name);
+            const isActive = activeLevelFilter === name;
+            const isFiltered = activeLevelFilter !== null && !isActive;
+            return (
+              <button
+                key={name}
+                onClick={() => setActiveLevelFilter(isActive ? null : name)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
+                  isFiltered
+                    ? 'opacity-30 border-gray-200 bg-gray-50 text-gray-400'
+                    : 'border-transparent text-white'
+                }`}
+                style={!isFiltered ? { backgroundColor: color } : undefined}
+                title={`Click to isolate ${getLevelDisplayName(name)}`}
+              >
+                <span>{getLevelDisplayName(name)}</span>
+                <span className={isFiltered ? 'text-gray-400' : 'opacity-80'}>
+                  {formatCurrency(typeof level.price === 'string' ? parseFloat(level.price) : level.price)}
                 </span>
-                {' '}({formatPercentage(levels.find(l => l.name === closestLevel)!.value)})
-              </p>
-            </div>
+                {name === closestLevel && !isFiltered && (
+                  <span className="ml-0.5 text-[10px] opacity-75">★</span>
+                )}
+              </button>
+            );
+          })}
+          {activeLevelFilter && (
+            <button
+              onClick={() => setActiveLevelFilter(null)}
+              className="px-2 py-1 text-xs text-gray-500 hover:text-gray-700 underline"
+            >
+              Show all
+            </button>
           )}
         </div>
       )}
