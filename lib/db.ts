@@ -5,7 +5,7 @@ if (!process.env.DATABASE_URL) {
   throw new Error('DATABASE_URL environment variable is not set');
 }
 
-const sql = neon(process.env.DATABASE_URL);
+export const sql = neon(process.env.DATABASE_URL);
 
 /**
  * Sanitize numeric values, replacing NaN, null, and undefined with 0
@@ -217,7 +217,7 @@ export async function searchStocks(query: string, limit: number = 20): Promise<s
     const result = await sql`
       SELECT DISTINCT symbol
       FROM public.eod_usmkts_price
-      WHERE symbol ILIKE ${query.toUpperCase() + '%'}
+      WHERE symbol LIKE ${query.toUpperCase() + '%'}
       ORDER BY symbol
       LIMIT ${limit}
     `;
@@ -356,7 +356,7 @@ export async function getStockDataByExpiry(symbol: string, expiryDate: string): 
         COALESCE(put_oi - call_oi, 0) as "OI_DIFF"
       FROM public.eod_usmkts_price
       WHERE symbol = ${symbol.toUpperCase()}
-        AND expiry_dt::text = ${expiryDate}
+        AND expiry_dt = ${expiryDate}::date
       ORDER BY trade_date DESC
       LIMIT 1
     `;

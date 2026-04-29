@@ -158,7 +158,8 @@ export default function KLineChart({
         }
       };
 
-      visibleRangeUnsubscribe = chartTimeScale.subscribeVisibleTimeRangeChange(handleVisibleTimeRangeChange);
+      chartTimeScale.subscribeVisibleTimeRangeChange(handleVisibleTimeRangeChange);
+      visibleRangeUnsubscribe = () => chartTimeScale.unsubscribeVisibleTimeRangeChange(handleVisibleTimeRangeChange);
     }
 
     // Add crosshair move handler for tooltip
@@ -216,8 +217,8 @@ export default function KLineChart({
 
       // Show tooltip with levels
       tooltipRef.current.style.display = 'block';
-      tooltipRef.current.style.left = param.point?.x + 10 + 'px';
-      tooltipRef.current.style.top = param.point?.y + 10 + 'px';
+      tooltipRef.current.style.left = ((param.point?.x ?? 0) + 10) + 'px';
+      tooltipRef.current.style.top = ((param.point?.y ?? 0) + 10) + 'px';
 
       // Build tooltip content with closest level highlighted
       const levelsWithProximity = dateLevels.map(level => {
@@ -379,9 +380,8 @@ export default function KLineChart({
           price: priceValue,
           color: color,
           lineWidth: lineWidth,
-          lineStyle: isClosest ? 0 : 2, // 0 = solid, 2 = dashed
+          lineStyle: isClosest ? 0 : 2,
           axisLabelVisible: true,
-          axisLabelBackgroundColor: color,
           title: displayName,
         });
 
