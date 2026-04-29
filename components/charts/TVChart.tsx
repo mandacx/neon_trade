@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { createChart, IChartApi, ISeriesApi, CandlestickData, HistogramData, MouseEventParams } from 'lightweight-charts';
+import { createChart, IChartApi, ISeriesApi, IPriceLine, CandlestickData, HistogramData, MouseEventParams } from 'lightweight-charts';
 import { LevelCalculation } from '@/types/stock';
 import { getLevelColor, getLevelDisplayName, formatCurrency, formatPercentage } from '@/lib/utils';
 
@@ -56,12 +56,22 @@ export default function TVChart({
   const callOiLineRef = useRef<ISeriesApi<'Line'> | null>(null);
   const putOiLineRef = useRef<ISeriesApi<'Line'> | null>(null);
   const oiDiffLineRef = useRef<ISeriesApi<'Line'> | null>(null);
-  const priceLineRefs = useRef<any[]>([]);
+  const priceLineRefs = useRef<IPriceLine[]>([]);
+  const historicalLevelsRef = useRef(historicalLevels);
+  const levelsRef = useRef(levels);
+  const closestLevelRef = useRef(closestLevel);
+  const oiDataRef = useRef(oiData);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedPeriod, setSelectedPeriod] = useState<string>('ALL');
   const [showPrice, setShowPrice] = useState(true);
   const [showOI, setShowOI] = useState(true);
   const loadingMoreRef = useRef(false);
+
+  useEffect(() => { historicalLevelsRef.current = historicalLevels; }, [historicalLevels]);
+  useEffect(() => { levelsRef.current = levels; }, [levels]);
+  useEffect(() => { closestLevelRef.current = closestLevel; }, [closestLevel]);
+  useEffect(() => { oiDataRef.current = oiData; }, [oiData]);
+  useEffect(() => { loadingMoreRef.current = isLoadingMore; }, [isLoadingMore]);
 
   useEffect(() => {
     if (!chartContainerRef.current) return;
@@ -247,16 +257,10 @@ export default function TVChart({
       const close = candleData.close;
       const dateStr = param.time as string;
 
-      // Get volume data for this time
       const volumeData = param.seriesData.get(volumeSeriesRef.current!);
       const volume = volumeData ? (volumeData as any).value : 0;
 
-      // Get OI data for this time
-      const oiSeriesData = param.seriesData.get(oiDiffSeriesRef.current!);
-      const oiDiffValue = oiSeriesData ? (oiSeriesData as any).value : null;
-      
-      // Find the full OI data for this date from oiData prop
-      const currentOiData = oiData.find(d => d.time === dateStr);
+      const currentOiData = oiDataRef.current.find(d => d.time === dateStr);
 
       // Update OHLC display in top-left corner
       if (ohlcDisplayRef.current) {
@@ -290,33 +294,22 @@ export default function TVChart({
         `;
       }
 
-      console.log(`Tooltip for date: ${dateStr} (type: ${typeof dateStr}), historicalLevels size: ${historicalLevels?.size || 0}`);
-      
       if (!tooltipRef.current) return;
-      
-      if (historicalLevels && historicalLevels.size > 0) {
-        console.log('Available dates in map:', Array.from(historicalLevels.keys()));
-      }
 
-      // Get levels for this specific date from historical data
       let dateLevels: LevelCalculation[] = [];
       let dateClosestLevel: string | undefined = undefined;
       let hasHistoricalData = false;
-      
-      if (historicalLevels && historicalLevels.size > 0) {
-        const historicalData = historicalLevels.get(dateStr);
-        console.log(`Looking up date "${dateStr}" in map:`, historicalData);
+
+      const hLevels = historicalLevelsRef.current;
+      if (hLevels && hLevels.size > 0) {
+        const historicalData = hLevels.get(dateStr);
         if (historicalData && historicalData.levels && historicalData.levels.length > 0) {
           dateLevels = historicalData.levels;
           dateClosestLevel = historicalData.closestLevel;
           hasHistoricalData = true;
-          console.log(`Using historical levels for ${dateStr}:`, dateLevels);
-        } else {
-          console.log(`No historical data found for "${dateStr}"`);
         }
       }
 
-      // Show tooltip with OHLC data (always visible)
       tooltipRef.current.style.display = 'block';
       tooltipRef.current.style.left = ((param.point?.x ?? 0) + 10) + 'px';
       tooltipRef.current.style.top = ((param.point?.y ?? 0) + 10) + 'px';
@@ -337,8 +330,6 @@ export default function TVChart({
           isProximity
         };
       }).reverse() : []; // Reverse the order: Call High -> Call Int -> Put/Call Int -> Put Int -> Put Low
-
-      console.log('Rendering tooltip with levels:', levelsWithProximity, 'hasHistoricalData:', hasHistoricalData);
 
       // Build OI section for tooltip
       const oiTooltipHtml = currentOiData ? `
@@ -478,8 +469,6 @@ export default function TVChart({
 
     // Format and set OI Diff data if available
     if (oiDiffSeriesRef.current && callOiLineRef.current && putOiLineRef.current && oiDiffLineRef.current && oiData.length > 0) {
-      console.log('Setting OI data, count:', oiData.length);
-      console.log('Sample OI data (first 3):', oiData.slice(0, 3));
       try {
         // Deduplicate OI data by time, sort ascending
         const oiByTime = new Map<string, typeof oiData[0]>();
@@ -519,27 +508,19 @@ export default function TVChart({
             value: d.oiDiff,
           }));
 
-        console.log('Formatted OI data (first 3):', formattedOiDiff.slice(0, 3));
         oiDiffSeriesRef.current.setData(formattedOiDiff);
         callOiLineRef.current.setData(callOiLineData);
         putOiLineRef.current.setData(putOiLineData);
         oiDiffLineRef.current.setData(oiDiffLineData);
-        
-        // Reapply visibility state for OI series after data update
+
         oiDiffSeriesRef.current.applyOptions({ visible: showOI });
         callOiLineRef.current.applyOptions({ visible: showOI });
         putOiLineRef.current.applyOptions({ visible: showOI });
         oiDiffLineRef.current.applyOptions({ visible: showOI });
-        
-        console.log('OI data set successfully, bars:', formattedOiDiff.length, 'Call OI line:', callOiLineData.length, 'Put OI line:', putOiLineData.length, 'OI Diff line:', oiDiffLineData.length);
       } catch (error) {
-        console.error('Error setting OI data:', error, 'Data:', oiData.slice(0, 2));
+        console.error('Error setting OI data:', error);
       }
-    } else {
-      console.log('No OI data to display. oiData length:', oiData.length, 'oiDiffSeriesRef exists:', !!oiDiffSeriesRef.current);
     }
-
-    console.log('Chart data updated');
 
     // Only fit content on initial load, not when loading more data
     if (!isLoadingMore && chartRef.current) {
@@ -549,12 +530,7 @@ export default function TVChart({
 
   // Add level lines
   useEffect(() => {
-    console.log('Price lines effect triggered. Levels:', levels, 'ClosestLevel:', closestLevel);
-    console.log('candleSeriesRef.current:', candleSeriesRef.current);
-    
     if (!candleSeriesRef.current || !levels.length) {
-      console.log('Skipping price lines - no series or no levels');
-      // Clear existing price lines if no levels
       priceLineRefs.current.forEach(line => {
         if (line && candleSeriesRef.current) {
           candleSeriesRef.current.removePriceLine(line);
@@ -564,8 +540,6 @@ export default function TVChart({
       return;
     }
 
-    // Clear all existing price lines before adding new ones
-    console.log('Clearing existing price lines. Count:', priceLineRefs.current.length);
     priceLineRefs.current.forEach(line => {
       if (line && candleSeriesRef.current) {
         candleSeriesRef.current.removePriceLine(line);
@@ -573,54 +547,33 @@ export default function TVChart({
     });
     priceLineRefs.current = [];
 
-    console.log('Adding price lines for levels:', JSON.stringify(levels, null, 2));
-    console.log('Closest level:', closestLevel);
-
     levels.forEach(level => {
-      console.log('Processing level:', level);
-      console.log('Level price type:', typeof level.price, 'Value:', level.price);
-      
-      // Convert price to number if it's a string
       const priceValue = typeof level.price === 'string' ? parseFloat(level.price) : level.price;
-      
-      console.log('Converted price:', priceValue, 'Type:', typeof priceValue);
-      console.log('Is NaN check:', isNaN(priceValue));
-      
-      // Skip if level doesn't have a valid price
-      if (!level || !priceValue || isNaN(priceValue) || priceValue === 0) {
-        console.warn('Skipping invalid level:', level, 'Converted price:', priceValue);
-        return;
-      }
+
+      if (!priceValue || isNaN(priceValue) || priceValue === 0) return;
 
       const isClosest = level.name === closestLevel;
       const color = isClosest ? '#3B82F6' : getLevelColor(level.name);
       const lineWidth = isClosest ? 2 : 1;
       const displayName = getLevelDisplayName(level.name);
 
-      console.log(`Creating price line for ${displayName} at ${priceValue} with color ${color}`);
-
       try {
         const priceLine = candleSeriesRef.current?.createPriceLine({
           price: priceValue,
           color: color,
           lineWidth: lineWidth,
-          lineStyle: isClosest ? 0 : 2, // 0 = solid, 2 = dashed
+          lineStyle: isClosest ? 0 : 2,
           axisLabelVisible: true,
           title: displayName,
         });
 
         if (priceLine) {
           priceLineRefs.current.push(priceLine);
-          console.log(`Successfully created price line for ${displayName}`);
-        } else {
-          console.error(`Failed to create price line for ${displayName}`);
         }
       } catch (err) {
         console.error(`Error creating price line for ${displayName}:`, err);
       }
     });
-
-    console.log('Total price lines created:', priceLineRefs.current.length);
 
     // Cleanup function to remove price lines when component unmounts or levels change
     return () => {
