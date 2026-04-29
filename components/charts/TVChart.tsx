@@ -446,8 +446,15 @@ export default function TVChart({
 
     pauseScrollTriggerRef.current?.();
 
+    // Deduplicate candle data by time (keep last), sort ascending
+    const candleByTimeMap = new Map<string, typeof candleData[0]>();
+    for (const d of candleData) { if (d.time) candleByTimeMap.set(d.time, d); }
+    const candleDeduped = Array.from(candleByTimeMap.values()).sort((a, b) =>
+      a.time < b.time ? -1 : a.time > b.time ? 1 : 0
+    );
+
     // Filter bars where any OHLC value is not a finite number (null/undefined/NaN all crash the chart)
-    const formattedCandles: CandlestickData[] = candleData
+    const formattedCandles: CandlestickData[] = candleDeduped
       .filter(d => Number.isFinite(d.open) && Number.isFinite(d.high) && Number.isFinite(d.low) && Number.isFinite(d.close))
       .map(d => ({
         time: d.time as any,
@@ -457,11 +464,17 @@ export default function TVChart({
         close: d.close,
       }));
 
-    const candleByTime = new Map(candleData.map(d => [d.time, d]));
-    const formattedVolume: HistogramData[] = volumeData
+    // Deduplicate volume data
+    const volByTimeMap = new Map<string, typeof volumeData[0]>();
+    for (const d of volumeData) { if (d.time) volByTimeMap.set(d.time, d); }
+    const volumeDeduped = Array.from(volByTimeMap.values()).sort((a, b) =>
+      a.time < b.time ? -1 : a.time > b.time ? 1 : 0
+    );
+
+    const formattedVolume: HistogramData[] = volumeDeduped
       .filter(d => Number.isFinite(d.value))
       .map(d => {
-        const candle = candleByTime.get(d.time);
+        const candle = candleByTimeMap.get(d.time);
         const isGreen = candle ? candle.close >= candle.open : true;
         return {
           time: d.time as any,
@@ -481,34 +494,43 @@ export default function TVChart({
     // Format and set OI Diff data if available
     if (oiDiffSeriesRef.current && callOiLineRef.current && putOiLineRef.current && oiDiffLineRef.current && oiData.length > 0) {
       try {
-        const formattedOiDiff: HistogramData[] = oiData
-          .filter(d => !!d.time)
+        // Deduplicate by time (keep last), then sort ascending — duplicates or out-of-order entries crash lightweight-charts
+        const oiByTime = new Map<string, typeof oiData[0]>();
+        for (const d of oiData) {
+          if (d.time) oiByTime.set(typeof d.time === 'string' ? d.time : String(d.time), d);
+        }
+        const oiDeduped = Array.from(oiByTime.values()).sort((a, b) =>
+          String(a.time) < String(b.time) ? -1 : String(a.time) > String(b.time) ? 1 : 0
+        );
+
+        const formattedOiDiff: HistogramData[] = oiDeduped
+          .filter(d => Number.isFinite(d.oiDiff))
           .map(d => ({
             time: (typeof d.time === 'string' ? d.time : String(d.time)) as any,
-            value: Math.abs(d.oiDiff || 0),
-            color: (d.oiDiff || 0) > 0 ? 'rgba(34, 197, 94, 0.6)' : 'rgba(239, 68, 68, 0.6)',
+            value: Math.abs(d.oiDiff),
+            color: d.oiDiff > 0 ? 'rgba(34, 197, 94, 0.6)' : 'rgba(239, 68, 68, 0.6)',
           }));
 
         // Format Call OI, Put OI, and OI Diff line data
-        const callOiLineData = oiData
-          .filter(d => d.time)
+        const callOiLineData = oiDeduped
+          .filter(d => Number.isFinite(d.callOi))
           .map(d => ({
             time: (typeof d.time === 'string' ? d.time : String(d.time)) as any,
-            value: d.callOi || 0,
+            value: d.callOi,
           }));
 
-        const putOiLineData = oiData
-          .filter(d => d.time)
+        const putOiLineData = oiDeduped
+          .filter(d => Number.isFinite(d.putOi))
           .map(d => ({
             time: (typeof d.time === 'string' ? d.time : String(d.time)) as any,
-            value: d.putOi || 0,
+            value: d.putOi,
           }));
 
-        const oiDiffLineData = oiData
-          .filter(d => d.time)
+        const oiDiffLineData = oiDeduped
+          .filter(d => Number.isFinite(d.oiDiff))
           .map(d => ({
             time: (typeof d.time === 'string' ? d.time : String(d.time)) as any,
-            value: d.oiDiff || 0,
+            value: d.oiDiff,
           }));
 
         oiDiffSeriesRef.current.setData(formattedOiDiff);
