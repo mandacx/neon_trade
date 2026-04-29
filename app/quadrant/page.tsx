@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import QuadrantChart from '@/components/charts/QuadrantChart';
 import Header from '@/components/layout/Header';
@@ -15,7 +15,7 @@ interface FilterOptions {
   indices?: { code: string; name: string }[];
 }
 
-export default function QuadrantPage() {
+function QuadrantPageInner() {
   const searchParams = useSearchParams();
   const [stocks, setStocks] = useState<QuadrantStock[]>([]);
   const [filteredStocks, setFilteredStocks] = useState<QuadrantStock[]>([]);
@@ -331,5 +331,13 @@ export default function QuadrantPage() {
         </div>
       </div>
     </>
+  );
+}
+
+export default function QuadrantPage() {
+  return (
+    <Suspense fallback={null}>
+      <QuadrantPageInner />
+    </Suspense>
   );
 }
