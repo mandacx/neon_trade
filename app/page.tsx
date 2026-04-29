@@ -229,30 +229,12 @@ export default function Home() {
     <>
       <Header />
       <div className="min-h-screen bg-gray-50">
-        {/* Hero */}
-        <div className="bg-white border-b border-gray-200 py-8">
-          <div className="container mx-auto px-4 text-center">
-            <h1 className="text-4xl font-bold mb-1 bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-green-600">
-              Neon Trade
-            </h1>
-            <p className="text-gray-400 mb-5 text-sm">Options flow · Price levels · Quadrant analysis</p>
-            <div className="flex justify-center mb-5">
-              <StockSearch />
-            </div>
-            <div className="flex flex-wrap justify-center gap-3">
-              <button onClick={() => router.push('/quadrant')}
-                className="flex items-center gap-2 px-5 py-2 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors text-sm">
-                📊 Quadrant Analysis
-              </button>
-              <button onClick={() => router.push('/stock/SPY')}
-                className="flex items-center gap-2 px-5 py-2 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 transition-colors text-sm">
-                📈 Stock Analysis
-              </button>
-            </div>
-          </div>
-        </div>
-
         <div className="container mx-auto px-4 py-5 space-y-5">
+
+          {/* Search bar */}
+          <div className="flex justify-center pt-2">
+            <StockSearch />
+          </div>
 
           {/* Index Tiles */}
           <section>
@@ -446,17 +428,6 @@ export default function Home() {
             )}
           </section>
 
-          {/* Footer nav */}
-          <div className="flex flex-wrap justify-center gap-4 py-4 border-t border-gray-200">
-            <button onClick={() => router.push('/quadrant')}
-              className="px-5 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors text-sm">
-              📊 Quadrant Analysis
-            </button>
-            <button onClick={() => router.push('/stock/SPY')}
-              className="px-5 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors text-sm">
-              📈 Stock Analysis
-            </button>
-          </div>
         </div>
       </div>
     </>
