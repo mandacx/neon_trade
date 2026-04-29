@@ -5,49 +5,32 @@ import { format } from 'date-fns';
 
 async function getSecuritiesFilterOptions() {
   try {
-    const cols = await sql`
-      SELECT column_name FROM information_schema.columns
-      WHERE table_schema = 'public' AND table_name = 'securities'
-    `;
-    const colNames = cols.map((c: any) => c.column_name as string);
+    const [sectors, industries, marketCapTiers, indices] = await Promise.all([
+      sql`SELECT DISTINCT sector FROM public.securities WHERE sector IS NOT NULL ORDER BY sector`,
+      sql`SELECT DISTINCT industry FROM public.securities WHERE industry IS NOT NULL ORDER BY industry`,
+      sql`SELECT DISTINCT market_cap_tier FROM public.securities WHERE market_cap_tier IS NOT NULL ORDER BY market_cap_tier`,
+      sql`SELECT DISTINCT elem->>'code' as code, elem->>'name' as name
+          FROM public.securities, jsonb_array_elements(indices::jsonb) as elem
+          WHERE indices IS NOT NULL AND indices != 'null'::jsonb
+          ORDER BY elem->>'name'`,
+    ]);
 
-    const result: Record<string, string[]> = {};
-
-    if (colNames.includes('sector')) {
-      const rows = await sql`SELECT DISTINCT sector FROM public.securities WHERE sector IS NOT NULL ORDER BY sector`;
-      result.sectors = rows.map((r: any) => r.sector);
-    }
-    if (colNames.includes('industry')) {
-      const rows = await sql`SELECT DISTINCT industry FROM public.securities WHERE industry IS NOT NULL ORDER BY industry`;
-      result.industries = rows.map((r: any) => r.industry);
-    }
-    if (colNames.includes('market_cap_tier')) {
-      const rows = await sql`SELECT DISTINCT market_cap_tier FROM public.securities WHERE market_cap_tier IS NOT NULL ORDER BY market_cap_tier`;
-      result.marketCapTiers = rows.map((r: any) => r.market_cap_tier);
-    }
-    if (colNames.includes('index_membership') || colNames.includes('indices')) {
-      const col = colNames.includes('index_membership') ? 'index_membership' : 'indices';
-      const rows = await sql`SELECT DISTINCT ${sql(col)} as val FROM public.securities WHERE ${sql(col)} IS NOT NULL ORDER BY ${sql(col)}`;
-      result.indices = rows.map((r: any) => r.val);
-    }
-
-    return { options: result, columns: colNames };
+    return {
+      sectors: sectors.map((r: any) => r.sector as string),
+      industries: industries.map((r: any) => r.industry as string),
+      marketCapTiers: marketCapTiers.map((r: any) => r.market_cap_tier as string),
+      indices: indices.map((r: any) => ({ code: r.code as string, name: r.name as string })),
+    };
   } catch {
-    return { options: {}, columns: [] };
+    return { sectors: [], industries: [], marketCapTiers: [], indices: [] };
   }
 }
 
-async function getSecuritiesMeta(symbols: string[], columns: string[]) {
-  if (symbols.length === 0 || columns.length === 0) return {};
+async function getSecuritiesMeta(symbols: string[]) {
+  if (symbols.length === 0) return {};
   try {
-    const selectCols = ['symbol'];
-    if (columns.includes('sector')) selectCols.push('sector');
-    if (columns.includes('industry')) selectCols.push('industry');
-    if (columns.includes('market_cap_tier')) selectCols.push('market_cap_tier');
-    if (columns.includes('market_cap')) selectCols.push('market_cap');
-
     const rows = await sql`
-      SELECT ${sql(selectCols.join(', '))}
+      SELECT symbol, sector, industry, market_cap_tier, market_cap, exchange, indices
       FROM public.securities
       WHERE symbol = ANY(${symbols})
     `;
@@ -70,10 +53,11 @@ export async function GET(request: NextRequest) {
     const sector = searchParams.get('sector');
     const industry = searchParams.get('industry');
     const marketCapTier = searchParams.get('marketCapTier');
+    const indexCode = searchParams.get('index');
 
     // If requesting metadata only (dates + filter options)
     if (metadataOnly) {
-      const [tradeDates, expiryDates, { options }] = await Promise.all([
+      const [tradeDates, expiryDates, filterOptions] = await Promise.all([
         getAvailableDates(30),
         getAvailableExpiryDates(),
         getSecuritiesFilterOptions(),
@@ -84,7 +68,7 @@ export async function GET(request: NextRequest) {
         data: {
           tradeDates,
           expiryDates,
-          filterOptions: options,
+          filterOptions,
         },
       });
     }
@@ -125,20 +109,31 @@ export async function GET(request: NextRequest) {
       !stock.levels.every(level => level.value === 1)
     );
 
-    // Enrich with securities metadata if any security filters requested
-    const { options: _opts, columns: secCols } = await getSecuritiesFilterOptions();
+    // Enrich with securities metadata
     const symbols = filteredStocks.map(s => s.symbol);
-    const secMeta = await getSecuritiesMeta(symbols, secCols);
+    const secMeta = await getSecuritiesMeta(symbols);
 
     // Apply securities-based filters
-    if (sector && secCols.includes('sector')) {
+    if (sector) {
       filteredStocks = filteredStocks.filter(s => secMeta[s.symbol]?.sector === sector);
     }
-    if (industry && secCols.includes('industry')) {
+    if (industry) {
       filteredStocks = filteredStocks.filter(s => secMeta[s.symbol]?.industry === industry);
     }
-    if (marketCapTier && secCols.includes('market_cap_tier')) {
+    if (marketCapTier) {
       filteredStocks = filteredStocks.filter(s => secMeta[s.symbol]?.market_cap_tier === marketCapTier);
+    }
+    if (indexCode) {
+      filteredStocks = filteredStocks.filter(s => {
+        const meta = secMeta[s.symbol];
+        if (!meta?.indices) return false;
+        try {
+          const arr: { code: string }[] = typeof meta.indices === 'string'
+            ? JSON.parse(meta.indices)
+            : meta.indices;
+          return Array.isArray(arr) && arr.some(i => i.code === indexCode);
+        } catch { return false; }
+      });
     }
 
     // Filter by threshold
@@ -157,13 +152,26 @@ export async function GET(request: NextRequest) {
     }
 
     // Attach securities metadata to output
-    const enriched = filteredStocks.map(s => ({
-      ...s,
-      sector: secMeta[s.symbol]?.sector ?? null,
-      industry: secMeta[s.symbol]?.industry ?? null,
-      marketCapTier: secMeta[s.symbol]?.market_cap_tier ?? null,
-      marketCap: secMeta[s.symbol]?.market_cap ? Number(secMeta[s.symbol].market_cap) : null,
-    }));
+    const enriched = filteredStocks.map(s => {
+      const m = secMeta[s.symbol];
+      let indicesList: string[] = [];
+      if (m?.indices) {
+        try {
+          const arr: { code: string; name: string }[] = typeof m.indices === 'string'
+            ? JSON.parse(m.indices) : m.indices;
+          indicesList = Array.isArray(arr) ? arr.map(i => i.name) : [];
+        } catch { /* ignore */ }
+      }
+      return {
+        ...s,
+        sector: m?.sector ?? null,
+        industry: m?.industry ?? null,
+        marketCapTier: m?.market_cap_tier ?? null,
+        marketCap: m?.market_cap ? Number(m.market_cap) : null,
+        exchange: m?.exchange ?? null,
+        indices: indicesList,
+      };
+    });
 
     const tradeDate = processedStocks.length > 0
       ? processedStocks[0].tradeDate
@@ -176,7 +184,7 @@ export async function GET(request: NextRequest) {
         count: enriched.length,
         total: processedStocks.length,
         stocks: enriched,
-        hasSecurities: secCols.length > 0,
+        hasSecurities: Object.keys(secMeta).length > 0,
       },
     });
   } catch (error) {

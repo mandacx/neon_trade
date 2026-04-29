@@ -11,7 +11,7 @@ interface FilterOptions {
   sectors?: string[];
   industries?: string[];
   marketCapTiers?: string[];
-  indices?: string[];
+  indices?: { code: string; name: string }[];
 }
 
 export default function QuadrantPage() {
@@ -32,6 +32,7 @@ export default function QuadrantPage() {
   const [sector, setSector] = useState('');
   const [industry, setIndustry] = useState('');
   const [marketCapTier, setMarketCapTier] = useState('');
+  const [indexCode, setIndexCode] = useState('');
 
   useEffect(() => {
     const fetchMetadata = async () => {
@@ -64,6 +65,7 @@ export default function QuadrantPage() {
         if (sector) params.set('sector', sector);
         if (industry) params.set('industry', industry);
         if (marketCapTier) params.set('marketCapTier', marketCapTier);
+        if (indexCode) params.set('index', indexCode);
 
         const response = await fetch(`/api/quadrant/data?${params}`);
         if (!response.ok) throw new Error('Failed to fetch quadrant data');
@@ -79,7 +81,7 @@ export default function QuadrantPage() {
     };
 
     fetchData();
-  }, [tradeDate, expiryDate, sector, industry, marketCapTier]);
+  }, [tradeDate, expiryDate, sector, industry, marketCapTier, indexCode]);
 
   // Client-side filters (search + threshold)
   useEffect(() => {
@@ -97,7 +99,8 @@ export default function QuadrantPage() {
 
   const hasSecurityFilters = (filterOptions.sectors?.length ?? 0) > 0
     || (filterOptions.industries?.length ?? 0) > 0
-    || (filterOptions.marketCapTiers?.length ?? 0) > 0;
+    || (filterOptions.marketCapTiers?.length ?? 0) > 0
+    || (filterOptions.indices?.length ?? 0) > 0;
 
   return (
     <>
@@ -206,11 +209,27 @@ export default function QuadrantPage() {
                   </div>
                 )}
 
+                {(filterOptions.indices?.length ?? 0) > 0 && (
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Index</label>
+                    <select
+                      value={indexCode}
+                      onChange={(e) => setIndexCode(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="">All Indices</option>
+                      {filterOptions.indices!.map(i => (
+                        <option key={i.code} value={i.code}>{i.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
                 {/* Clear securities filters */}
-                {(sector || industry || marketCapTier) && (
+                {(sector || industry || marketCapTier || indexCode) && (
                   <div className="flex items-end">
                     <button
-                      onClick={() => { setSector(''); setIndustry(''); setMarketCapTier(''); }}
+                      onClick={() => { setSector(''); setIndustry(''); setMarketCapTier(''); setIndexCode(''); }}
                       className="px-3 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50"
                     >
                       Clear Filters

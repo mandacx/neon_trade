@@ -82,6 +82,7 @@ export default function QuadrantChart({ data, onStockClick, height = 600 }: Quad
           sector: (stock as any).sector,
           industry: (stock as any).industry,
           marketCapTier: (stock as any).marketCapTier,
+          indices: (stock as any).indices,
           color: getLevelColor(stock.closestLevel),
         });
       });
@@ -117,10 +118,13 @@ export default function QuadrantChart({ data, onStockClick, height = 600 }: Quad
         <div className="bg-white p-4 border-2 border-gray-300 rounded-lg shadow-xl min-w-[280px] z-50">
           <p className="font-bold text-xl mb-1 text-blue-600">{d.symbol}</p>
           {(d.sector || d.industry) && (
-            <p className="text-xs text-gray-400 mb-1">{[d.sector, d.industry].filter(Boolean).join(' · ')}</p>
+            <p className="text-xs text-gray-400 mb-0.5">{[d.sector, d.industry].filter(Boolean).join(' · ')}</p>
           )}
-          {d.marketCapTier && (
-            <p className="text-xs text-gray-400 mb-2">Market Cap: {d.marketCapTier}</p>
+          {(d.marketCapTier || (d.indices?.length > 0)) && (
+            <p className="text-xs text-gray-400 mb-2">
+              {d.marketCapTier && <span className="mr-2">Cap: {d.marketCapTier}</span>}
+              {d.indices?.length > 0 && <span>{d.indices.join(', ')}</span>}
+            </p>
           )}
           <div className="text-xs text-gray-500 mb-2">
             <p>Trade: {d.tradeDate} · Expiry: {d.expiryDate}</p>
