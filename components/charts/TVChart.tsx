@@ -443,7 +443,7 @@ export default function TVChart({
       }
       chart.remove();
     };
-  }, [height, onLoadMore, historicalLevels, levels, closestLevel]);
+  }, [height, onLoadMore]);
 
   // Update data
   useEffect(() => {
@@ -452,25 +452,42 @@ export default function TVChart({
     console.log('Updating chart data, candle count:', candleData.length);
     console.log('Date range:', candleData[0]?.time, 'to', candleData[candleData.length - 1]?.time);
 
-    // Format candlestick data
-    const formattedCandles: CandlestickData[] = candleData.map(d => ({
-      time: d.time as any,
-      open: d.open,
-      high: d.high,
-      low: d.low,
-      close: d.close,
-    }));
+    // Deduplicate by time (keep last) and sort ascending — duplicates crash lightweight-charts
+    const candleByTimeMap = new Map<string, typeof candleData[0]>();
+    for (const d of candleData) { if (d.time) candleByTimeMap.set(d.time, d); }
+    const candleDeduped = Array.from(candleByTimeMap.values()).sort((a, b) =>
+      a.time < b.time ? -1 : a.time > b.time ? 1 : 0
+    );
 
-    // Format volume data with colors based on candle direction
-    const formattedVolume: HistogramData[] = volumeData.map((d, index) => {
-      const candle = candleData[index];
-      const isGreen = candle && candle.close >= candle.open;
-      return {
+    // Filter bars where any OHLC value is not a finite number
+    const formattedCandles: CandlestickData[] = candleDeduped
+      .filter(d => Number.isFinite(d.open) && Number.isFinite(d.high) && Number.isFinite(d.low) && Number.isFinite(d.close))
+      .map(d => ({
         time: d.time as any,
-        value: d.value,
-        color: isGreen ? 'rgba(34, 197, 94, 0.5)' : 'rgba(239, 68, 68, 0.5)', // green or red with transparency
-      };
-    });
+        open: d.open,
+        high: d.high,
+        low: d.low,
+        close: d.close,
+      }));
+
+    // Deduplicate volume data
+    const volByTimeMap = new Map<string, typeof volumeData[0]>();
+    for (const d of volumeData) { if (d.time) volByTimeMap.set(d.time, d); }
+    const volumeDeduped = Array.from(volByTimeMap.values()).sort((a, b) =>
+      a.time < b.time ? -1 : a.time > b.time ? 1 : 0
+    );
+
+    const formattedVolume: HistogramData[] = volumeDeduped
+      .filter(d => Number.isFinite(d.value))
+      .map(d => {
+        const candle = candleByTimeMap.get(d.time);
+        const isGreen = candle ? candle.close >= candle.open : true;
+        return {
+          time: d.time as any,
+          value: d.value,
+          color: isGreen ? 'rgba(34, 197, 94, 0.5)' : 'rgba(239, 68, 68, 0.5)',
+        };
+      });
 
     // Use setData to replace all data (handles both initial load and updates)
     candleSeriesRef.current.setData(formattedCandles);
@@ -485,46 +502,42 @@ export default function TVChart({
       console.log('Setting OI data, count:', oiData.length);
       console.log('Sample OI data (first 3):', oiData.slice(0, 3));
       try {
-        const formattedOiDiff: HistogramData[] = oiData
-          .map((d, index) => {
-            // Debug first few items
-            if (index < 3) {
-              console.log(`Item ${index}:`, d, 'time type:', typeof d.time, 'time value:', d.time);
-            }
-            // Ensure time is in the correct format (YYYY-MM-DD string)
-            const timeValue = d.time ? (typeof d.time === 'string' ? d.time : String(d.time)) : null;
-            if (!timeValue) {
-              console.warn('Skipping OI item with invalid time:', d);
-              return null;
-            }
-            return {
-              time: timeValue as any,
-              value: Math.abs(d.oiDiff || 0),
-              color: (d.oiDiff || 0) > 0 ? 'rgba(34, 197, 94, 0.6)' : 'rgba(239, 68, 68, 0.6)', // green if put>call, red if call>put
-            };
-          })
-          .filter((item): item is HistogramData => item !== null);
+        // Deduplicate OI data by time, sort ascending
+        const oiByTime = new Map<string, typeof oiData[0]>();
+        for (const d of oiData) {
+          if (d.time) oiByTime.set(typeof d.time === 'string' ? d.time : String(d.time), d);
+        }
+        const oiDeduped = Array.from(oiByTime.values()).sort((a, b) =>
+          String(a.time) < String(b.time) ? -1 : String(a.time) > String(b.time) ? 1 : 0
+        );
 
-        // Format Call OI, Put OI, and OI Diff line data
-        const callOiLineData = oiData
-          .filter(d => d.time)
+        const formattedOiDiff: HistogramData[] = oiDeduped
+          .filter(d => Number.isFinite(d.oiDiff))
           .map(d => ({
             time: (typeof d.time === 'string' ? d.time : String(d.time)) as any,
-            value: d.callOi || 0,
+            value: Math.abs(d.oiDiff),
+            color: d.oiDiff > 0 ? 'rgba(34, 197, 94, 0.6)' : 'rgba(239, 68, 68, 0.6)',
           }));
 
-        const putOiLineData = oiData
-          .filter(d => d.time)
+        const callOiLineData = oiDeduped
+          .filter(d => Number.isFinite(d.callOi))
           .map(d => ({
             time: (typeof d.time === 'string' ? d.time : String(d.time)) as any,
-            value: d.putOi || 0,
+            value: d.callOi,
           }));
 
-        const oiDiffLineData = oiData
-          .filter(d => d.time)
+        const putOiLineData = oiDeduped
+          .filter(d => Number.isFinite(d.putOi))
           .map(d => ({
             time: (typeof d.time === 'string' ? d.time : String(d.time)) as any,
-            value: d.oiDiff || 0,
+            value: d.putOi,
+          }));
+
+        const oiDiffLineData = oiDeduped
+          .filter(d => Number.isFinite(d.oiDiff))
+          .map(d => ({
+            time: (typeof d.time === 'string' ? d.time : String(d.time)) as any,
+            value: d.oiDiff,
           }));
 
         console.log('Formatted OI data (first 3):', formattedOiDiff.slice(0, 3));
