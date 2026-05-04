@@ -3,7 +3,6 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { useParams } from 'next/navigation';
 import TVChart from '@/components/charts/TVChart';
-import StockSearch from '@/components/ui/StockSearch';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import ErrorDisplay from '@/components/ui/ErrorDisplay';
 import Header from '@/components/layout/Header';
@@ -379,11 +378,6 @@ export default function StockPage() {
       <Header />
       <div className="min-h-screen bg-gray-50">
         <div className="container mx-auto px-4 py-8">
-          {/* Search Bar */}
-          <div className="mb-8 flex justify-center">
-            <StockSearch />
-          </div>
-
           {/* Expiry Date Selector */}
           {!isLoading && expiryDates.length > 0 && (
             <div className="mb-6 flex items-center justify-end gap-3">

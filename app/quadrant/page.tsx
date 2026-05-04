@@ -118,7 +118,7 @@ function QuadrantPageInner() {
 
   const hasActiveFilters = !!(sector || industry || marketCapTier || indexCode);
 
-  const selectClass = "w-full px-2 py-1.5 border border-gray-200 rounded-md text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white";
+  const selectClass = "px-2 py-1.5 border border-gray-200 rounded-md text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white max-w-[180px]";
   const labelClass = "block text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-0.5";
 
   return (
@@ -147,8 +147,7 @@ function QuadrantPageInner() {
 
             {filtersOpen && (
               <div className="px-4 pb-3 border-t border-gray-100">
-                {/* Row 1: date + search + proximity */}
-                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 pt-3">
+                <div className="flex flex-wrap items-end gap-3 pt-3">
                   <div>
                     <label className={labelClass}>Trade Date</label>
                     <select value={tradeDate} onChange={e => setTradeDate(e.target.value)} className={selectClass}>
@@ -162,26 +161,24 @@ function QuadrantPageInner() {
                     </select>
                   </div>
                   <div>
-                    <label className={labelClass}>Symbol Search</label>
+                    <label className={labelClass}>Symbol</label>
                     <input
                       type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
                       placeholder="e.g., AAPL"
-                      className={selectClass}
+                      className="w-24 px-2 py-1.5 border border-gray-200 rounded-md text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
                     />
                   </div>
-                  <div className="md:col-span-1 lg:col-span-2">
+                  <div className="w-40">
                     <label className={labelClass}>Proximity: {(threshold * 100).toFixed(0)}%</label>
                     <input
                       type="range" min="0" max="1" step="0.02" value={threshold}
                       onChange={e => setThreshold(parseFloat(e.target.value))}
                       className="w-full mt-1 accent-blue-500"
                     />
-                    <div className="flex justify-between text-[10px] text-gray-300 mt-0.5">
+                    <div className="flex justify-between text-[10px] text-gray-300">
                       <span>0%</span><span>50%</span><span>100%</span>
                     </div>
                   </div>
-
-                  {/* Securities filters inline if available */}
                   {hasSecurityFilters && (filterOptions.sectors?.length ?? 0) > 0 && (
                     <div>
                       <label className={labelClass}>Sector</label>
@@ -191,50 +188,44 @@ function QuadrantPageInner() {
                       </select>
                     </div>
                   )}
+                  {hasSecurityFilters && (filterOptions.industries?.length ?? 0) > 0 && (
+                    <div>
+                      <label className={labelClass}>Industry</label>
+                      <select value={industry} onChange={e => setIndustry(e.target.value)} className={selectClass}>
+                        <option value="">All Industries</option>
+                        {filterOptions.industries!.map(i => <option key={i} value={i}>{i}</option>)}
+                      </select>
+                    </div>
+                  )}
+                  {hasSecurityFilters && (filterOptions.marketCapTiers?.length ?? 0) > 0 && (
+                    <div>
+                      <label className={labelClass}>Cap Tier</label>
+                      <select value={marketCapTier} onChange={e => setMarketCapTier(e.target.value)} className={selectClass}>
+                        <option value="">All</option>
+                        {filterOptions.marketCapTiers!.map(t => <option key={t} value={t}>{t}</option>)}
+                      </select>
+                    </div>
+                  )}
+                  {hasSecurityFilters && (filterOptions.indices?.length ?? 0) > 0 && (
+                    <div>
+                      <label className={labelClass}>Index</label>
+                      <select value={indexCode} onChange={e => setIndexCode(e.target.value)} className={selectClass}>
+                        <option value="">All Indices</option>
+                        {filterOptions.indices!.map(i => <option key={i.code} value={i.code}>{i.name}</option>)}
+                      </select>
+                    </div>
+                  )}
+                  {hasActiveFilters && (
+                    <div className="flex items-end pb-0.5">
+                      <button
+                        onClick={() => { setSector(''); setIndustry(''); setMarketCapTier(''); setIndexCode(''); }}
+                        className="px-2.5 py-1.5 text-xs text-gray-500 border border-gray-200 rounded-md hover:bg-gray-50"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  )}
                 </div>
-
-                {/* Row 2: remaining securities filters */}
-                {hasSecurityFilters && (
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
-                    {(filterOptions.industries?.length ?? 0) > 0 && (
-                      <div>
-                        <label className={labelClass}>Industry</label>
-                        <select value={industry} onChange={e => setIndustry(e.target.value)} className={selectClass}>
-                          <option value="">All Industries</option>
-                          {filterOptions.industries!.map(i => <option key={i} value={i}>{i}</option>)}
-                        </select>
-                      </div>
-                    )}
-                    {(filterOptions.marketCapTiers?.length ?? 0) > 0 && (
-                      <div>
-                        <label className={labelClass}>Market Cap Tier</label>
-                        <select value={marketCapTier} onChange={e => setMarketCapTier(e.target.value)} className={selectClass}>
-                          <option value="">All</option>
-                          {filterOptions.marketCapTiers!.map(t => <option key={t} value={t}>{t}</option>)}
-                        </select>
-                      </div>
-                    )}
-                    {(filterOptions.indices?.length ?? 0) > 0 && (
-                      <div>
-                        <label className={labelClass}>Index</label>
-                        <select value={indexCode} onChange={e => setIndexCode(e.target.value)} className={selectClass}>
-                          <option value="">All Indices</option>
-                          {filterOptions.indices!.map(i => <option key={i.code} value={i.code}>{i.name}</option>)}
-                        </select>
-                      </div>
-                    )}
-                    {hasActiveFilters && (
-                      <div className="flex items-end">
-                        <button
-                          onClick={() => { setSector(''); setIndustry(''); setMarketCapTier(''); setIndexCode(''); }}
-                          className="px-3 py-1.5 text-xs text-gray-600 border border-gray-200 rounded-md hover:bg-gray-50"
-                        >
-                          Clear Filters
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                )}
               </div>
             )}
           </div>
