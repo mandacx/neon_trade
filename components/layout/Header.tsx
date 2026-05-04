@@ -20,7 +20,15 @@ export default function Header() {
             <Image src="/logo.svg" alt="Neon Trade" width={140} height={34} priority />
           </Link>
 
-          {/* Action buttons */}
+          {/* Search — centre */}
+          <div className="hidden md:block flex-1 max-w-sm mx-4">
+            <StockSearch compact />
+          </div>
+
+          {/* Spacer */}
+          <div className="flex-1" />
+
+          {/* Action buttons — right */}
           <div className="hidden md:flex items-center gap-2 shrink-0">
             <button
               onClick={() => router.push('/quadrant')}
@@ -38,14 +46,6 @@ export default function Header() {
             >
               📈 Stock Analysis
             </button>
-          </div>
-
-          {/* Spacer */}
-          <div className="flex-1" />
-
-          {/* Search — top right */}
-          <div className="hidden md:block shrink-0 w-56">
-            <StockSearch compact />
           </div>
 
           {/* Mobile menu */}
