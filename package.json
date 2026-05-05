@@ -11,6 +11,7 @@
   "dependencies": {
     "@klinecharts/pro": "^0.1.1",
     "@neondatabase/serverless": "^0.10.4",
+    "@vercel/analytics": "^2.0.1",
     "axios": "^1.7.9",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
