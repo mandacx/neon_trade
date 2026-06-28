@@ -89,6 +89,8 @@ function QuadrantPageInner() {
         if (!result.success) throw new Error(result.error || 'Unknown error');
         setStocks(result.data.stocks);
         setFilteredStocks(result.data.stocks);
+        // §4 — adopt filter options derived from the items actually present.
+        if (result.data.filterOptions) setFilterOptions(result.data.filterOptions);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load quadrant data');
       } finally {

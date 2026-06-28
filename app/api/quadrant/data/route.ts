@@ -7,6 +7,43 @@ async function safeQuery<T>(fn: () => Promise<T[]>): Promise<T[]> {
   try { return await fn(); } catch { return []; }
 }
 
+// §4 — fixed-threshold tiers in one ordered list (thresholds/order live in one place).
+const CAP_TIER_ORDER = ['Mega', 'Large', 'Mid', 'Small', 'Micro', 'Nano'];
+function orderCapTiers(tiers: string[]): string[] {
+  return [...tiers].sort((a, b) => {
+    const ia = CAP_TIER_ORDER.findIndex(t => a.toLowerCase().startsWith(t.toLowerCase()));
+    const ib = CAP_TIER_ORDER.findIndex(t => b.toLowerCase().startsWith(t.toLowerCase()));
+    return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib) || a.localeCompare(b);
+  });
+}
+
+// §4 — derive filter options ONLY from items actually present, so we never offer
+// an empty bucket. Options are computed before sector/industry filters are applied
+// (i.e. from the full universe for the selected date) so dropdowns don't collapse mid-filter.
+function deriveFilterOptions(secMeta: Record<string, any>) {
+  const sectors = new Set<string>();
+  const industries = new Set<string>();
+  const tiers = new Set<string>();
+  const indices = new Map<string, string>(); // code -> name
+  Object.values(secMeta).forEach((m: any) => {
+    if (m?.sector) sectors.add(m.sector);
+    if (m?.industry) industries.add(m.industry);
+    if (m?.market_cap_tier) tiers.add(m.market_cap_tier);
+    if (m?.indices) {
+      try {
+        const arr = typeof m.indices === 'string' ? JSON.parse(m.indices) : m.indices;
+        if (Array.isArray(arr)) arr.forEach((i: any) => { if (i?.code) indices.set(i.code, i.name ?? i.code); });
+      } catch { /* ignore */ }
+    }
+  });
+  return {
+    sectors: [...sectors].sort(),
+    industries: [...industries].sort(),
+    marketCapTiers: orderCapTiers([...tiers]),
+    indices: [...indices.entries()].map(([code, name]) => ({ code, name })).sort((a, b) => a.name.localeCompare(b.name)),
+  };
+}
+
 async function getSecuritiesFilterOptions() {
   const [sectors, industries, marketCapTiers, indices] = await Promise.all([
     safeQuery(() => sql`SELECT DISTINCT sector FROM public.securities WHERE sector IS NOT NULL ORDER BY sector`),
@@ -27,7 +64,7 @@ async function getSecuritiesFilterOptions() {
   return {
     sectors: sectors.map((r: any) => r.sector as string),
     industries: industries.map((r: any) => r.industry as string),
-    marketCapTiers: marketCapTiers.map((r: any) => r.market_cap_tier as string),
+    marketCapTiers: orderCapTiers(marketCapTiers.map((r: any) => r.market_cap_tier as string)),
     indices: indices.map((r: any) => ({ code: r.code as string, name: r.name as string })),
   };
 }
@@ -119,6 +156,9 @@ export async function GET(request: NextRequest) {
     const symbols = filteredStocks.map(s => s.symbol);
     const secMeta = await getSecuritiesMeta(symbols);
 
+    // §4 — derive filter options from the present universe (pre sector/industry filtering).
+    const derivedFilterOptions = deriveFilterOptions(secMeta);
+
     // Apply securities-based filters
     if (sector) {
       filteredStocks = filteredStocks.filter(s => secMeta[s.symbol]?.sector === sector);
@@ -191,6 +231,7 @@ export async function GET(request: NextRequest) {
         count: enriched.length,
         total: processedStocks.length,
         stocks: enriched,
+        filterOptions: derivedFilterOptions,
         hasSecurities: Object.keys(secMeta).length > 0,
       },
     });
