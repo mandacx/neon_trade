@@ -25,3 +25,16 @@ body {
     text-wrap: balance;
   }
 }
+
+@keyframes scan-ticker-scroll {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+
+.scan-ticker-track {
+  animation: scan-ticker-scroll 40s linear infinite;
+}
+
+.scan-ticker-track:hover {
+  animation-play-state: paused;
+}

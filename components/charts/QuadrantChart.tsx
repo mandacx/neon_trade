@@ -19,6 +19,8 @@ interface QuadrantChartProps {
   data: QuadrantStock[];
   onStockClick?: (symbol: string) => void;
   height?: number;
+  title?: string;
+  subtitle?: string;
 }
 
 type QuadrantLevel = 'put_low' | 'put_int' | 'put_call_int' | 'call_int' | 'call_high' | null;
@@ -97,7 +99,7 @@ function dotRadius(marketCap: number | null | undefined): number {
   return Math.max(4, Math.min(14, Math.round(r)));
 }
 
-export default function QuadrantChart({ data, onStockClick, height = 600 }: QuadrantChartProps) {
+export default function QuadrantChart({ data, onStockClick, height = 600, title = "5-Level Stock Ladder", subtitle }: QuadrantChartProps) {
   const [selectedQuadrant, setSelectedQuadrant] = useState<QuadrantLevel>(null);
   const [showGuide, setShowGuide] = useState(false);
 
@@ -158,6 +160,10 @@ export default function QuadrantChart({ data, onStockClick, height = 600 }: Quad
           name: (stock as any).name,
           color: getLevelColor(stock.closestLevel),
           r: dotRadius((stock as any).marketCap),
+          scanCode: (stock as any).scanCode,
+          chg: (stock as any).chg,
+          prevClose: (stock as any).prevClose,
+          loadDateTime: (stock as any).loadDateTime,
         });
       });
     });
@@ -261,10 +267,23 @@ export default function QuadrantChart({ data, onStockClick, height = 600 }: Quad
           )}
           <div className="text-xs text-gray-500 mb-2">
             <p>Trade: {d.tradeDate} · Expiry: {d.expiryDate}</p>
+            {d.loadDateTime && <p>Alert loaded: {d.loadDateTime}</p>}
           </div>
           <p className="text-sm text-gray-600 mb-2">
             Close: <span className="font-semibold">{formatCurrency(d.close)}</span>
+            {d.chg != null && (
+              <span className={`ml-2 font-semibold ${d.chg >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                {d.chg >= 0 ? '+' : ''}{Number(d.chg).toFixed(2)}
+              </span>
+            )}
           </p>
+          {d.scanCode && (
+            <p className="text-xs mb-2">
+              <span className="px-2 py-0.5 rounded font-semibold text-white" style={{ backgroundColor: d.color }}>
+                ALERT: {d.scanCode}
+              </span>
+            </p>
+          )}
           <p className="text-sm font-semibold mb-3 pb-2 border-b" style={{ color: d.color }}>
             Closest: {getLevelDisplayName(d.closestLevel)}
             <span className="text-xs text-gray-500 font-normal ml-2">
@@ -314,9 +333,9 @@ export default function QuadrantChart({ data, onStockClick, height = 600 }: Quad
     <div className="w-full">
       <div className="mb-3 flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-bold mb-0.5">5-Level Stock Ladder</h2>
+          <h2 className="text-xl font-bold mb-0.5">{title}</h2>
           <p className="text-gray-500 text-sm">
-            {chartData.length} stocks · X-axis = price position across the stock&apos;s own levels
+            {chartData.length} {subtitle ?? "stocks · X-axis = price position across the stock's own levels"}
             {selectedQuadrant && (
               <>
                 <span className="ml-2 font-semibold" style={{ color: getLevelColor(selectedQuadrant) }}>

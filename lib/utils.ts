@@ -96,6 +96,20 @@ export function getLevelDisplayName(levelName: string): string {
     call_int: 'Call Int',
     call_high: 'Call High',
   };
-  
+
   return names[levelName] || levelName;
 }
+
+/**
+ * Maps a public.intra_us_scanner_eod scan_code (e.g. "PUT CALL INT") onto the
+ * same level keys used elsewhere in the app (e.g. "put_call_int"). Kept here
+ * (not in lib/scanAlerts.ts) so client components can use it without pulling
+ * in the server-only Neon db client.
+ */
+export const SCAN_CODE_TO_LEVEL: Record<string, string> = {
+  'PUT LOW': 'put_low',
+  'PUT INT': 'put_int',
+  'PUT CALL INT': 'put_call_int',
+  'CALL INT': 'call_int',
+  'CALL HIGH': 'call_high',
+};

@@ -94,3 +94,26 @@ export interface LevelLine {
   level: LevelCalculation;
   isClosest: boolean;
 }
+
+// Scan alert from public.intra_us_scanner_eod — a stock crossing one of its own
+// 5 option levels. Structurally compatible with QuadrantStock (superset) so it
+// can be rendered by the same QuadrantChart bubble component.
+export interface ScanAlert {
+  symbol: string;
+  name?: string | null;
+  close: number;              // last_price at time of scan
+  prevClose: number;
+  chg: number;
+  tradeDate: string;
+  expiryDate: string;
+  loadDateTime: string;       // when the scanner recorded this alert
+  scanCode: string;           // raw scanner code, e.g. "PUT CALL INT"
+  levels: LevelCalculation[];
+  closestLevel: string;       // level name derived from scanCode
+  closestValue: number;
+  sector?: string | null;
+  industry?: string | null;
+  marketCapTier?: string | null;
+  marketCap?: number | null;
+  indices?: string[];
+}

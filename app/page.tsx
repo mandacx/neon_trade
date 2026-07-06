@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Header from '@/components/layout/Header';
+import ScanAlertsTicker from '@/components/ui/ScanAlertsTicker';
 
 const LEVEL_COLORS: Record<string, string> = {
   put_low: '#dc2626', put_int: '#ea580c', put_call_int: '#16a34a',
@@ -229,6 +230,9 @@ export default function Home() {
       <Header />
       <div className="min-h-screen bg-gray-50">
         <div className="container mx-auto px-4 py-5 space-y-5">
+
+          {/* Scan Alerts Ticker */}
+          <ScanAlertsTicker />
 
           {/* Index Tiles */}
           <section>

@@ -3,13 +3,27 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
+import { useEffect, useRef, useState } from 'react';
 import StockSearch from '@/components/ui/StockSearch';
 
 export default function Header() {
   const pathname = usePathname();
   const router = useRouter();
+  const [scanMenuOpen, setScanMenuOpen] = useState(false);
+  const scanMenuRef = useRef<HTMLDivElement>(null);
 
   const isActive = (path: string) => pathname === path;
+  const isScanAlertsPath = pathname?.startsWith('/scan-alerts');
+
+  useEffect(() => {
+    function onClickOutside(e: MouseEvent) {
+      if (scanMenuRef.current && !scanMenuRef.current.contains(e.target as Node)) {
+        setScanMenuOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, []);
 
   return (
     <header className="bg-white shadow-sm border-b border-gray-200">
@@ -38,6 +52,39 @@ export default function Header() {
             >
               📊 Quadrant Analysis
             </button>
+            <div className="relative" ref={scanMenuRef}>
+              <button
+                onClick={() => setScanMenuOpen(v => !v)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                  isScanAlertsPath ? 'bg-purple-700 text-white' : 'bg-purple-600 text-white hover:bg-purple-700'
+                }`}
+              >
+                🔔 Scan Alerts
+                <svg className={`w-3 h-3 transition-transform ${scanMenuOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              {scanMenuOpen && (
+                <div className="absolute right-0 mt-1 w-44 bg-white rounded-lg shadow-lg border border-gray-200 overflow-hidden z-30">
+                  <button
+                    onClick={() => { setScanMenuOpen(false); router.push('/scan-alerts/latest'); }}
+                    className={`w-full text-left px-3 py-2 text-xs font-medium hover:bg-purple-50 ${
+                      isActive('/scan-alerts/latest') ? 'text-purple-700 bg-purple-50' : 'text-gray-700'
+                    }`}
+                  >
+                    🆕 Latest
+                  </button>
+                  <button
+                    onClick={() => { setScanMenuOpen(false); router.push('/scan-alerts/historical'); }}
+                    className={`w-full text-left px-3 py-2 text-xs font-medium hover:bg-purple-50 border-t border-gray-100 ${
+                      isActive('/scan-alerts/historical') ? 'text-purple-700 bg-purple-50' : 'text-gray-700'
+                    }`}
+                  >
+                    🕓 Historical
+                  </button>
+                </div>
+              )}
+            </div>
             <button
               onClick={() => router.push('/stock/SPY')}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
@@ -72,6 +119,18 @@ export default function Header() {
             className="w-full text-left px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50 rounded-lg"
           >
             📊 Quadrant Analysis
+          </button>
+          <button
+            onClick={() => router.push('/scan-alerts/latest')}
+            className="w-full text-left px-3 py-2 text-sm font-semibold text-purple-700 hover:bg-purple-50 rounded-lg"
+          >
+            🆕 Scan Alerts — Latest
+          </button>
+          <button
+            onClick={() => router.push('/scan-alerts/historical')}
+            className="w-full text-left px-3 py-2 text-sm font-semibold text-purple-700 hover:bg-purple-50 rounded-lg"
+          >
+            🕓 Scan Alerts — Historical
           </button>
           <button
             onClick={() => router.push('/stock/SPY')}
