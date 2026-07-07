@@ -70,7 +70,7 @@ export default function TVChart({
   const [showPrice, setShowPrice] = useState(true);
   const [showOI, setShowOI] = useState(true);
   const [activeLevelFilter, setActiveLevelFilter] = useState<string | null>(null);
-  const [excludedExpiries, setExcludedExpiries] = useState<Set<string>>(new Set());
+  const [activeExpiryFilter, setActiveExpiryFilter] = useState<string | null>(null);
   const loadingMoreRef = useRef(false);
 
   // Only alerts for expiries that haven't passed yet — a chart annotation for an
@@ -85,8 +85,10 @@ export default function TVChart({
     [activeScanAlerts]
   );
   const visibleScanAlerts = useMemo(
-    () => activeScanAlerts.filter(a => !excludedExpiries.has(a.expiryDate)),
-    [activeScanAlerts, excludedExpiries]
+    () => activeExpiryFilter === null
+      ? activeScanAlerts
+      : activeScanAlerts.filter(a => a.expiryDate === activeExpiryFilter),
+    [activeScanAlerts, activeExpiryFilter]
   );
 
   useEffect(() => { historicalLevelsRef.current = historicalLevels; }, [historicalLevels]);
@@ -791,12 +793,7 @@ export default function TVChart({
   };
 
   const toggleExpiry = (expiry: string) => {
-    setExcludedExpiries(prev => {
-      const next = new Set(prev);
-      if (next.has(expiry)) next.delete(expiry);
-      else next.add(expiry);
-      return next;
-    });
+    setActiveExpiryFilter(prev => (prev === expiry ? null : expiry));
   };
 
   return (
@@ -807,26 +804,27 @@ export default function TVChart({
             🔔 Alert Expiries:
           </span>
           {expiryOptions.map(expiry => {
-            const isExcluded = excludedExpiries.has(expiry);
+            const isActive = activeExpiryFilter === expiry;
+            const isDimmed = activeExpiryFilter !== null && !isActive;
             const count = activeScanAlerts.filter(a => a.expiryDate === expiry).length;
             return (
               <button
                 key={expiry}
                 onClick={() => toggleExpiry(expiry)}
                 className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-all ${
-                  isExcluded
+                  isDimmed
                     ? 'opacity-40 border-gray-200 bg-gray-50 text-gray-400'
                     : 'border-purple-300 bg-purple-50 text-purple-700 hover:bg-purple-100'
                 }`}
-                title={isExcluded ? `Click to show ${expiry} alerts` : `Click to hide ${expiry} alerts`}
+                title={isActive ? `Click to show all expiries` : `Click to show only ${expiry} alerts`}
               >
                 {expiry} <span className="opacity-70">({count})</span>
               </button>
             );
           })}
-          {excludedExpiries.size > 0 && (
+          {activeExpiryFilter !== null && (
             <button
-              onClick={() => setExcludedExpiries(new Set())}
+              onClick={() => setActiveExpiryFilter(null)}
               className="px-2 py-1 text-xs text-gray-500 hover:text-gray-700 underline"
             >
               Show all
