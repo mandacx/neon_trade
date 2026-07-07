@@ -5,7 +5,7 @@ import { getSecuritiesMeta, attachSecuritiesMeta } from '@/lib/securitiesFilters
 // Most recently loaded alerts, for the scrolling ticker on the Home and Latest pages.
 export async function GET(request: NextRequest) {
   try {
-    const limit = parseInt(request.nextUrl.searchParams.get('limit') || '20', 10);
+    const limit = Math.min(parseInt(request.nextUrl.searchParams.get('limit') || '40', 10), 200);
     const alerts = await getRecentScanAlerts(limit);
     const secMeta = await getSecuritiesMeta(alerts.map(a => a.symbol));
     const enriched = alerts.map(a => attachSecuritiesMeta(a, secMeta));

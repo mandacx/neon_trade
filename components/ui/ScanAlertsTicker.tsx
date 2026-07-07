@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { getLevelColor, getLevelDisplayName, SCAN_CODE_TO_LEVEL } from '@/lib/utils';
 import { ScanAlert } from '@/types/stock';
@@ -9,29 +9,73 @@ interface ScanAlertsTickerProps {
   limit?: number;
 }
 
-export default function ScanAlertsTicker({ limit = 20 }: ScanAlertsTickerProps) {
+// Alerts only fire while the scanner runs intraday, so there's nothing new to
+// find off-hours — poll fast during the session and much less often outside it
+// to cut DB reads/cost without missing anything.
+const MARKET_HOURS_POLL_MS = 15 * 60 * 1000;
+const OFF_HOURS_POLL_MS = 60 * 60 * 1000;
+// Bound on the accumulated/deduped list so the ticker can't grow unbounded.
+const DISPLAY_CAP = 60;
+// Keeps per-item dwell time roughly constant as the list grows, instead of a
+// fixed-duration scroll rushing past a big batch unreadably.
+const SECONDS_PER_ITEM = 2.2;
+const MIN_SCROLL_SECONDS = 20;
+
+function isUsMarketHours(date: Date): boolean {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York', weekday: 'short', hour: 'numeric', minute: 'numeric', hour12: false,
+  }).formatToParts(date);
+  const get = (type: string) => parts.find(p => p.type === type)?.value ?? '';
+  if (get('weekday') === 'Sat' || get('weekday') === 'Sun') return false;
+  const minutesSinceMidnight = parseInt(get('hour'), 10) * 60 + parseInt(get('minute'), 10);
+  return minutesSinceMidnight >= 9 * 60 + 30 && minutesSinceMidnight < 16 * 60; // 9:30–16:00 ET, holidays not accounted for
+}
+
+function alertKey(a: ScanAlert): string {
+  return `${a.symbol}|${a.expiryDate}|${a.loadDateTime}|${a.scanCode}`;
+}
+
+export default function ScanAlertsTicker({ limit = 40 }: ScanAlertsTickerProps) {
   const router = useRouter();
   const [alerts, setAlerts] = useState<ScanAlert[]>([]);
   const [loading, setLoading] = useState(true);
+  const seenRef = useRef<Map<string, ScanAlert>>(new Map());
 
   useEffect(() => {
     let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout>;
+
     function load() {
       fetch(`/api/scan-alerts/recent?limit=${limit}`)
         .then(r => r.json())
-        .then(res => { if (!cancelled && res.success) setAlerts(res.data.alerts); })
+        .then(res => {
+          if (cancelled || !res.success) return;
+          const fresh: ScanAlert[] = res.data.alerts;
+          fresh.forEach(a => seenRef.current.set(alertKey(a), a));
+          const merged = [...seenRef.current.values()]
+            .sort((a, b) => b.loadDateTime.localeCompare(a.loadDateTime))
+            .slice(0, DISPLAY_CAP);
+          seenRef.current = new Map(merged.map(a => [alertKey(a), a]));
+          setAlerts(merged);
+        })
         .catch(() => {})
-        .finally(() => { if (!cancelled) setLoading(false); });
+        .finally(() => {
+          if (cancelled) return;
+          setLoading(false);
+          timeoutId = setTimeout(load, isUsMarketHours(new Date()) ? MARKET_HOURS_POLL_MS : OFF_HOURS_POLL_MS);
+        });
     }
+
     load();
-    const interval = setInterval(load, 60_000);
-    return () => { cancelled = true; clearInterval(interval); };
+    return () => { cancelled = true; clearTimeout(timeoutId); };
   }, [limit]);
 
   if (loading) {
     return <div className="bg-white border border-gray-200 rounded-xl h-11 animate-pulse" />;
   }
   if (alerts.length === 0) return null;
+
+  const scrollSeconds = Math.max(alerts.length * SECONDS_PER_ITEM, MIN_SCROLL_SECONDS);
 
   const level = (a: ScanAlert) => SCAN_CODE_TO_LEVEL[a.scanCode] ?? a.closestLevel;
 
@@ -64,7 +108,7 @@ export default function ScanAlertsTicker({ limit = 20 }: ScanAlertsTickerProps) 
         🔔 New Alerts
       </span>
       <div className="overflow-hidden flex-1">
-        <div className="flex scan-ticker-track whitespace-nowrap">
+        <div className="flex scan-ticker-track whitespace-nowrap" style={{ animationDuration: `${scrollSeconds}s` }}>
           {alerts.map((a, i) => <Item key={`a-${i}`} a={a} idx={i} />)}
           {alerts.map((a, i) => <Item key={`b-${i}`} a={a} idx={i} />)}
         </div>
