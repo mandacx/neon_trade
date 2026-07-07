@@ -7,17 +7,23 @@ import { getLevelColor, getLevelDisplayName, formatCurrency, formatPercentage, S
 
 interface TVChartProps {
   symbol: string;
+  // `time` is epoch seconds — the chart's canonical time axis, at whatever
+  // interval was fetched. `dayKey` is the US trading day it belongs to
+  // ('YYYY-MM-DD'), used to join day-level data (levels/OI/alerts) onto it.
   candleData: Array<{
-    time: string;
+    time: number;
+    dayKey: string;
     open: number;
     high: number;
     low: number;
     close: number;
   }>;
   volumeData: Array<{
-    time: string;
+    time: number;
+    dayKey: string;
     value: number;
   }>;
+  // Day-level data — keyed by trading day regardless of chart interval.
   oiData?: Array<{
     time: string;
     callOi: number;
@@ -29,10 +35,22 @@ interface TVChartProps {
   historicalLevels?: Map<string, { levels: LevelCalculation[], closestLevel: string }>;
   scanAlerts?: ScanAlert[];
   selectedExpiry?: string;
+  isIntraday?: boolean;
+  livePrice?: number;
   currentPrice?: number;
   height?: number;
   onLoadMore?: (direction: 'past' | 'future', firstVisibleTime: string, lastVisibleTime: string) => void;
   isLoadingMore?: boolean;
+}
+
+function formatBarTime(epochSeconds: number, intraday: boolean): string {
+  const d = new Date(epochSeconds * 1000);
+  if (intraday) {
+    return d.toLocaleString('en-US', {
+      timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true,
+    });
+  }
+  return d.toLocaleDateString('en-US', { timeZone: 'America/New_York', year: 'numeric', month: 'short', day: 'numeric' });
 }
 
 export default function TVChart({
@@ -45,6 +63,8 @@ export default function TVChart({
   historicalLevels,
   scanAlerts = [],
   selectedExpiry,
+  isIntraday = false,
+  livePrice,
   currentPrice,
   height = 500,
   onLoadMore,
@@ -67,6 +87,7 @@ export default function TVChart({
   const closestLevelRef = useRef(closestLevel);
   const oiDataRef = useRef(oiData);
   const scanAlertsByDateRef = useRef<Map<string, ScanAlert[]>>(new Map());
+  const dayKeyByTimeRef = useRef<Map<number, string>>(new Map());
   const [isLoading, setIsLoading] = useState(true);
   const [selectedPeriod, setSelectedPeriod] = useState<string>('ALL');
   const [showPrice, setShowPrice] = useState(true);
@@ -81,11 +102,35 @@ export default function TVChart({
     [scanAlerts, selectedExpiry]
   );
 
+  // Single canonical, deduped/sorted view of the candle bars — every other
+  // effect (volume, OI, levels, markers, tooltip) derives from this instead of
+  // re-deduping independently.
+  const processedBars = useMemo(() => {
+    const map = new Map<number, typeof candleData[0]>();
+    candleData.forEach(d => {
+      if (Number.isFinite(d.time) && Number.isFinite(d.open) && Number.isFinite(d.high) && Number.isFinite(d.low) && Number.isFinite(d.close)) {
+        map.set(d.time, d);
+      }
+    });
+    return [...map.values()].sort((a, b) => a.time - b.time);
+  }, [candleData]);
+
+  const volumeByTime = useMemo(() => {
+    const map = new Map<number, number>();
+    volumeData.forEach(d => { if (Number.isFinite(d.time) && Number.isFinite(d.value)) map.set(d.time, d.value); });
+    return map;
+  }, [volumeData]);
+
   useEffect(() => { historicalLevelsRef.current = historicalLevels; }, [historicalLevels]);
   useEffect(() => { levelsRef.current = levels; }, [levels]);
   useEffect(() => { closestLevelRef.current = closestLevel; }, [closestLevel]);
   useEffect(() => { oiDataRef.current = oiData; }, [oiData]);
   useEffect(() => { loadingMoreRef.current = isLoadingMore; }, [isLoadingMore]);
+  useEffect(() => {
+    const map = new Map<number, string>();
+    processedBars.forEach(bar => map.set(bar.time, bar.dayKey));
+    dayKeyByTimeRef.current = map;
+  }, [processedBars]);
 
   useEffect(() => {
     if (!chartContainerRef.current) return;
@@ -234,10 +279,10 @@ export default function TVChart({
 
     // Subscribe to visible range changes to detect when to load more data
     let visibleRangeUnsubscribe: (() => void) | null = null;
-    
+
     if (onLoadMore) {
       const chartTimeScale = chart.timeScale();
-      
+
       const handleVisibleTimeRangeChange = () => {
         if (!chartRef.current || loadingMoreRef.current) return;
         if (!candleSeriesRef.current) return;
@@ -251,11 +296,11 @@ export default function TVChart({
         const seriesData = candleSeriesRef.current.data();
         if (!seriesData || seriesData.length === 0) return;
 
-        const firstDataTime = seriesData[0].time as string;
-        const lastDataTime = seriesData[seriesData.length - 1].time as string;
+        const firstDataTime = seriesData[0].time as number;
+        const lastDataTime = seriesData[seriesData.length - 1].time as number;
 
         loadingMoreRef.current = true;
-        onLoadMore('past', firstDataTime, lastDataTime);
+        onLoadMore('past', String(firstDataTime), String(lastDataTime));
         setTimeout(() => {
           loadingMoreRef.current = false;
         }, 3000);
@@ -290,12 +335,14 @@ export default function TVChart({
       const high = candleData.high;
       const low = candleData.low;
       const close = candleData.close;
-      const dateStr = param.time as string;
+      const barTime = param.time as number;
+      const dayKey = dayKeyByTimeRef.current.get(barTime) ?? '';
+      const barLabel = formatBarTime(barTime, isIntraday);
 
       const volumeData = param.seriesData.get(volumeSeriesRef.current!);
       const volume = volumeData ? (volumeData as any).value : 0;
 
-      const currentOiData = oiDataRef.current.find(d => d.time === dateStr);
+      const currentOiData = oiDataRef.current.find(d => d.time === dayKey);
 
       // Update OHLC display in top-left corner
       if (ohlcDisplayRef.current) {
@@ -303,7 +350,7 @@ export default function TVChart({
         const priceColor = isGreen ? 'text-green-600' : 'text-red-600';
         const change = close - open;
         const changePercent = (change / open) * 100;
-        
+
         const oiDisplayHtml = currentOiData ? `
           <div class="text-[10px] text-gray-600 border-t border-gray-200 pt-1 mt-1">
             <div class="flex justify-between gap-2">
@@ -313,7 +360,7 @@ export default function TVChart({
             <div class="mt-0.5">OI Diff: <span class="font-semibold ${currentOiData.oiDiff >= 0 ? 'text-green-600' : 'text-red-600'}">${currentOiData.oiDiff >= 0 ? '+' : ''}${currentOiData.oiDiff.toLocaleString()}</span></div>
           </div>
         ` : '';
-        
+
         ohlcDisplayRef.current.innerHTML = `
           <div class="text-xs space-y-1">
             <div class="font-semibold text-gray-700">${symbol} <span class="${priceColor} text-[11px]">${change >= 0 ? '+' : ''}${change.toFixed(2)} (${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}%)</span></div>
@@ -337,7 +384,7 @@ export default function TVChart({
 
       const hLevels = historicalLevelsRef.current;
       if (hLevels && hLevels.size > 0) {
-        const historicalData = hLevels.get(dateStr);
+        const historicalData = hLevels.get(dayKey);
         if (historicalData && historicalData.levels && historicalData.levels.length > 0) {
           dateLevels = historicalData.levels;
           dateClosestLevel = historicalData.closestLevel;
@@ -356,7 +403,7 @@ export default function TVChart({
         // Convert price and value to numbers if they're strings
         const priceValue = typeof level.price === 'string' ? parseFloat(level.price) : level.price;
         const valueNum = typeof level.value === 'string' ? parseFloat(level.value) : level.value;
-        
+
         return {
           name: level.name,
           price: priceValue,
@@ -367,7 +414,7 @@ export default function TVChart({
       }).reverse() : []; // Reverse the order: Call High -> Call Int -> Put/Call Int -> Put Int -> Put Low
 
       // Build scan alerts section for tooltip
-      const dateAlerts = scanAlertsByDateRef.current.get(dateStr) || [];
+      const dateAlerts = scanAlertsByDateRef.current.get(dayKey) || [];
       const alertsTooltipHtml = dateAlerts.length > 0 ? `
         <div class="mt-3 pt-2 border-t border-gray-300">
           <div class="font-semibold mb-1 text-gray-700">🔔 Scan Alerts (${dateAlerts.length}):</div>
@@ -407,7 +454,7 @@ export default function TVChart({
 
       tooltipRef.current.innerHTML = `
         <div class="text-xs">
-          <div class="font-bold mb-2">${dateStr}</div>
+          <div class="font-bold mb-2">${barLabel}</div>
           <div class="grid grid-cols-2 gap-x-4 gap-y-1 mb-3 pb-2 border-b border-gray-300">
             <div class="flex justify-between">
               <span class="text-gray-600">Open:</span>
@@ -468,120 +515,92 @@ export default function TVChart({
       levelSeriesRefs.current = {};
       chart.remove();
     };
-  }, [height, onLoadMore]);
+  }, [height, onLoadMore, isIntraday, symbol]);
 
-  // Update data
+  // Update candle + volume data
   useEffect(() => {
     if (!candleSeriesRef.current || !volumeSeriesRef.current || isLoading) return;
 
-    console.log('Updating chart data, candle count:', candleData.length);
-    console.log('Date range:', candleData[0]?.time, 'to', candleData[candleData.length - 1]?.time);
+    const formattedCandles: CandlestickData[] = processedBars.map(d => ({
+      time: d.time as any,
+      open: d.open,
+      high: d.high,
+      low: d.low,
+      close: d.close,
+    }));
 
-    // Deduplicate by time (keep last) and sort ascending — duplicates crash lightweight-charts
-    const candleByTimeMap = new Map<string, typeof candleData[0]>();
-    for (const d of candleData) { if (d.time) candleByTimeMap.set(d.time, d); }
-    const candleDeduped = Array.from(candleByTimeMap.values()).sort((a, b) =>
-      a.time < b.time ? -1 : a.time > b.time ? 1 : 0
-    );
-
-    // Filter bars where any OHLC value is not a finite number
-    const formattedCandles: CandlestickData[] = candleDeduped
-      .filter(d => Number.isFinite(d.open) && Number.isFinite(d.high) && Number.isFinite(d.low) && Number.isFinite(d.close))
+    const formattedVolume: HistogramData[] = processedBars
+      .filter(d => volumeByTime.has(d.time))
       .map(d => ({
         time: d.time as any,
-        open: d.open,
-        high: d.high,
-        low: d.low,
-        close: d.close,
+        value: volumeByTime.get(d.time)!,
+        color: d.close >= d.open ? 'rgba(34, 197, 94, 0.5)' : 'rgba(239, 68, 68, 0.5)',
       }));
-
-    // Deduplicate volume data
-    const volByTimeMap = new Map<string, typeof volumeData[0]>();
-    for (const d of volumeData) { if (d.time) volByTimeMap.set(d.time, d); }
-    const volumeDeduped = Array.from(volByTimeMap.values()).sort((a, b) =>
-      a.time < b.time ? -1 : a.time > b.time ? 1 : 0
-    );
-
-    const formattedVolume: HistogramData[] = volumeDeduped
-      .filter(d => Number.isFinite(d.value))
-      .map(d => {
-        const candle = candleByTimeMap.get(d.time);
-        const isGreen = candle ? candle.close >= candle.open : true;
-        return {
-          time: d.time as any,
-          value: d.value,
-          color: isGreen ? 'rgba(34, 197, 94, 0.5)' : 'rgba(239, 68, 68, 0.5)',
-        };
-      });
 
     // Use setData to replace all data (handles both initial load and updates)
     candleSeriesRef.current.setData(formattedCandles);
     volumeSeriesRef.current.setData(formattedVolume);
-    
+
     // Reapply visibility state for price series after data update
     candleSeriesRef.current.applyOptions({ visible: showPrice });
     volumeSeriesRef.current.applyOptions({ visible: showPrice });
-
-    // Format and set OI Diff data if available
-    if (oiDiffSeriesRef.current && callOiLineRef.current && putOiLineRef.current && oiDiffLineRef.current && oiData.length > 0) {
-      try {
-        // Deduplicate OI data by time, sort ascending
-        const oiByTime = new Map<string, typeof oiData[0]>();
-        for (const d of oiData) {
-          if (d.time) oiByTime.set(typeof d.time === 'string' ? d.time : String(d.time), d);
-        }
-        const oiDeduped = Array.from(oiByTime.values()).sort((a, b) =>
-          String(a.time) < String(b.time) ? -1 : String(a.time) > String(b.time) ? 1 : 0
-        );
-
-        const formattedOiDiff: HistogramData[] = oiDeduped
-          .filter(d => Number.isFinite(d.oiDiff))
-          .map(d => ({
-            time: (typeof d.time === 'string' ? d.time : String(d.time)) as any,
-            value: Math.abs(d.oiDiff),
-            color: d.oiDiff > 0 ? 'rgba(34, 197, 94, 0.6)' : 'rgba(239, 68, 68, 0.6)',
-          }));
-
-        const callOiLineData = oiDeduped
-          .filter(d => Number.isFinite(d.callOi))
-          .map(d => ({
-            time: (typeof d.time === 'string' ? d.time : String(d.time)) as any,
-            value: d.callOi,
-          }));
-
-        const putOiLineData = oiDeduped
-          .filter(d => Number.isFinite(d.putOi))
-          .map(d => ({
-            time: (typeof d.time === 'string' ? d.time : String(d.time)) as any,
-            value: d.putOi,
-          }));
-
-        const oiDiffLineData = oiDeduped
-          .filter(d => Number.isFinite(d.oiDiff))
-          .map(d => ({
-            time: (typeof d.time === 'string' ? d.time : String(d.time)) as any,
-            value: d.oiDiff,
-          }));
-
-        oiDiffSeriesRef.current.setData(formattedOiDiff);
-        callOiLineRef.current.setData(callOiLineData);
-        putOiLineRef.current.setData(putOiLineData);
-        oiDiffLineRef.current.setData(oiDiffLineData);
-
-        oiDiffSeriesRef.current.applyOptions({ visible: showOI });
-        callOiLineRef.current.applyOptions({ visible: showOI });
-        putOiLineRef.current.applyOptions({ visible: showOI });
-        oiDiffLineRef.current.applyOptions({ visible: showOI });
-      } catch (error) {
-        console.error('Error setting OI data:', error);
-      }
-    }
 
     // Only fit content on initial load, not when loading more data
     if (!isLoadingMore && chartRef.current) {
       chartRef.current.timeScale().fitContent();
     }
-  }, [candleData, volumeData, oiData, isLoading, isLoadingMore, showPrice, showOI]);
+  }, [processedBars, volumeByTime, isLoading, isLoadingMore, showPrice]);
+
+  // OI histogram/lines — day-level data, broadcast flat across every bar within
+  // that trading day so it renders sensibly at any chart interval (daily or intraday).
+  useEffect(() => {
+    if (!oiDiffSeriesRef.current || !callOiLineRef.current || !putOiLineRef.current || !oiDiffLineRef.current) return;
+
+    if (oiData.length === 0 || processedBars.length === 0) {
+      oiDiffSeriesRef.current.setData([]);
+      callOiLineRef.current.setData([]);
+      putOiLineRef.current.setData([]);
+      oiDiffLineRef.current.setData([]);
+      return;
+    }
+
+    try {
+      const oiByDay = new Map<string, typeof oiData[0]>();
+      oiData.forEach(d => { if (d.time) oiByDay.set(String(d.time), d); });
+
+      const oiDiffPoints: HistogramData[] = [];
+      const callOiPoints: { time: any; value: number }[] = [];
+      const putOiPoints: { time: any; value: number }[] = [];
+      const oiDiffLinePoints: { time: any; value: number }[] = [];
+
+      processedBars.forEach(bar => {
+        const dayOi = oiByDay.get(bar.dayKey);
+        if (!dayOi) return;
+        if (Number.isFinite(dayOi.oiDiff)) {
+          oiDiffPoints.push({
+            time: bar.time as any,
+            value: Math.abs(dayOi.oiDiff),
+            color: dayOi.oiDiff > 0 ? 'rgba(34, 197, 94, 0.6)' : 'rgba(239, 68, 68, 0.6)',
+          });
+          oiDiffLinePoints.push({ time: bar.time as any, value: dayOi.oiDiff });
+        }
+        if (Number.isFinite(dayOi.callOi)) callOiPoints.push({ time: bar.time as any, value: dayOi.callOi });
+        if (Number.isFinite(dayOi.putOi)) putOiPoints.push({ time: bar.time as any, value: dayOi.putOi });
+      });
+
+      oiDiffSeriesRef.current.setData(oiDiffPoints);
+      callOiLineRef.current.setData(callOiPoints as any);
+      putOiLineRef.current.setData(putOiPoints as any);
+      oiDiffLineRef.current.setData(oiDiffLinePoints as any);
+
+      oiDiffSeriesRef.current.applyOptions({ visible: showOI });
+      callOiLineRef.current.applyOptions({ visible: showOI });
+      putOiLineRef.current.applyOptions({ visible: showOI });
+      oiDiffLineRef.current.applyOptions({ visible: showOI });
+    } catch (error) {
+      console.error('Error setting OI data:', error);
+    }
+  }, [oiData, processedBars, showOI]);
 
   // Add level lines
   useEffect(() => {
@@ -641,35 +660,43 @@ export default function TVChart({
     };
   }, [levels, closestLevel]);
 
-  // Populate historical level line series from historicalLevels map
+  // Populate historical level line series — day-level data, broadcast flat
+  // across every bar within that trading day (same reasoning as OI above).
   useEffect(() => {
     const refs = levelSeriesRefs.current;
-    if (!historicalLevels || historicalLevels.size === 0 || Object.keys(refs).length === 0) return;
+    if (Object.keys(refs).length === 0) return;
 
-    const buckets: Record<string, { time: string; value: number }[]> = {
+    if (!historicalLevels || historicalLevels.size === 0 || processedBars.length === 0) {
+      Object.values(refs).forEach(s => s.setData([]));
+      return;
+    }
+
+    const buckets: Record<string, { time: any; value: number }[]> = {
       call_high: [], call_int: [], put_call_int: [], put_int: [], put_low: [],
     };
 
-    historicalLevels.forEach((dateData, date) => {
-      dateData.levels.forEach(level => {
+    processedBars.forEach(bar => {
+      const dayData = historicalLevels.get(bar.dayKey);
+      if (!dayData) return;
+      dayData.levels.forEach(level => {
         const price = typeof level.price === 'string' ? parseFloat(level.price) : level.price;
         if (buckets[level.name] && Number.isFinite(price) && price > 0) {
-          buckets[level.name].push({ time: date, value: price });
+          buckets[level.name].push({ time: bar.time as any, value: price });
         }
       });
     });
 
     Object.entries(buckets).forEach(([name, data]) => {
       const s = refs[name];
-      if (!s || data.length === 0) return;
-      data.sort((a, b) => (a.time < b.time ? -1 : 1));
+      if (!s) return;
       s.setData(data as any);
     });
-  }, [historicalLevels]);
+  }, [historicalLevels, processedBars]);
 
-  // Scan alert markers — one dot per date with alerts, colored by the triggered level.
-  // Grouped so multiple same-day alerts (e.g. different expiries) render as one marker
-  // with a count badge instead of stacking illegibly.
+  // Scan alert markers — one dot per trading day with alerts, colored by the
+  // triggered level, placed at that day's first loaded bar (works at any
+  // interval). Grouped so multiple same-day alerts (e.g. different expiries)
+  // render as one marker with a count badge instead of stacking illegibly.
   useEffect(() => {
     const byDate = new Map<string, ScanAlert[]>();
     visibleScanAlerts.forEach(a => {
@@ -681,26 +708,57 @@ export default function TVChart({
 
     if (!candleSeriesRef.current || isLoading) return;
 
-    const markers: SeriesMarker<Time>[] = [...byDate.entries()]
-      .sort((a, b) => (a[0] < b[0] ? -1 : 1))
-      .map(([date, alertsOnDate]) => {
+    const firstBarTimeByDay = new Map<string, number>();
+    processedBars.forEach(bar => {
+      if (!firstBarTimeByDay.has(bar.dayKey)) firstBarTimeByDay.set(bar.dayKey, bar.time);
+    });
+
+    const rawMarkers: (SeriesMarker<Time> | null)[] = [...byDate.entries()]
+      .map(([date, alertsOnDate]): SeriesMarker<Time> | null => {
+        const barTime = firstBarTimeByDay.get(date);
+        if (barTime === undefined) return null; // no loaded bar for that day — skip rather than guess a position
         const primary = alertsOnDate[alertsOnDate.length - 1];
         const level = SCAN_CODE_TO_LEVEL[primary.scanCode] ?? primary.closestLevel;
         return {
-          time: date as Time,
+          time: barTime as Time,
           position: 'aboveBar',
           shape: 'circle',
           color: getLevelColor(level),
           text: alertsOnDate.length > 1 ? String(alertsOnDate.length) : undefined,
         };
       });
+    const markers: SeriesMarker<Time>[] = rawMarkers
+      .filter((m): m is SeriesMarker<Time> => m !== null)
+      .sort((a, b) => (a.time as number) - (b.time as number));
 
     try {
       candleSeriesRef.current.setMarkers(markers);
     } catch (err) {
       console.error('Error setting scan alert markers:', err);
     }
-  }, [visibleScanAlerts, isLoading]);
+  }, [visibleScanAlerts, isLoading, processedBars]);
+
+  // Live price — nudges the most recent bar's OHLC in place rather than trying
+  // to roll over into a new bar client-side (which would need to duplicate the
+  // server's bucket-boundary logic). The next fetch/interval change reconciles
+  // it with a real bar.
+  useEffect(() => {
+    if (livePrice === undefined || !Number.isFinite(livePrice) || !candleSeriesRef.current || isLoading) return;
+    const seriesData = candleSeriesRef.current.data();
+    if (!seriesData || seriesData.length === 0) return;
+    const last = seriesData[seriesData.length - 1] as CandlestickData;
+    try {
+      candleSeriesRef.current.update({
+        time: last.time,
+        open: last.open,
+        high: Math.max(last.high, livePrice),
+        low: Math.min(last.low, livePrice),
+        close: livePrice,
+      });
+    } catch (err) {
+      console.error('Error live-updating candle:', err);
+    }
+  }, [livePrice, isLoading]);
 
   // Level filter toggle: show only selected level, or all if none selected
   useEffect(() => {
@@ -720,7 +778,7 @@ export default function TVChart({
 
   useEffect(() => {
     if (!oiDiffSeriesRef.current || !callOiLineRef.current || !putOiLineRef.current || !oiDiffLineRef.current) return;
-    
+
     oiDiffSeriesRef.current.applyOptions({ visible: showOI });
     callOiLineRef.current.applyOptions({ visible: showOI });
     putOiLineRef.current.applyOptions({ visible: showOI });
@@ -730,57 +788,54 @@ export default function TVChart({
   // Handle time period selection
   const handlePeriodChange = (period: string) => {
     if (!chartRef.current || !candleSeriesRef.current) return;
-    
+
     setSelectedPeriod(period);
-    
+
     const seriesData = candleSeriesRef.current.data();
     if (!seriesData || seriesData.length === 0) return;
-    
-    const lastDataTime = seriesData[seriesData.length - 1].time as string;
-    const lastDate = new Date(lastDataTime);
-    
-    let fromDate: Date;
-    
+
+    const lastTime = seriesData[seriesData.length - 1].time as number;
+    const DAY = 86400;
+
+    let fromTime: number;
+
     switch (period) {
       case '1D':
-        fromDate = new Date(lastDate);
-        fromDate.setDate(lastDate.getDate() - 1);
+        fromTime = lastTime - 1 * DAY;
         break;
       case '1W':
-        fromDate = new Date(lastDate);
-        fromDate.setDate(lastDate.getDate() - 7);
+        fromTime = lastTime - 7 * DAY;
         break;
       case '1M':
-        fromDate = new Date(lastDate);
-        fromDate.setMonth(lastDate.getMonth() - 1);
+        fromTime = lastTime - 30 * DAY;
         break;
       case '3M':
-        fromDate = new Date(lastDate);
-        fromDate.setMonth(lastDate.getMonth() - 3);
+        fromTime = lastTime - 90 * DAY;
         break;
       case '6M':
-        fromDate = new Date(lastDate);
-        fromDate.setMonth(lastDate.getMonth() - 6);
+        fromTime = lastTime - 180 * DAY;
         break;
       case '1Y':
-        fromDate = new Date(lastDate);
-        fromDate.setFullYear(lastDate.getFullYear() - 1);
+        fromTime = lastTime - 365 * DAY;
         break;
-      case 'YTD':
-        fromDate = new Date(lastDate.getFullYear(), 0, 1);
+      case 'YTD': {
+        const lastDate = new Date(lastTime * 1000);
+        fromTime = Math.floor(new Date(Date.UTC(lastDate.getUTCFullYear(), 0, 1)).getTime() / 1000);
         break;
+      }
       case 'ALL':
       default:
         chartRef.current.timeScale().fitContent();
         return;
     }
-    
-    const fromTimeStr = fromDate.toISOString().split('T')[0];
+
     chartRef.current.timeScale().setVisibleRange({
-      from: fromTimeStr as any,
-      to: lastDataTime as any,
+      from: fromTime as any,
+      to: lastTime as any,
     });
   };
+
+  const displayPrice = livePrice ?? currentPrice;
 
   return (
     <div className="w-full">
@@ -788,9 +843,15 @@ export default function TVChart({
         <div className="flex items-center gap-3">
           <div>
             <h2 className="text-2xl font-bold">{symbol}</h2>
-            {currentPrice && (
-              <p className="text-lg text-gray-600">
-                {formatCurrency(currentPrice)}
+            {displayPrice !== undefined && (
+              <p className="text-lg text-gray-600 flex items-center gap-2">
+                <span>{formatCurrency(displayPrice)}</span>
+                {livePrice !== undefined && (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-bold text-green-600 uppercase tracking-wide">
+                    <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                    Live
+                  </span>
+                )}
               </p>
             )}
           </div>
@@ -801,7 +862,7 @@ export default function TVChart({
             </div>
           )}
         </div>
-        
+
         <div className="flex items-center gap-3">
           {/* Visibility Toggles */}
           <div className="flex items-center gap-2 border-r border-gray-300 pr-3">
@@ -826,7 +887,7 @@ export default function TVChart({
               OI
             </button>
           </div>
-          
+
           {/* Time Period Selector */}
           <div className="flex items-center gap-1">
             {['1D', '1W', '1M', '3M', '6M', '1Y', 'YTD', 'ALL'].map((period) => (
@@ -852,20 +913,20 @@ export default function TVChart({
         style={{ height: `${height}px` }}
       >
         {/* OHLC Display - Top Left */}
-        <div 
+        <div
           ref={ohlcDisplayRef}
           className="absolute top-2 left-2 bg-white/95 backdrop-blur-sm px-3 py-2 rounded shadow-md z-10 pointer-events-none border border-gray-200"
         >
           <div className="text-xs text-gray-500">{symbol}</div>
         </div>
-        
+
         {/* Tooltip */}
         <div
           ref={tooltipRef}
           className="absolute z-10 bg-white border border-gray-300 rounded-lg shadow-lg p-3 pointer-events-none"
           style={{ display: 'none' }}
         />
-        
+
         {isLoading && (
           <div className="absolute inset-0 flex items-center justify-center bg-white bg-opacity-75">
             <div className="text-center">

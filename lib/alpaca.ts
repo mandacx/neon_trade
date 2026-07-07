@@ -39,7 +39,7 @@ export interface AlpacaHistoryResponse {
 /**
  * Get historical price data (OHLCV) from Alpaca
  * @param symbol Stock symbol
- * @param timeframe Timeframe: 1Min, 5Min, 15Min, 1Hour, 1Day, 1Week, 1Month
+ * @param timeframe Timeframe: 1Min, 5Min, 15Min, 30Min, 1Hour, 1Day, 1Week, 1Month
  * @param start Start date in RFC3339 format or YYYY-MM-DD
  * @param end End date in RFC3339 format or YYYY-MM-DD
  */
@@ -50,22 +50,34 @@ export async function getHistoricalBars(
   end?: string
 ): Promise<AlpacaBar[]> {
   try {
-    const params: any = {
-      symbols: symbol.toUpperCase(), // Note: 'symbols' not 'symbol'
-      timeframe,
-      adjustment: 'split', // Adjust for stock splits
-      feed: 'iex', // Use IEX feed (available on free tier)
-    };
+    const bars: AlpacaBar[] = [];
+    let pageToken: string | undefined;
+    // Alpaca pages at 1000 bars/request by default; intraday ranges can exceed that.
+    // Loop until exhausted, capped so a misbehaving response can't loop forever.
+    for (let page = 0; page < 20; page++) {
+      const params: any = {
+        symbols: symbol.toUpperCase(), // Note: 'symbols' not 'symbol'
+        timeframe,
+        adjustment: 'split', // Adjust for stock splits
+        feed: 'iex', // Use IEX feed (available on free tier)
+        limit: 10000,
+      };
 
-    if (start) params.start = start;
-    if (end) params.end = end;
+      if (start) params.start = start;
+      if (end) params.end = end;
+      if (pageToken) params.page_token = pageToken;
 
-    const response = await alpacaClient.get<AlpacaHistoryResponse>(
-      '/v2/stocks/bars',
-      { params }
-    );
+      const response = await alpacaClient.get<AlpacaHistoryResponse>(
+        '/v2/stocks/bars',
+        { params }
+      );
 
-    return response.data?.bars?.[symbol.toUpperCase()] || [];
+      bars.push(...(response.data?.bars?.[symbol.toUpperCase()] || []));
+      pageToken = response.data?.next_page_token;
+      if (!pageToken) break;
+    }
+
+    return bars;
   } catch (error) {
     if (axios.isAxiosError(error)) {
       console.error('Alpaca API error:', error.response?.status, error.response?.data);
@@ -82,7 +94,8 @@ export async function getHistoricalBars(
 export async function getLatestQuote(symbol: string) {
   try {
     const response = await alpacaClient.get(
-      `/v2/stocks/${symbol.toUpperCase()}/quotes/latest`
+      `/v2/stocks/${symbol.toUpperCase()}/quotes/latest`,
+      { params: { feed: 'iex' } }
     );
 
     return response.data?.quote;
@@ -102,7 +115,8 @@ export async function getLatestQuote(symbol: string) {
 export async function getLatestTrade(symbol: string) {
   try {
     const response = await alpacaClient.get(
-      `/v2/stocks/${symbol.toUpperCase()}/trades/latest`
+      `/v2/stocks/${symbol.toUpperCase()}/trades/latest`,
+      { params: { feed: 'iex' } }
     );
 
     return response.data?.trade;
@@ -116,11 +130,23 @@ export async function getLatestTrade(symbol: string) {
   }
 }
 
+export type ChartInterval = '1min' | '5min' | '15min' | '30min' | '1hour' | 'daily' | 'weekly' | 'monthly';
+
 /**
  * Convert interval string to Alpaca timeframe format
  */
-export function convertIntervalToTimeframe(interval: 'daily' | 'weekly' | 'monthly'): string {
+export function convertIntervalToTimeframe(interval: ChartInterval): string {
   switch (interval) {
+    case '1min':
+      return '1Min';
+    case '5min':
+      return '5Min';
+    case '15min':
+      return '15Min';
+    case '30min':
+      return '30Min';
+    case '1hour':
+      return '1Hour';
     case 'daily':
       return '1Day';
     case 'weekly':
@@ -130,4 +156,9 @@ export function convertIntervalToTimeframe(interval: 'daily' | 'weekly' | 'month
     default:
       return '1Day';
   }
+}
+
+/** Is this interval finer than one day (i.e. multiple bars per trading day)? */
+export function isIntradayInterval(interval: ChartInterval): boolean {
+  return interval === '1min' || interval === '5min' || interval === '15min' || interval === '30min' || interval === '1hour';
 }

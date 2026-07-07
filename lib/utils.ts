@@ -113,3 +113,23 @@ export const SCAN_CODE_TO_LEVEL: Record<string, string> = {
   'CALL INT': 'call_int',
   'CALL HIGH': 'call_high',
 };
+
+/** Regular NYSE/Nasdaq session: 9:30–16:00 America/New_York, Mon–Fri. Holidays not accounted for. */
+export function isUsMarketHours(date: Date): boolean {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York', weekday: 'short', hour: 'numeric', minute: 'numeric', hour12: false,
+  }).formatToParts(date);
+  const get = (type: string) => parts.find(p => p.type === type)?.value ?? '';
+  if (get('weekday') === 'Sat' || get('weekday') === 'Sun') return false;
+  const minutesSinceMidnight = parseInt(get('hour'), 10) * 60 + parseInt(get('minute'), 10);
+  return minutesSinceMidnight >= 9 * 60 + 30 && minutesSinceMidnight < 16 * 60;
+}
+
+/** Format a UTC epoch-seconds timestamp as the US trading-day it falls on ('YYYY-MM-DD' in America/New_York). */
+export function usTradingDayKey(epochSeconds: number): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date(epochSeconds * 1000));
+  const get = (type: string) => parts.find(p => p.type === type)?.value ?? '';
+  return `${get('year')}-${get('month')}-${get('day')}`;
+}

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { getLevelColor, getLevelDisplayName, SCAN_CODE_TO_LEVEL } from '@/lib/utils';
+import { getLevelColor, getLevelDisplayName, SCAN_CODE_TO_LEVEL, isUsMarketHours } from '@/lib/utils';
 import { ScanAlert } from '@/types/stock';
 
 interface ScanAlertsTickerProps {
@@ -20,16 +20,6 @@ const DISPLAY_CAP = 60;
 // fixed-duration scroll rushing past a big batch unreadably.
 const SECONDS_PER_ITEM = 2.2;
 const MIN_SCROLL_SECONDS = 20;
-
-function isUsMarketHours(date: Date): boolean {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/New_York', weekday: 'short', hour: 'numeric', minute: 'numeric', hour12: false,
-  }).formatToParts(date);
-  const get = (type: string) => parts.find(p => p.type === type)?.value ?? '';
-  if (get('weekday') === 'Sat' || get('weekday') === 'Sun') return false;
-  const minutesSinceMidnight = parseInt(get('hour'), 10) * 60 + parseInt(get('minute'), 10);
-  return minutesSinceMidnight >= 9 * 60 + 30 && minutesSinceMidnight < 16 * 60; // 9:30–16:00 ET, holidays not accounted for
-}
 
 function alertKey(a: ScanAlert): string {
   return `${a.symbol}|${a.expiryDate}|${a.loadDateTime}|${a.scanCode}`;

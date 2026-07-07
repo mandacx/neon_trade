@@ -8,13 +8,29 @@ import ErrorDisplay from '@/components/ui/ErrorDisplay';
 import Header from '@/components/layout/Header';
 import ScanAlertsTicker from '@/components/ui/ScanAlertsTicker';
 import { LevelCalculation, ScanAlert } from '@/types/stock';
-import { getLevelColor, getLevelDisplayName, formatCurrency, formatPercentage } from '@/lib/utils';
+import { getLevelColor, getLevelDisplayName, formatCurrency, formatPercentage, isUsMarketHours } from '@/lib/utils';
+import { isIntradayInterval } from '@/lib/alpaca';
 import { format, subDays } from 'date-fns';
+
+type SelectableInterval = '1min' | '5min' | '15min' | '30min' | '1hour' | 'daily';
+
+// initialDays = default lookback on first load / interval switch; chunkDays = how
+// much more to pull per scroll-back "load more". Finer intervals use smaller
+// windows so a single fetch/pagination round stays a reasonable size.
+const INTERVAL_CONFIG: Record<SelectableInterval, { initialDays: number; chunkDays: number; label: string }> = {
+  '1min': { initialDays: 2, chunkDays: 1, label: '1m' },
+  '5min': { initialDays: 5, chunkDays: 3, label: '5m' },
+  '15min': { initialDays: 10, chunkDays: 5, label: '15m' },
+  '30min': { initialDays: 20, chunkDays: 10, label: '30m' },
+  '1hour': { initialDays: 30, chunkDays: 15, label: '1H' },
+  daily: { initialDays: 60, chunkDays: 60, label: '1D' },
+};
+const INTERVAL_ORDER: SelectableInterval[] = ['1min', '5min', '15min', '30min', '1hour', 'daily'];
 
 export default function StockPage() {
   const params = useParams();
   const symbol = params?.symbol as string;
-  
+
   const [stockData, setStockData] = useState<any>(null);
   const [ohlcData, setOhlcData] = useState<any[]>([]);
   const [oiData, setOiData] = useState<any[]>([]);
@@ -28,7 +44,9 @@ export default function StockPage() {
   const [expiryDates, setExpiryDates] = useState<string[]>([]);
   const [selectedExpiry, setSelectedExpiry] = useState<string>('');
   const [isInitialLoad, setIsInitialLoad] = useState(true);
-  
+  const [chartInterval, setChartInterval] = useState<SelectableInterval>('daily');
+  const [livePrice, setLivePrice] = useState<number | undefined>(undefined);
+
   // Track loaded date ranges to avoid duplicate fetches
   const loadedRangesRef = useRef<{ from: string; to: string }[]>([]);
 
@@ -36,9 +54,11 @@ export default function StockPage() {
   const ohlcDataRef = useRef<any[]>([]);
   const isLoadingMoreRef = useRef(false);
   const selectedExpiryRef = useRef('');
+  const chartIntervalRef = useRef<SelectableInterval>('daily');
   useEffect(() => { ohlcDataRef.current = ohlcData; }, [ohlcData]);
   useEffect(() => { isLoadingMoreRef.current = isLoadingMore; }, [isLoadingMore]);
   useEffect(() => { selectedExpiryRef.current = selectedExpiry; }, [selectedExpiry]);
+  useEffect(() => { chartIntervalRef.current = chartInterval; }, [chartInterval]);
 
   useEffect(() => {
     if (!symbol) return;
@@ -48,16 +68,17 @@ export default function StockPage() {
       setError(null);
 
       try {
+        const { initialDays } = INTERVAL_CONFIG[chartInterval];
         const to = format(new Date(), 'yyyy-MM-dd');
-        const from = format(subDays(new Date(), 60), 'yyyy-MM-dd');
-        
+        const from = format(subDays(new Date(), initialDays), 'yyyy-MM-dd');
+
         // Track initial loaded range
         loadedRangesRef.current = [{ from, to }];
 
         // Fetch stock details, levels, expiry dates, and scan alerts
         const [detailsRes, ohlcRes, levelsRes, expiryRes, scanAlertsRes] = await Promise.all([
           fetch(`/api/stocks/${symbol}`),
-          fetch(`/api/stocks/${symbol}/ohlc?from=${from}&to=${to}`),
+          fetch(`/api/stocks/${symbol}/ohlc?from=${from}&to=${to}&interval=${chartInterval}`),
           fetch(`/api/stocks/${symbol}/levels`),
           fetch(`/api/stocks/${symbol}/expiry-dates`),
           fetch(`/api/stocks/${symbol}/scan-alerts?from=${from}&to=${to}`),
@@ -95,20 +116,22 @@ export default function StockPage() {
           setLevels(levelsData.data.calculated || []);
           setClosestLevel(levelsData.data.closestLevel);
         }
-        
-        // Set expiry dates if available
+
+        // Set expiry dates if available. Keep the user's existing selection across
+        // interval switches — only default to the nearest expiry on true first load.
         if (expiryData.success && expiryData.data.expiryDates.length > 0) {
-          setExpiryDates(expiryData.data.expiryDates);
           const firstExpiry = expiryData.data.expiryDates[0];
-          setSelectedExpiry(firstExpiry);
-          
+          const expiryToUse = selectedExpiryRef.current || firstExpiry;
+          setExpiryDates(expiryData.data.expiryDates);
+          setSelectedExpiry(expiryToUse);
+
           const dates = (ohlc.data.data || []).map((d: any) => d.date).sort();
           if (dates.length > 0) {
-            const from = dates[0];
-            const to = dates[dates.length - 1];
+            const levelsFrom = dates[0];
+            const levelsTo = dates[dates.length - 1];
 
             try {
-              const histResponse = await fetch(`/api/stocks/${symbol}/levels?expiry=${firstExpiry}&range=true&from=${from}&to=${to}`);
+              const histResponse = await fetch(`/api/stocks/${symbol}/levels?expiry=${expiryToUse}&range=true&from=${levelsFrom}&to=${levelsTo}`);
 
               if (histResponse.ok) {
                 const histLevelsData = await histResponse.json();
@@ -163,7 +186,7 @@ export default function StockPage() {
     };
 
     fetchData();
-  }, [symbol]);
+  }, [symbol, chartInterval]);
 
   // Fetch historical levels data when expiry date changes (skip initial load)
   useEffect(() => {
@@ -228,6 +251,31 @@ export default function StockPage() {
     fetchHistoricalLevels();
   }, [selectedExpiry, symbol, isInitialLoad, ohlcData]);
 
+  // Live price — polls Alpaca's latest trade. Fast during market hours for a
+  // genuinely "live" feel, much slower off-hours since the price can't move.
+  useEffect(() => {
+    if (!symbol) return;
+    let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout>;
+
+    function poll() {
+      fetch(`/api/stocks/${symbol}/quote`)
+        .then(r => r.json())
+        .then(res => {
+          if (cancelled || !res.success || !res.data) return;
+          setLivePrice(res.data.price);
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (cancelled) return;
+          timeoutId = setTimeout(poll, isUsMarketHours(new Date()) ? 10_000 : 5 * 60_000);
+        });
+    }
+
+    poll();
+    return () => { cancelled = true; clearTimeout(timeoutId); };
+  }, [symbol]);
+
   // Handle loading more historical data
   const handleLoadMore = useCallback(async (
     direction: 'past' | 'future',
@@ -241,12 +289,13 @@ export default function StockPage() {
 
       let from: string;
       let to: string;
+      const { chunkDays } = INTERVAL_CONFIG[chartIntervalRef.current];
 
       const currentOhlcData = ohlcDataRef.current;
       if (direction === 'past') {
         const earliestDate = new Date(currentOhlcData[0]?.date || firstVisibleTime);
         to = format(subDays(earliestDate, 1), 'yyyy-MM-dd');
-        from = format(subDays(earliestDate, 60), 'yyyy-MM-dd');
+        from = format(subDays(earliestDate, chunkDays), 'yyyy-MM-dd');
       } else {
         const latestDate = new Date(currentOhlcData[currentOhlcData.length - 1]?.date || lastVisibleTime);
         from = format(new Date(latestDate.getTime() + 86400000), 'yyyy-MM-dd');
@@ -263,8 +312,8 @@ export default function StockPage() {
         return;
       }
 
-      const ohlcResponse = await fetch(`/api/stocks/${symbol}/ohlc?from=${from}&to=${to}`);
-      
+      const ohlcResponse = await fetch(`/api/stocks/${symbol}/ohlc?from=${from}&to=${to}&interval=${chartIntervalRef.current}`);
+
       if (!ohlcResponse.ok) {
         throw new Error('Failed to load more data');
       }
@@ -305,10 +354,10 @@ export default function StockPage() {
           const levelsResponse = await fetch(
             `/api/stocks/${symbol}/levels?expiry=${selectedExpiryRef.current}&range=true&from=${from}&to=${to}`
           );
-          
+
           if (levelsResponse.ok) {
             const levelsResult = await levelsResponse.json();
-            
+
             if (levelsResult.success && levelsResult.data?.history) {
               const historyData = levelsResult.data.history;
 
@@ -357,7 +406,8 @@ export default function StockPage() {
   }, [levels, stockData, closestLevel]);
 
   const candleData = useMemo(() => ohlcData.map(d => ({
-    time: d.date,
+    time: d.timestamp,
+    dayKey: d.date,
     open: d.open,
     high: d.high,
     low: d.low,
@@ -365,7 +415,8 @@ export default function StockPage() {
   })), [ohlcData]);
 
   const volumeData = useMemo(() => ohlcData.map(d => ({
-    time: d.date,
+    time: d.timestamp,
+    dayKey: d.date,
     value: d.volume,
   })), [ohlcData]);
 
@@ -401,6 +452,24 @@ export default function StockPage() {
         <div className="container mx-auto px-4 py-8">
           <div className="mb-6">
             <ScanAlertsTicker />
+          </div>
+
+          {/* Chart Interval Selector */}
+          <div className="mb-3 flex flex-wrap items-center gap-1.5">
+            <span className="text-xs font-semibold text-gray-500 mr-1">Interval:</span>
+            {INTERVAL_ORDER.map((iv) => (
+              <button
+                key={iv}
+                onClick={() => setChartInterval(iv)}
+                className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
+                  chartInterval === iv
+                    ? 'border-green-600 bg-green-600 text-white'
+                    : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                {INTERVAL_CONFIG[iv].label}
+              </button>
+            ))}
           </div>
 
           {/* Expiry Selector — drives both the price level lines and the scan alert markers on the chart */}
@@ -444,6 +513,8 @@ export default function StockPage() {
               historicalLevels={historicalLevels}
               scanAlerts={scanAlerts}
               selectedExpiry={selectedExpiry}
+              isIntraday={isIntradayInterval(chartInterval)}
+              livePrice={livePrice}
               currentPrice={stockData?.close}
               height={600}
               onLoadMore={handleLoadMore}
