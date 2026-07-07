@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createChart, IChartApi, ISeriesApi, IPriceLine, CandlestickData, HistogramData, MouseEventParams, SeriesMarker, Time } from 'lightweight-charts';
 import { LevelCalculation, ScanAlert } from '@/types/stock';
 import { getLevelColor, getLevelDisplayName, formatCurrency, formatPercentage, SCAN_CODE_TO_LEVEL } from '@/lib/utils';
@@ -70,7 +70,24 @@ export default function TVChart({
   const [showPrice, setShowPrice] = useState(true);
   const [showOI, setShowOI] = useState(true);
   const [activeLevelFilter, setActiveLevelFilter] = useState<string | null>(null);
+  const [excludedExpiries, setExcludedExpiries] = useState<Set<string>>(new Set());
   const loadingMoreRef = useRef(false);
+
+  // Only alerts for expiries that haven't passed yet — a chart annotation for an
+  // already-expired option isn't actionable, just historical noise.
+  const todayStr = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const activeScanAlerts = useMemo(
+    () => scanAlerts.filter(a => a.expiryDate >= todayStr),
+    [scanAlerts, todayStr]
+  );
+  const expiryOptions = useMemo(
+    () => [...new Set(activeScanAlerts.map(a => a.expiryDate))].sort(),
+    [activeScanAlerts]
+  );
+  const visibleScanAlerts = useMemo(
+    () => activeScanAlerts.filter(a => !excludedExpiries.has(a.expiryDate)),
+    [activeScanAlerts, excludedExpiries]
+  );
 
   useEffect(() => { historicalLevelsRef.current = historicalLevels; }, [historicalLevels]);
   useEffect(() => { levelsRef.current = levels; }, [levels]);
@@ -663,7 +680,7 @@ export default function TVChart({
   // with a count badge instead of stacking illegibly.
   useEffect(() => {
     const byDate = new Map<string, ScanAlert[]>();
-    scanAlerts.forEach(a => {
+    visibleScanAlerts.forEach(a => {
       const list = byDate.get(a.tradeDate) ?? [];
       list.push(a);
       byDate.set(a.tradeDate, list);
@@ -691,7 +708,7 @@ export default function TVChart({
     } catch (err) {
       console.error('Error setting scan alert markers:', err);
     }
-  }, [scanAlerts, isLoading]);
+  }, [visibleScanAlerts, isLoading]);
 
   // Level filter toggle: show only selected level, or all if none selected
   useEffect(() => {
@@ -773,8 +790,51 @@ export default function TVChart({
     });
   };
 
+  const toggleExpiry = (expiry: string) => {
+    setExcludedExpiries(prev => {
+      const next = new Set(prev);
+      if (next.has(expiry)) next.delete(expiry);
+      else next.add(expiry);
+      return next;
+    });
+  };
+
   return (
     <div className="w-full">
+      {expiryOptions.length > 0 && (
+        <div className="mb-3 flex flex-wrap items-center gap-1.5">
+          <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mr-1">
+            🔔 Alert Expiries:
+          </span>
+          {expiryOptions.map(expiry => {
+            const isExcluded = excludedExpiries.has(expiry);
+            const count = activeScanAlerts.filter(a => a.expiryDate === expiry).length;
+            return (
+              <button
+                key={expiry}
+                onClick={() => toggleExpiry(expiry)}
+                className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-all ${
+                  isExcluded
+                    ? 'opacity-40 border-gray-200 bg-gray-50 text-gray-400'
+                    : 'border-purple-300 bg-purple-50 text-purple-700 hover:bg-purple-100'
+                }`}
+                title={isExcluded ? `Click to show ${expiry} alerts` : `Click to hide ${expiry} alerts`}
+              >
+                {expiry} <span className="opacity-70">({count})</span>
+              </button>
+            );
+          })}
+          {excludedExpiries.size > 0 && (
+            <button
+              onClick={() => setExcludedExpiries(new Set())}
+              className="px-2 py-1 text-xs text-gray-500 hover:text-gray-700 underline"
+            >
+              Show all
+            </button>
+          )}
+        </div>
+      )}
+
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div>
