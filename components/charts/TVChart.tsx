@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, ReactNode } from 'react';
 import { createChart, IChartApi, ISeriesApi, IPriceLine, CandlestickData, HistogramData, MouseEventParams, SeriesMarker, Time } from 'lightweight-charts';
 import { LevelCalculation, ScanAlert } from '@/types/stock';
 import { getLevelColor, getLevelDisplayName, formatCurrency, formatPercentage, SCAN_CODE_TO_LEVEL } from '@/lib/utils';
@@ -38,6 +38,9 @@ interface TVChartProps {
   isIntraday?: boolean;
   livePrice?: number;
   currentPrice?: number;
+  // Rendered in the chart's own top-left toolbar, next to the symbol/price —
+  // e.g. an interval selector — so it reads as part of the chart, not the page.
+  headerExtra?: ReactNode;
   height?: number;
   onLoadMore?: (direction: 'past' | 'future', firstVisibleTime: string, lastVisibleTime: string) => void;
   isLoadingMore?: boolean;
@@ -66,6 +69,7 @@ export default function TVChart({
   isIntraday = false,
   livePrice,
   currentPrice,
+  headerExtra,
   height = 500,
   onLoadMore,
   isLoadingMore = false,
@@ -855,6 +859,11 @@ export default function TVChart({
               </p>
             )}
           </div>
+          {headerExtra && (
+            <div className="flex items-center border-l border-gray-300 pl-3">
+              {headerExtra}
+            </div>
+          )}
           {isLoadingMore && (
             <div className="flex items-center gap-2 text-sm text-blue-600">
               <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600" />

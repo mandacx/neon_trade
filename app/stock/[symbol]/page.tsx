@@ -427,6 +427,24 @@ export default function StockPage() {
     oiDiff: d.oiDiff,
   })), [oiData]);
 
+  const intervalSelector = (
+    <div className="flex items-center gap-1">
+      {INTERVAL_ORDER.map((iv) => (
+        <button
+          key={iv}
+          onClick={() => setChartInterval(iv)}
+          className={`px-2.5 py-1.5 text-xs font-medium rounded transition-colors ${
+            chartInterval === iv
+              ? 'bg-green-600 text-white'
+              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+          }`}
+        >
+          {INTERVAL_CONFIG[iv].label}
+        </button>
+      ))}
+    </div>
+  );
+
   if (isLoading) {
     return (
       <>
@@ -452,24 +470,6 @@ export default function StockPage() {
         <div className="container mx-auto px-4 py-8">
           <div className="mb-6">
             <ScanAlertsTicker />
-          </div>
-
-          {/* Chart Interval Selector */}
-          <div className="mb-3 flex flex-wrap items-center gap-1.5">
-            <span className="text-xs font-semibold text-gray-500 mr-1">Interval:</span>
-            {INTERVAL_ORDER.map((iv) => (
-              <button
-                key={iv}
-                onClick={() => setChartInterval(iv)}
-                className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
-                  chartInterval === iv
-                    ? 'border-green-600 bg-green-600 text-white'
-                    : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
-                }`}
-              >
-                {INTERVAL_CONFIG[iv].label}
-              </button>
-            ))}
           </div>
 
           {/* Expiry Selector — drives both the price level lines and the scan alert markers on the chart */}
@@ -516,6 +516,7 @@ export default function StockPage() {
               isIntraday={isIntradayInterval(chartInterval)}
               livePrice={livePrice}
               currentPrice={stockData?.close}
+              headerExtra={intervalSelector}
               height={600}
               onLoadMore={handleLoadMore}
               isLoadingMore={isLoadingMore}
