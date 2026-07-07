@@ -69,6 +69,37 @@ export interface ScanAlertQueryFilters {
  * (tradeDate + futureExpiryOnly) and the Historical page (yearMonth + optional
  * tradeDate/expiryDate).
  */
+/** All scan alerts for one symbol (optionally date-bounded), oldest first — for chart markers. */
+export async function getScanAlertsForSymbol(symbol: string, fromDate?: string, toDate?: string): Promise<ScanAlert[]> {
+  const conditions: string[] = ['symbol = $1'];
+  const params: any[] = [symbol.toUpperCase()];
+
+  if (fromDate) {
+    params.push(fromDate);
+    conditions.push(`trade_date >= $${params.length}`);
+  }
+  if (toDate) {
+    params.push(toDate);
+    conditions.push(`trade_date <= $${params.length}`);
+  }
+
+  const query = `
+    SELECT ${SCAN_ALERT_SELECT}
+    FROM public.intra_us_scanner_eod
+    WHERE ${conditions.join(' AND ')}
+    ORDER BY trade_date ASC, load_dt_tm ASC
+    LIMIT 5000
+  `;
+
+  try {
+    const rows = (await sql(query, params)) as any[];
+    return rows.map(processRow).filter((a): a is ScanAlert => a !== null);
+  } catch (error) {
+    console.error('Error fetching scan alerts for symbol:', error);
+    return [];
+  }
+}
+
 export async function getScanAlerts(filters: ScanAlertQueryFilters): Promise<ScanAlert[]> {
   const conditions: string[] = [];
   const params: any[] = [];

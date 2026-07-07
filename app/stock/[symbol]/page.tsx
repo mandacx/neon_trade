@@ -6,7 +6,8 @@ import TVChart from '@/components/charts/TVChart';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import ErrorDisplay from '@/components/ui/ErrorDisplay';
 import Header from '@/components/layout/Header';
-import { LevelCalculation } from '@/types/stock';
+import ScanAlertsTicker from '@/components/ui/ScanAlertsTicker';
+import { LevelCalculation, ScanAlert } from '@/types/stock';
 import { getLevelColor, getLevelDisplayName, formatCurrency, formatPercentage } from '@/lib/utils';
 import { format, subDays } from 'date-fns';
 
@@ -17,6 +18,7 @@ export default function StockPage() {
   const [stockData, setStockData] = useState<any>(null);
   const [ohlcData, setOhlcData] = useState<any[]>([]);
   const [oiData, setOiData] = useState<any[]>([]);
+  const [scanAlerts, setScanAlerts] = useState<ScanAlert[]>([]);
   const [levels, setLevels] = useState<LevelCalculation[]>([]);
   const [closestLevel, setClosestLevel] = useState<string>('');
   const [historicalLevels, setHistoricalLevels] = useState<Map<string, { levels: LevelCalculation[], closestLevel: string }>>(new Map());
@@ -52,12 +54,13 @@ export default function StockPage() {
         // Track initial loaded range
         loadedRangesRef.current = [{ from, to }];
 
-        // Fetch stock details, levels, and expiry dates
-        const [detailsRes, ohlcRes, levelsRes, expiryRes] = await Promise.all([
+        // Fetch stock details, levels, expiry dates, and scan alerts
+        const [detailsRes, ohlcRes, levelsRes, expiryRes, scanAlertsRes] = await Promise.all([
           fetch(`/api/stocks/${symbol}`),
           fetch(`/api/stocks/${symbol}/ohlc?from=${from}&to=${to}`),
           fetch(`/api/stocks/${symbol}/levels`),
           fetch(`/api/stocks/${symbol}/expiry-dates`),
+          fetch(`/api/stocks/${symbol}/scan-alerts?from=${from}&to=${to}`),
         ]);
 
         // Check OHLC response (required)
@@ -78,7 +81,12 @@ export default function StockPage() {
 
         // Set OHLC data (always required)
         setOhlcData(ohlc.data.data || []);
-        
+
+        if (scanAlertsRes.ok) {
+          const scanAlertsData = await scanAlertsRes.json();
+          if (scanAlertsData.success) setScanAlerts(scanAlertsData.data.alerts || []);
+        }
+
         // Set stock details and levels only if available from database
         if (details.success && details.data) {
           setStockData(details.data);
@@ -280,6 +288,19 @@ export default function StockPage() {
           }
         });
 
+        const scanAlertsResponse = await fetch(`/api/stocks/${symbol}/scan-alerts?from=${from}&to=${to}`);
+        if (scanAlertsResponse.ok) {
+          const scanAlertsResult = await scanAlertsResponse.json();
+          if (scanAlertsResult.success && scanAlertsResult.data.alerts.length > 0) {
+            const newAlerts: ScanAlert[] = scanAlertsResult.data.alerts;
+            setScanAlerts(prevAlerts => {
+              const seen = new Set(prevAlerts.map(a => `${a.symbol}|${a.expiryDate}|${a.loadDateTime}`));
+              const deduped = newAlerts.filter(a => !seen.has(`${a.symbol}|${a.expiryDate}|${a.loadDateTime}`));
+              return direction === 'past' ? [...deduped, ...prevAlerts] : [...prevAlerts, ...deduped];
+            });
+          }
+        }
+
         if (selectedExpiryRef.current) {
           const levelsResponse = await fetch(
             `/api/stocks/${symbol}/levels?expiry=${selectedExpiryRef.current}&range=true&from=${from}&to=${to}`
@@ -378,6 +399,10 @@ export default function StockPage() {
       <Header />
       <div className="min-h-screen bg-gray-50">
         <div className="container mx-auto px-4 py-8">
+          <div className="mb-6">
+            <ScanAlertsTicker />
+          </div>
+
           {/* Expiry Date Selector */}
           {!isLoading && expiryDates.length > 0 && (
             <div className="mb-6 flex items-center justify-end gap-3">
@@ -409,6 +434,7 @@ export default function StockPage() {
               levels={levels}
               closestLevel={closestLevelName}
               historicalLevels={historicalLevels}
+              scanAlerts={scanAlerts}
               currentPrice={stockData?.close}
               height={600}
               onLoadMore={handleLoadMore}

@@ -1,9 +1,9 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { createChart, IChartApi, ISeriesApi, IPriceLine, CandlestickData, HistogramData, MouseEventParams } from 'lightweight-charts';
-import { LevelCalculation } from '@/types/stock';
-import { getLevelColor, getLevelDisplayName, formatCurrency, formatPercentage } from '@/lib/utils';
+import { createChart, IChartApi, ISeriesApi, IPriceLine, CandlestickData, HistogramData, MouseEventParams, SeriesMarker, Time } from 'lightweight-charts';
+import { LevelCalculation, ScanAlert } from '@/types/stock';
+import { getLevelColor, getLevelDisplayName, formatCurrency, formatPercentage, SCAN_CODE_TO_LEVEL } from '@/lib/utils';
 
 interface TVChartProps {
   symbol: string;
@@ -27,6 +27,7 @@ interface TVChartProps {
   levels?: LevelCalculation[];
   closestLevel?: string;
   historicalLevels?: Map<string, { levels: LevelCalculation[], closestLevel: string }>;
+  scanAlerts?: ScanAlert[];
   currentPrice?: number;
   height?: number;
   onLoadMore?: (direction: 'past' | 'future', firstVisibleTime: string, lastVisibleTime: string) => void;
@@ -41,6 +42,7 @@ export default function TVChart({
   levels = [],
   closestLevel,
   historicalLevels,
+  scanAlerts = [],
   currentPrice,
   height = 500,
   onLoadMore,
@@ -62,6 +64,7 @@ export default function TVChart({
   const levelsRef = useRef(levels);
   const closestLevelRef = useRef(closestLevel);
   const oiDataRef = useRef(oiData);
+  const scanAlertsByDateRef = useRef<Map<string, ScanAlert[]>>(new Map());
   const [isLoading, setIsLoading] = useState(true);
   const [selectedPeriod, setSelectedPeriod] = useState<string>('ALL');
   const [showPrice, setShowPrice] = useState(true);
@@ -354,6 +357,24 @@ export default function TVChart({
         };
       }).reverse() : []; // Reverse the order: Call High -> Call Int -> Put/Call Int -> Put Int -> Put Low
 
+      // Build scan alerts section for tooltip
+      const dateAlerts = scanAlertsByDateRef.current.get(dateStr) || [];
+      const alertsTooltipHtml = dateAlerts.length > 0 ? `
+        <div class="mt-3 pt-2 border-t border-gray-300">
+          <div class="font-semibold mb-1 text-gray-700">🔔 Scan Alerts (${dateAlerts.length}):</div>
+          ${dateAlerts.map(a => {
+            const level = SCAN_CODE_TO_LEVEL[a.scanCode] ?? a.closestLevel;
+            const color = getLevelColor(level);
+            return `
+              <div class="flex justify-between gap-4 items-center py-0.5">
+                <span class="px-1.5 py-0.5 rounded text-white text-[10px] font-semibold" style="background-color:${color}">${a.scanCode}</span>
+                <span class="text-gray-500 text-[10px]">exp ${a.expiryDate}</span>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      ` : '';
+
       // Build OI section for tooltip
       const oiTooltipHtml = currentOiData ? `
         <div class="mt-3 pt-2 border-t border-gray-300">
@@ -396,6 +417,7 @@ export default function TVChart({
               <span class="font-semibold">${formatCurrency(close)}</span>
             </div>
           </div>
+          ${alertsTooltipHtml}
           ${oiTooltipHtml}
           ${levelsWithProximity.length > 0 ? `
             <div class="mt-3 pt-2 border-t border-gray-300">
@@ -635,6 +657,41 @@ export default function TVChart({
       s.setData(data as any);
     });
   }, [historicalLevels]);
+
+  // Scan alert markers — one dot per date with alerts, colored by the triggered level.
+  // Grouped so multiple same-day alerts (e.g. different expiries) render as one marker
+  // with a count badge instead of stacking illegibly.
+  useEffect(() => {
+    const byDate = new Map<string, ScanAlert[]>();
+    scanAlerts.forEach(a => {
+      const list = byDate.get(a.tradeDate) ?? [];
+      list.push(a);
+      byDate.set(a.tradeDate, list);
+    });
+    scanAlertsByDateRef.current = byDate;
+
+    if (!candleSeriesRef.current || isLoading) return;
+
+    const markers: SeriesMarker<Time>[] = [...byDate.entries()]
+      .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+      .map(([date, alertsOnDate]) => {
+        const primary = alertsOnDate[alertsOnDate.length - 1];
+        const level = SCAN_CODE_TO_LEVEL[primary.scanCode] ?? primary.closestLevel;
+        return {
+          time: date as Time,
+          position: 'aboveBar',
+          shape: 'circle',
+          color: getLevelColor(level),
+          text: alertsOnDate.length > 1 ? String(alertsOnDate.length) : undefined,
+        };
+      });
+
+    try {
+      candleSeriesRef.current.setMarkers(markers);
+    } catch (err) {
+      console.error('Error setting scan alert markers:', err);
+    }
+  }, [scanAlerts, isLoading]);
 
   // Level filter toggle: show only selected level, or all if none selected
   useEffect(() => {
