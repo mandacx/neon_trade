@@ -28,6 +28,7 @@ interface TVChartProps {
   closestLevel?: string;
   historicalLevels?: Map<string, { levels: LevelCalculation[], closestLevel: string }>;
   scanAlerts?: ScanAlert[];
+  selectedExpiry?: string;
   currentPrice?: number;
   height?: number;
   onLoadMore?: (direction: 'past' | 'future', firstVisibleTime: string, lastVisibleTime: string) => void;
@@ -43,6 +44,7 @@ export default function TVChart({
   closestLevel,
   historicalLevels,
   scanAlerts = [],
+  selectedExpiry,
   currentPrice,
   height = 500,
   onLoadMore,
@@ -70,25 +72,13 @@ export default function TVChart({
   const [showPrice, setShowPrice] = useState(true);
   const [showOI, setShowOI] = useState(true);
   const [activeLevelFilter, setActiveLevelFilter] = useState<string | null>(null);
-  const [activeExpiryFilter, setActiveExpiryFilter] = useState<string | null>(null);
   const loadingMoreRef = useRef(false);
 
-  // Only alerts for expiries that haven't passed yet — a chart annotation for an
-  // already-expired option isn't actionable, just historical noise.
-  const todayStr = useMemo(() => new Date().toISOString().slice(0, 10), []);
-  const activeScanAlerts = useMemo(
-    () => scanAlerts.filter(a => a.expiryDate >= todayStr),
-    [scanAlerts, todayStr]
-  );
-  const expiryOptions = useMemo(
-    () => [...new Set(activeScanAlerts.map(a => a.expiryDate))].sort(),
-    [activeScanAlerts]
-  );
+  // Scan alert markers/tooltip are scoped to whichever expiry is selected for the
+  // price levels — one control drives both, so they always describe the same contract.
   const visibleScanAlerts = useMemo(
-    () => activeExpiryFilter === null
-      ? activeScanAlerts
-      : activeScanAlerts.filter(a => a.expiryDate === activeExpiryFilter),
-    [activeScanAlerts, activeExpiryFilter]
+    () => (selectedExpiry ? scanAlerts.filter(a => a.expiryDate === selectedExpiry) : scanAlerts),
+    [scanAlerts, selectedExpiry]
   );
 
   useEffect(() => { historicalLevelsRef.current = historicalLevels; }, [historicalLevels]);
@@ -792,47 +782,8 @@ export default function TVChart({
     });
   };
 
-  const toggleExpiry = (expiry: string) => {
-    setActiveExpiryFilter(prev => (prev === expiry ? null : expiry));
-  };
-
   return (
     <div className="w-full">
-      {expiryOptions.length > 0 && (
-        <div className="mb-3 flex flex-wrap items-center gap-1.5">
-          <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mr-1">
-            🔔 Alert Expiries:
-          </span>
-          {expiryOptions.map(expiry => {
-            const isActive = activeExpiryFilter === expiry;
-            const isDimmed = activeExpiryFilter !== null && !isActive;
-            const count = activeScanAlerts.filter(a => a.expiryDate === expiry).length;
-            return (
-              <button
-                key={expiry}
-                onClick={() => toggleExpiry(expiry)}
-                className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-all ${
-                  isDimmed
-                    ? 'opacity-40 border-gray-200 bg-gray-50 text-gray-400'
-                    : 'border-purple-300 bg-purple-50 text-purple-700 hover:bg-purple-100'
-                }`}
-                title={isActive ? `Click to show all expiries` : `Click to show only ${expiry} alerts`}
-              >
-                {expiry} <span className="opacity-70">({count})</span>
-              </button>
-            );
-          })}
-          {activeExpiryFilter !== null && (
-            <button
-              onClick={() => setActiveExpiryFilter(null)}
-              className="px-2 py-1 text-xs text-gray-500 hover:text-gray-700 underline"
-            >
-              Show all
-            </button>
-          )}
-        </div>
-      )}
-
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div>

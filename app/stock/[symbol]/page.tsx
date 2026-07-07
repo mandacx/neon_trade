@@ -403,24 +403,32 @@ export default function StockPage() {
             <ScanAlertsTicker />
           </div>
 
-          {/* Expiry Date Selector */}
+          {/* Expiry Selector — drives both the price level lines and the scan alert markers on the chart */}
           {!isLoading && expiryDates.length > 0 && (
-            <div className="mb-6 flex items-center justify-end gap-3">
-              <label htmlFor="expiry-select" className="text-sm font-medium text-gray-700">
-                Expiry Date:
-              </label>
-              <select
-                id="expiry-select"
-                value={selectedExpiry}
-                onChange={(e) => setSelectedExpiry(e.target.value)}
-                className="px-4 py-2 border border-gray-300 rounded-lg bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
-              >
-                {expiryDates.map((date) => (
-                  <option key={date} value={date}>
+            <div className="mb-6 flex flex-wrap items-center gap-1.5">
+              <span className="text-xs font-semibold text-gray-500 mr-1">Expiry Date:</span>
+              {expiryDates.map((date) => {
+                const isActive = date === selectedExpiry;
+                const alertCount = scanAlerts.filter(a => a.expiryDate === date).length;
+                return (
+                  <button
+                    key={date}
+                    onClick={() => setSelectedExpiry(date)}
+                    className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
+                      isActive
+                        ? 'border-blue-600 bg-blue-600 text-white'
+                        : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
                     {date}
-                  </option>
-                ))}
-              </select>
+                    {alertCount > 0 && (
+                      <span className={`ml-1.5 ${isActive ? 'opacity-90' : 'text-purple-600'}`}>
+                        🔔{alertCount}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
           )}
 
@@ -435,6 +443,7 @@ export default function StockPage() {
               closestLevel={closestLevelName}
               historicalLevels={historicalLevels}
               scanAlerts={scanAlerts}
+              selectedExpiry={selectedExpiry}
               currentPrice={stockData?.close}
               height={600}
               onLoadMore={handleLoadMore}
