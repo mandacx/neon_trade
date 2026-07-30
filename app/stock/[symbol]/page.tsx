@@ -38,7 +38,7 @@ type LevelHistoryEntry = {
   oi?: { callOi: number; putOi: number; oiDiff: number };
   ratios?: { upc: number; ucpr: number };
 };
-const SEVEN_LEVEL_ORDER = ['put_low', 'call_low', 'put_int', 'put_call_int', 'call_int', 'put_high', 'call_high'];
+const SEVEN_LEVEL_ORDER = ['put_low', 'put_int', 'put_call_int', 'call_int', 'call_high', 'call_low', 'put_high'];
 
 export default function StockPage() {
   const params = useParams();

@@ -90,12 +90,12 @@ export async function GET(
         // for the chart/scan alerts — this is a superset for the levels table).
         const sevenLevels = [
           { name: 'put_low', price: data.put_LOW },
-          { name: 'call_low', price: data.call_low },
           { name: 'put_int', price: data.PUT_INT },
           { name: 'put_call_int', price: data.PUT_CALL_INT },
           { name: 'call_int', price: data.CALL_INT },
-          { name: 'put_high', price: data.put_HIGH },
           { name: 'call_high', price: data.call_HIGH },
+          { name: 'call_low', price: data.call_low },
+          { name: 'put_high', price: data.put_HIGH },
         ].map(l => ({
           ...l,
           value: data.CLOSE ? (data.CLOSE - l.price) / data.CLOSE : 0,
