@@ -76,9 +76,11 @@ export function debounce<T extends (...args: any[]) => any>(
 export function getLevelColor(levelName: string): string {
   const colors: Record<string, string> = {
     put_low: '#EF4444',      // Red
+    call_low: '#F87171',     // Light Red
     put_int: '#F97316',      // Orange
     put_call_int: '#EAB308', // Yellow
     call_int: '#84CC16',     // Light Green
+    put_high: '#4ADE80',     // Light Green
     call_high: '#22C55E',    // Green
   };
   
@@ -91,9 +93,11 @@ export function getLevelColor(levelName: string): string {
 export function getLevelDisplayName(levelName: string): string {
   const names: Record<string, string> = {
     put_low: 'Put Low',
+    call_low: 'Call Low',
     put_int: 'Put Int',
     put_call_int: 'Put/Call Int',
     call_int: 'Call Int',
+    put_high: 'Put High',
     call_high: 'Call High',
   };
 

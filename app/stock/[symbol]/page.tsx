@@ -27,6 +27,19 @@ const INTERVAL_CONFIG: Record<SelectableInterval, { initialDays: number; chunkDa
 };
 const INTERVAL_ORDER: SelectableInterval[] = ['1min', '5min', '15min', '30min', '1hour', 'daily'];
 
+// One row of the 7-level historical table: the DB's full level set (superset of
+// the 5 "official" levels used for closest-level business logic elsewhere).
+type SevenLevel = { name: string; price: number; value: number };
+type LevelHistoryEntry = {
+  levels: LevelCalculation[];
+  closestLevel: string;
+  close: number;
+  sevenLevels: SevenLevel[];
+  oi?: { callOi: number; putOi: number; oiDiff: number };
+  ratios?: { upc: number; ucpr: number };
+};
+const SEVEN_LEVEL_ORDER = ['put_low', 'call_low', 'put_int', 'put_call_int', 'call_int', 'put_high', 'call_high'];
+
 export default function StockPage() {
   const params = useParams();
   const symbol = params?.symbol as string;
@@ -37,7 +50,7 @@ export default function StockPage() {
   const [scanAlerts, setScanAlerts] = useState<ScanAlert[]>([]);
   const [levels, setLevels] = useState<LevelCalculation[]>([]);
   const [closestLevel, setClosestLevel] = useState<string>('');
-  const [historicalLevels, setHistoricalLevels] = useState<Map<string, { levels: LevelCalculation[], closestLevel: string }>>(new Map());
+  const [historicalLevels, setHistoricalLevels] = useState<Map<string, LevelHistoryEntry>>(new Map());
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -144,7 +157,11 @@ export default function StockPage() {
                   histLevelsData.data.history.forEach((item: any) => {
                     levelsMap.set(item.date, {
                       levels: item.calculated,
-                      closestLevel: item.closestLevel
+                      closestLevel: item.closestLevel,
+                      close: item.close,
+                      sevenLevels: item.sevenLevels || [],
+                      oi: item.oi,
+                      ratios: item.ratios,
                     });
                     if (!latestDate || item.date > latestDate) {
                       latestDate = item.date;
@@ -211,7 +228,11 @@ export default function StockPage() {
             levelsData.data.history.forEach((item: any) => {
               levelsMap.set(item.date, {
                 levels: item.calculated,
-                closestLevel: item.closestLevel
+                closestLevel: item.closestLevel,
+                close: item.close,
+                sevenLevels: item.sevenLevels || [],
+                oi: item.oi,
+                ratios: item.ratios,
               });
               if (!latestDate || item.date > latestDate) {
                 latestDate = item.date;
@@ -366,7 +387,11 @@ export default function StockPage() {
                 historyData.forEach((item: any) => {
                   newMap.set(item.date, {
                     levels: item.calculated || [],
-                    closestLevel: item.closestLevel || ''
+                    closestLevel: item.closestLevel || '',
+                    close: item.close,
+                    sevenLevels: item.sevenLevels || [],
+                    oi: item.oi,
+                    ratios: item.ratios,
                   });
                 });
                 return newMap;
@@ -426,6 +451,13 @@ export default function StockPage() {
     putOi: d.putOi,
     oiDiff: d.oiDiff,
   })), [oiData]);
+
+  // Most-recent-first rows for the historical 7-level table below the main chart
+  const levelHistoryRows = useMemo(() => {
+    return Array.from(historicalLevels.entries())
+      .map(([date, entry]) => ({ date, ...entry }))
+      .sort((a, b) => b.date.localeCompare(a.date));
+  }, [historicalLevels]);
 
   const intervalSelector = (
     <div className="flex items-center gap-1">
@@ -524,17 +556,17 @@ export default function StockPage() {
           </div>
 
           {/* Stock Details */}
-          <div className="grid md:grid-cols-2 gap-6">
+          <div className="grid md:grid-cols-2 gap-4">
             {/* Level Details Table */}
-            <div className="bg-white rounded-lg shadow-md p-6">
-              <h3 className="text-xl font-bold mb-4">Price Levels</h3>
+            <div className="bg-white rounded-lg shadow-md p-4">
+              <h3 className="text-base font-bold mb-2">Price Levels</h3>
               {levels.length === 0 ? (
-                <div className="text-center py-8 text-gray-500">
-                  <p className="mb-2">Level data not available in database</p>
-                  <p className="text-sm">Displaying broker OHLC data only</p>
+                <div className="text-center py-4 text-gray-500 text-sm">
+                  <p className="mb-1">Level data not available in database</p>
+                  <p className="text-xs">Displaying broker OHLC data only</p>
                 </div>
               ) : (
-                <div className="space-y-3">
+                <div className="space-y-1.5">
                   {levels.map((level: any) => {
                   const isClosest = level.name === closestLevelName;
                   const color = isClosest ? '#3B82F6' : getLevelColor(level.name);
@@ -542,34 +574,31 @@ export default function StockPage() {
                   return (
                     <div
                       key={level.name}
-                      className={`p-3 rounded-lg border-2 ${
+                      className={`px-2.5 py-1.5 rounded-md border ${
                         isClosest
                           ? 'bg-blue-50 border-blue-500'
                           : 'bg-gray-50 border-gray-200'
                       }`}
                     >
-                      <div className="flex items-center justify-between mb-1">
-                        <div className="flex items-center gap-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
                           <div
-                            className="w-3 h-3 rounded-full"
+                            className="w-2.5 h-2.5 rounded-full"
                             style={{ backgroundColor: color }}
                           />
-                          <span className="font-semibold">
+                          <span className="text-sm font-semibold">
                             {getLevelDisplayName(level.name)}
                           </span>
                           {isClosest && (
-                            <span className="text-xs bg-blue-600 text-white px-2 py-0.5 rounded">
+                            <span className="text-[10px] bg-blue-600 text-white px-1.5 py-0.5 rounded">
                               Closest
                             </span>
                           )}
                         </div>
-                        <span className="font-bold">{formatCurrency(level.price)}</span>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-gray-600">Distance:</span>
-                        <span className="font-mono">
-                          {formatCurrency(level.distance)} ({level.percentage})
-                        </span>
+                        <div className="flex items-baseline gap-2">
+                          <span className="font-bold text-sm">{formatCurrency(level.price)}</span>
+                          <span className="text-xs font-mono text-gray-500">{level.percentage}</span>
+                        </div>
                       </div>
                     </div>
                   );
@@ -579,35 +608,35 @@ export default function StockPage() {
             </div>
 
             {/* Stock Info */}
-            <div className="bg-white rounded-lg shadow-md p-6">
-              <h3 className="text-xl font-bold mb-4">Stock Information</h3>
-              <div className="space-y-3">
-                <div className="flex justify-between pb-2 border-b border-gray-200">
-                  <span className="text-gray-600">Symbol:</span>
-                  <span className="font-semibold text-xl">{symbol.toUpperCase()}</span>
+            <div className="bg-white rounded-lg shadow-md p-4">
+              <h3 className="text-base font-bold mb-2">Stock Information</h3>
+              <div className="space-y-1.5">
+                <div className="flex justify-between pb-1.5 border-b border-gray-200">
+                  <span className="text-sm text-gray-600">Symbol:</span>
+                  <span className="font-semibold">{symbol.toUpperCase()}</span>
                 </div>
                 {stockData && (
                   <>
-                    <div className="flex justify-between pb-2 border-b border-gray-200">
-                      <span className="text-gray-600">Close Price:</span>
-                      <span className="font-semibold text-xl">
+                    <div className="flex justify-between pb-1.5 border-b border-gray-200">
+                      <span className="text-sm text-gray-600">Close Price:</span>
+                      <span className="font-semibold">
                         {formatCurrency(stockData?.close)}
                       </span>
                     </div>
-                    <div className="flex justify-between pb-2 border-b border-gray-200">
-                      <span className="text-gray-600">Trade Date:</span>
-                      <span className="font-medium">{stockData?.tradeDate}</span>
+                    <div className="flex justify-between pb-1.5 border-b border-gray-200">
+                      <span className="text-sm text-gray-600">Trade Date:</span>
+                      <span className="text-sm font-medium">{stockData?.tradeDate}</span>
                     </div>
-                    <div className="flex justify-between pb-2 border-b border-gray-200">
-                      <span className="text-gray-600">Expiry Date:</span>
-                      <span className="font-medium">{selectedExpiry || stockData?.expiryDate || 'N/A'}</span>
+                    <div className="flex justify-between pb-1.5 border-b border-gray-200">
+                      <span className="text-sm text-gray-600">Expiry Date:</span>
+                      <span className="text-sm font-medium">{selectedExpiry || stockData?.expiryDate || 'N/A'}</span>
                     </div>
                   </>
                 )}
                 {!stockData && ohlcData.length > 0 && (
-                  <div className="flex justify-between pb-2 border-b border-gray-200">
-                    <span className="text-gray-600">Latest Close:</span>
-                    <span className="font-semibold text-xl">
+                  <div className="flex justify-between pb-1.5 border-b border-gray-200">
+                    <span className="text-sm text-gray-600">Latest Close:</span>
+                    <span className="font-semibold">
                       {formatCurrency(ohlcData[ohlcData.length - 1]?.close)}
                     </span>
                   </div>
@@ -617,9 +646,9 @@ export default function StockPage() {
                   const closestLvl = levels.find(l => l.name === closestLevelName)
                     || stockData?.levels?.find((l: any) => l.name === closestLevelName);
                   return closestLvl ? (
-                    <div className="mt-6 p-4 bg-gradient-to-r from-blue-50 to-green-50 rounded-lg">
-                      <p className="text-sm text-gray-700 mb-2"><strong>Analysis:</strong></p>
-                      <p className="text-sm">
+                    <div className="mt-3 p-3 bg-gradient-to-r from-blue-50 to-green-50 rounded-lg">
+                      <p className="text-xs text-gray-700 mb-1"><strong>Analysis:</strong></p>
+                      <p className="text-xs">
                         The current price is closest to the{' '}
                         <strong className="text-blue-700">{getLevelDisplayName(closestLevelName)}</strong>{' '}
                         level at {formatCurrency(closestLvl.price)}, with a distance
@@ -630,6 +659,76 @@ export default function StockPage() {
                 })()}
               </div>
             </div>
+          </div>
+
+          {/* 7-Level Historical Table — close price, all 7 raw DB levels, OI, and the UPC/UCPR ratio columns */}
+          <div className="mt-6 bg-white rounded-lg shadow-md p-4">
+            <h3 className="text-base font-bold mb-2">Historical Levels &amp; OI</h3>
+            {levelHistoryRows.length === 0 ? (
+              <div className="text-center py-4 text-gray-500 text-sm">
+                No historical level data available{selectedExpiry ? ` for expiry ${selectedExpiry}` : ''}.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs whitespace-nowrap">
+                  <thead>
+                    <tr className="border-b border-gray-200 text-gray-500">
+                      <th className="text-left py-1.5 pr-3 font-medium">Date</th>
+                      <th className="text-right py-1.5 px-2 font-medium">Close</th>
+                      {SEVEN_LEVEL_ORDER.map((name) => (
+                        <th key={name} className="text-right py-1.5 px-2 font-medium">
+                          {getLevelDisplayName(name)}
+                        </th>
+                      ))}
+                      <th className="text-right py-1.5 px-2 font-medium">Call OI</th>
+                      <th className="text-right py-1.5 px-2 font-medium">Put OI</th>
+                      <th className="text-right py-1.5 px-2 font-medium">OI Diff</th>
+                      <th className="text-right py-1.5 pl-2 font-medium">UPC</th>
+                      <th className="text-right py-1.5 pl-2 font-medium">UCPR</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {levelHistoryRows.map((row) => {
+                      const closest = row.sevenLevels.length > 0
+                        ? row.sevenLevels.reduce((c, l) => Math.abs(l.value) < Math.abs(c.value) ? l : c)
+                        : null;
+                      const levelsByName = new Map(row.sevenLevels.map(l => [l.name, l]));
+
+                      return (
+                        <tr key={row.date} className="border-b border-gray-100 last:border-0 hover:bg-gray-50">
+                          <td className="py-1.5 pr-3 text-gray-600">{row.date}</td>
+                          <td className="text-right py-1.5 px-2 font-semibold">{formatCurrency(row.close)}</td>
+                          {SEVEN_LEVEL_ORDER.map((name) => {
+                            const lvl = levelsByName.get(name);
+                            const isClosest = !!closest && lvl && closest.name === lvl.name;
+                            return (
+                              <td
+                                key={name}
+                                className={`text-right py-1.5 px-2 font-mono ${
+                                  isClosest ? 'bg-blue-50 text-blue-700 font-bold rounded' : ''
+                                }`}
+                              >
+                                {lvl ? formatCurrency(lvl.price) : '—'}
+                                {lvl && (
+                                  <span className={`ml-1 ${isClosest ? 'text-blue-500' : 'text-gray-400'}`}>
+                                    ({formatPercentage(lvl.value)})
+                                  </span>
+                                )}
+                              </td>
+                            );
+                          })}
+                          <td className="text-right py-1.5 px-2 text-gray-600">{row.oi?.callOi?.toLocaleString() ?? '—'}</td>
+                          <td className="text-right py-1.5 px-2 text-gray-600">{row.oi?.putOi?.toLocaleString() ?? '—'}</td>
+                          <td className="text-right py-1.5 px-2 text-gray-600">{row.oi?.oiDiff?.toLocaleString() ?? '—'}</td>
+                          <td className="text-right py-1.5 pl-2 text-gray-600">{row.ratios?.upc ?? '—'}</td>
+                          <td className="text-right py-1.5 pl-2 text-gray-600">{row.ratios?.ucpr ?? '—'}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       </div>

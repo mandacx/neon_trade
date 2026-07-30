@@ -32,7 +32,7 @@ export async function GET(
       if (expiryDate) {
         // Fetch historical data for specific expiry
         const result = await sql`
-          SELECT 
+          SELECT
             symbol as "SYMBOL",
             expiry_dt::text as "EXPIRY_DT",
             trade_date::text as "TRADE_DATE",
@@ -42,6 +42,10 @@ export async function GET(
             COALESCE(comb_int, 0) as "PUT_CALL_INT",
             COALESCE(call_int, 0) as "CALL_INT",
             COALESCE(call_high, 0) as "call_HIGH",
+            COALESCE(call_low, 0) as "call_low",
+            COALESCE(put_high, 0) as "put_HIGH",
+            COALESCE(unused_pc, 0) as "UNUSED_PC",
+            COALESCE(unused_pc_rev, 0) as "UNUSED_PC_REV",
             COALESCE(put_oi, 0) as "PUT_OI",
             COALESCE(call_oi, 0) as "CALL_OI",
             COALESCE(put_oi - call_oi, 0) as "OI_DIFF"
@@ -62,16 +66,16 @@ export async function GET(
           PUT_CALL_INT: row.PUT_CALL_INT,
           CALL_INT: row.CALL_INT,
           call_HIGH: row.call_HIGH,
+          call_low: row.call_low,
+          put_HIGH: row.put_HIGH,
+          UNUSED_PC: row.UNUSED_PC,
+          UNUSED_PC_REV: row.UNUSED_PC_REV,
           PUT_OI: row.PUT_OI,
           CALL_OI: row.CALL_OI,
           OI_DIFF: row.OI_DIFF,
           OPEN: 0,
           HIGH: 0,
           LOW: 0,
-          call_low: 0,
-          put_HIGH: 0,
-          UNUSED_PC: 0,
-          UNUSED_PC_REV: 0,
         }));
       } else {
         historicalData = await getHistoricalStockData(symbol, from, to);
@@ -80,6 +84,22 @@ export async function GET(
       const processedData = historicalData.map(data => {
         const levels = calculateLevels(data);
         const closest = findClosestLevel(levels);
+
+        // All 7 raw price levels the DB stores (the 5-level calculateLevels()
+        // above only covers the "official" closest-level business logic used
+        // for the chart/scan alerts — this is a superset for the levels table).
+        const sevenLevels = [
+          { name: 'put_low', price: data.put_LOW },
+          { name: 'call_low', price: data.call_low },
+          { name: 'put_int', price: data.PUT_INT },
+          { name: 'put_call_int', price: data.PUT_CALL_INT },
+          { name: 'call_int', price: data.CALL_INT },
+          { name: 'put_high', price: data.put_HIGH },
+          { name: 'call_high', price: data.call_HIGH },
+        ].map(l => ({
+          ...l,
+          value: data.CLOSE ? (data.CLOSE - l.price) / data.CLOSE : 0,
+        }));
 
         return {
           date: data.TRADE_DATE,
@@ -99,6 +119,11 @@ export async function GET(
             percentage: formatPercentage(l.value),
           })),
           closestLevel: closest.name,
+          sevenLevels,
+          ratios: {
+            upc: data.UNUSED_PC,
+            ucpr: data.UNUSED_PC_REV,
+          },
           oi: {
             callOi: data.CALL_OI,
             putOi: data.PUT_OI,
