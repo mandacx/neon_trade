@@ -542,7 +542,13 @@ export default function WatchlistsPage() {
 
           {error && <p className="text-[11px] text-red-600 mb-2">{error}</p>}
 
-          <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-x-auto">
+          <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
+            {/* overflow-x-auto is scoped to just the table — putting it on this
+                whole card would also force overflow-y to clip (per the CSS rule
+                that a non-visible x-axis forces a non-visible y-axis too),
+                cutting off AddSymbolInput's dropdown below instead of letting
+                it float over the page. */}
+            <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-[11px] font-semibold text-gray-500 uppercase bg-gray-50 border-b border-gray-100">
@@ -600,6 +606,7 @@ export default function WatchlistsPage() {
                 )}
               </tbody>
             </table>
+            </div>
 
             {canEdit && (
               <div className="p-3 border-t border-gray-100 bg-gray-50/50">
