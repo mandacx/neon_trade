@@ -561,7 +561,7 @@ export default function WatchlistsPage() {
                 {sortedRows.map(r => (
                   <tr key={r.symbol} className="border-b border-gray-50 hover:bg-blue-50/40 transition-colors">
                     <td className={cellPad}>
-                      <Link href={`/stock/${encodeURIComponent(r.symbol)}`} className="flex items-center gap-1.5 hover:underline">
+                      <Link href={`/stock/${encodeURIComponent(r.symbol)}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 hover:underline">
                         <ChangeDot change={r.change} />
                         <span className="font-semibold text-gray-900">{r.symbol}</span>
                       </Link>

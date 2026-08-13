@@ -92,6 +92,8 @@ export default function AlertsWidget({ watchlistId, expiry }: { watchlistId: str
             <Link
               key={a.id}
               href={`/stock/${encodeURIComponent(a.symbol)}`}
+              target="_blank"
+              rel="noopener noreferrer"
               className="block px-2.5 py-2 rounded-lg hover:bg-gray-50 transition-colors"
             >
               <div className="flex items-center justify-between gap-2">
