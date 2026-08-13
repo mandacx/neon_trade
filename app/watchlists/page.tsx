@@ -32,6 +32,10 @@ interface LevelRow {
 }
 
 type DirectionFilter = 'all' | 'up' | 'down';
+type LevelKey = 'put_low' | 'put_int' | 'put_call_int' | 'call_int' | 'call_high';
+const LEVEL_FILTER_OPTIONS: LevelKey[] = ['call_high', 'call_int', 'put_call_int', 'put_int', 'put_low'];
+
+type SortKey = 'symbol' | 'lastPrice' | 'change' | 'open' | 'dayLow' | 'dayHigh' | 'volume' | 'level';
 
 function fmtExpiry(dateStr: string): string {
   try {
@@ -84,6 +88,18 @@ function Spinner() {
   return <div className="inline-block animate-spin h-3.5 w-3.5 border-2 border-blue-600 border-t-transparent rounded-full" />;
 }
 
+function SortHeader({ label, active, dir, align = 'left', onClick }: { label: string; active: boolean; dir: 'asc' | 'desc'; align?: 'left' | 'right'; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`flex items-center gap-1 hover:text-gray-700 transition-colors ${align === 'right' ? 'justify-end w-full' : ''}`}
+    >
+      {label}
+      <span className={active ? 'text-blue-600' : 'text-gray-300'}>{active ? (dir === 'asc' ? '↑' : '↓') : '↕'}</span>
+    </button>
+  );
+}
+
 function LevelCell({ level }: { level: LevelRow | undefined }) {
   if (!level) return <span className="text-xs text-gray-300">—</span>;
   if (!level.closestLevel) {
@@ -102,7 +118,7 @@ function LevelCell({ level }: { level: LevelRow | undefined }) {
   return (
     <div className="text-right">
       <span
-        className="inline-block text-[11px] font-semibold px-1.5 py-0.5 rounded"
+        className="inline-block text-xs font-bold px-1.5 py-0.5 rounded"
         style={{ backgroundColor: `${color}1A`, color }}
       >
         {getLevelDisplayName(level.closestLevel)}
@@ -132,8 +148,11 @@ export default function WatchlistsPage() {
   const [selectedExpiry, setSelectedExpiry] = useState('');
   const [search, setSearch] = useState('');
   const [directionFilter, setDirectionFilter] = useState<DirectionFilter>('all');
+  const [levelFilter, setLevelFilter] = useState<LevelKey | ''>('');
   const [proximityEnabled, setProximityEnabled] = useState(false);
   const [proximityThreshold, setProximityThreshold] = useState(5);
+  const [sortKey, setSortKey] = useState<SortKey | null>(null);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [condensed, setCondensed] = useState(false);
   const [visibleCols, setVisibleCols] = useState<Set<ColumnKey>>(new Set(OPTIONAL_COLUMNS.map(c => c.key)));
   const [customizeOpen, setCustomizeOpen] = useState(false);
@@ -155,12 +174,48 @@ export default function WatchlistsPage() {
     if (q && !r.symbol.includes(q) && !r.name.toUpperCase().includes(q)) return false;
     if (directionFilter === 'up' && !((r.change ?? 0) > 0)) return false;
     if (directionFilter === 'down' && !((r.change ?? 0) < 0)) return false;
+    if (levelFilter && levelBySymbol.get(r.symbol)?.closestLevel !== levelFilter) return false;
     if (proximityEnabled) {
       const distancePercent = levelBySymbol.get(r.symbol)?.distancePercent;
       if (distancePercent == null || Math.abs(distancePercent) > proximityThreshold) return false;
     }
     return true;
   });
+
+  function sortValue(r: QuoteRow, key: SortKey): number | string | null {
+    switch (key) {
+      case 'symbol': return r.symbol;
+      case 'lastPrice': return r.lastPrice;
+      case 'change': return r.change;
+      case 'open': return r.open;
+      case 'dayLow': return r.dayLow;
+      case 'dayHigh': return r.dayHigh;
+      case 'volume': return r.volume;
+      case 'level': {
+        const pct = levelBySymbol.get(r.symbol)?.distancePercent;
+        return pct == null ? null : Math.abs(pct);
+      }
+    }
+  }
+
+  const sortedRows = sortKey ? [...visibleRows].sort((a, b) => {
+    const av = sortValue(a, sortKey);
+    const bv = sortValue(b, sortKey);
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1; // missing values always sort to the end, regardless of direction
+    if (bv == null) return -1;
+    const cmp = typeof av === 'string' ? av.localeCompare(bv as string) : (av as number) - (bv as number);
+    return sortDir === 'asc' ? cmp : -cmp;
+  }) : visibleRows;
+
+  function toggleSort(key: SortKey) {
+    if (sortKey === key) {
+      setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDir('asc');
+    }
+  }
 
   async function refreshLists(keepSelection: boolean) {
     const res = await fetch('/api/watchlists');
@@ -310,8 +365,8 @@ export default function WatchlistsPage() {
             <p className="text-xs text-gray-400 mt-0.5">Live prices for your own lists, plus curated sector and index lists.</p>
           </div>
 
-          {/* Toolbar */}
-          <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 mb-4 space-y-3">
+          {/* Toolbar — one merged row of controls (wraps naturally on narrow screens) */}
+          <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 mb-4">
             <div className="flex flex-wrap items-end justify-between gap-4">
               <div className="flex flex-wrap items-end gap-4">
                 <div>
@@ -319,7 +374,7 @@ export default function WatchlistsPage() {
                   <select
                     value={selectedId}
                     onChange={e => setSelectedId(e.target.value)}
-                    className="px-3 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white min-w-[240px]"
+                    className="px-3 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white min-w-[220px]"
                   >
                     {custom.length > 0 && (
                       <optgroup label="My Watchlists">
@@ -344,6 +399,57 @@ export default function WatchlistsPage() {
                     </select>
                   </div>
                 )}
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">Search</label>
+                  <input
+                    value={search}
+                    onChange={e => setSearch(e.target.value)}
+                    placeholder="Symbol or name…"
+                    className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white w-44"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">Level</label>
+                  <select
+                    value={levelFilter}
+                    onChange={e => setLevelFilter(e.target.value as LevelKey | '')}
+                    className="px-3 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white"
+                  >
+                    <option value="">All levels</option>
+                    {LEVEL_FILTER_OPTIONS.map(l => <option key={l} value={l}>{getLevelDisplayName(l)}</option>)}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">Direction</label>
+                  <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
+                    {(['all', 'up', 'down'] as DirectionFilter[]).map(d => (
+                      <button
+                        key={d}
+                        onClick={() => setDirectionFilter(d)}
+                        className={`px-2.5 py-1.5 rounded-md text-xs font-semibold transition-colors ${directionFilter === d ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500'}`}
+                      >
+                        {d === 'all' ? 'All' : d === 'up' ? '▲ Gainers' : '▼ Losers'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="flex items-center gap-1.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1 cursor-pointer select-none">
+                    <input type="checkbox" checked={proximityEnabled} onChange={e => setProximityEnabled(e.target.checked)} className="accent-blue-600" />
+                    Near a level: {proximityThreshold}%
+                  </label>
+                  <input
+                    type="range" min="1" max="20" step="0.5"
+                    value={proximityThreshold}
+                    disabled={!proximityEnabled}
+                    onChange={e => setProximityThreshold(parseFloat(e.target.value))}
+                    className="w-32 accent-blue-500 disabled:opacity-40 mb-2"
+                  />
+                </div>
               </div>
 
               <div className="flex items-center gap-4">
@@ -373,47 +479,6 @@ export default function WatchlistsPage() {
                     </div>
                   )}
                 </div>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-end gap-4 pt-3 border-t border-gray-100">
-              <div>
-                <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">Search</label>
-                <input
-                  value={search}
-                  onChange={e => setSearch(e.target.value)}
-                  placeholder="Symbol or name…"
-                  className="px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white w-48"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">Direction</label>
-                <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
-                  {(['all', 'up', 'down'] as DirectionFilter[]).map(d => (
-                    <button
-                      key={d}
-                      onClick={() => setDirectionFilter(d)}
-                      className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-colors ${directionFilter === d ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500'}`}
-                    >
-                      {d === 'all' ? 'All' : d === 'up' ? '▲ Gainers' : '▼ Losers'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="flex items-center gap-1.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1 cursor-pointer select-none">
-                  <input type="checkbox" checked={proximityEnabled} onChange={e => setProximityEnabled(e.target.checked)} className="accent-blue-600" />
-                  Near a level: {proximityThreshold}%
-                </label>
-                <input
-                  type="range" min="1" max="20" step="0.5"
-                  value={proximityThreshold}
-                  disabled={!proximityEnabled}
-                  onChange={e => setProximityThreshold(parseFloat(e.target.value))}
-                  className="w-40 accent-blue-500 disabled:opacity-40"
-                />
               </div>
             </div>
           </div>
@@ -481,19 +546,19 @@ export default function WatchlistsPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-[11px] font-semibold text-gray-500 uppercase bg-gray-50 border-b border-gray-100">
-                  <th className={cellPad}>Symbol</th>
-                  <th className={`${cellPad} text-right`}>Last Price</th>
-                  <th className={`${cellPad} text-right`}>Change</th>
-                  {visibleCols.has('open') && <th className={`${cellPad} text-right`}>Open</th>}
-                  {visibleCols.has('dayLow') && <th className={`${cellPad} text-right`}>Day Low</th>}
-                  {visibleCols.has('dayHigh') && <th className={`${cellPad} text-right`}>Day High</th>}
-                  {visibleCols.has('volume') && <th className={`${cellPad} text-right`}>Volume</th>}
-                  {visibleCols.has('level') && <th className={`${cellPad} text-right`}>Nearest Level</th>}
+                  <th className={cellPad}><SortHeader label="Symbol" active={sortKey === 'symbol'} dir={sortDir} onClick={() => toggleSort('symbol')} /></th>
+                  <th className={`${cellPad} text-right`}><SortHeader label="Last Price" align="right" active={sortKey === 'lastPrice'} dir={sortDir} onClick={() => toggleSort('lastPrice')} /></th>
+                  <th className={`${cellPad} text-right`}><SortHeader label="Change" align="right" active={sortKey === 'change'} dir={sortDir} onClick={() => toggleSort('change')} /></th>
+                  {visibleCols.has('open') && <th className={`${cellPad} text-right`}><SortHeader label="Open" align="right" active={sortKey === 'open'} dir={sortDir} onClick={() => toggleSort('open')} /></th>}
+                  {visibleCols.has('dayLow') && <th className={`${cellPad} text-right`}><SortHeader label="Day Low" align="right" active={sortKey === 'dayLow'} dir={sortDir} onClick={() => toggleSort('dayLow')} /></th>}
+                  {visibleCols.has('dayHigh') && <th className={`${cellPad} text-right`}><SortHeader label="Day High" align="right" active={sortKey === 'dayHigh'} dir={sortDir} onClick={() => toggleSort('dayHigh')} /></th>}
+                  {visibleCols.has('volume') && <th className={`${cellPad} text-right`}><SortHeader label="Volume" align="right" active={sortKey === 'volume'} dir={sortDir} onClick={() => toggleSort('volume')} /></th>}
+                  {visibleCols.has('level') && <th className={`${cellPad} text-right`}><SortHeader label="Nearest Level" align="right" active={sortKey === 'level'} dir={sortDir} onClick={() => toggleSort('level')} /></th>}
                   {canEdit && <th className={cellPad}></th>}
                 </tr>
               </thead>
               <tbody>
-                {visibleRows.map(r => (
+                {sortedRows.map(r => (
                   <tr key={r.symbol} className="border-b border-gray-50 hover:bg-blue-50/40 transition-colors">
                     <td className={cellPad}>
                       <Link href={`/stock/${encodeURIComponent(r.symbol)}`} className="flex items-center gap-1.5 hover:underline">
