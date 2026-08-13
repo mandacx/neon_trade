@@ -137,3 +137,22 @@ export function usTradingDayKey(epochSeconds: number): string {
   const get = (type: string) => parts.find(p => p.type === type)?.value ?? '';
   return `${get('year')}-${get('month')}-${get('day')}`;
 }
+
+/** How a past scan alert's option position played out by expiry — see lib/alertPerformance.ts. */
+export type PerformanceOutcome = 'favorable' | 'unfavorable' | 'flat' | 'not_yet_expired' | 'awaiting_data';
+
+export const OUTCOME_LABEL: Record<PerformanceOutcome, string> = {
+  favorable: 'Favorable',
+  unfavorable: 'Unfavorable',
+  flat: 'Flat',
+  not_yet_expired: 'Upcoming',
+  awaiting_data: 'Awaiting data',
+};
+
+export const OUTCOME_CLASS: Record<PerformanceOutcome, string> = {
+  favorable: 'bg-green-100 text-green-700',
+  unfavorable: 'bg-red-100 text-red-700',
+  flat: 'bg-gray-100 text-gray-500',
+  not_yet_expired: 'bg-gray-100 text-gray-500',
+  awaiting_data: 'bg-gray-100 text-gray-500',
+};
