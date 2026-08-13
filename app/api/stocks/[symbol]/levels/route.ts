@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getLatestStockData, getHistoricalStockData, getStockDataByExpiry, sql } from '@/lib/db';
+import { getLatestStockData, getHistoricalStockData, getStockDataByExpiry, getStockDataAsOf, sql } from '@/lib/db';
 import { calculateLevels, findClosestLevel } from '@/lib/calculations';
 import { formatPercentage } from '@/lib/utils';
 import { format, subDays } from 'date-fns';
+import { getCurrentUserContext } from '@/lib/appUsers';
+import { levelGate, LEVEL_RANGE_RATE, LEVEL_POINT_RATE, DELAYED_RANGE_DAYS } from '@/lib/levelAccess';
+import { checkRateLimit, rateLimitKey, rateLimitHeaders } from '@/lib/rateLimit';
 
 export async function GET(
   request: NextRequest,
@@ -22,12 +25,45 @@ export async function GET(
       );
     }
 
+    // Levels are the paid product. Unentitled viewers still get the response —
+    // the chart needs date/close/oi for every row — but level fields are
+    // blanked for the recent window. See lib/levelAccess.ts.
+    const ctx = await getCurrentUserContext();
+    const gate = levelGate(ctx.features);
+
+    // Volume control. The range branch is the bulk-scrape vector (one wide call
+    // per symbol returns that symbol's whole history), so it gets the tight
+    // budget; single-row lookups are looser since a normal page visit makes
+    // several. Keyed by session user when signed in, else client IP.
+    const rl = range ? LEVEL_RANGE_RATE : LEVEL_POINT_RATE;
+    const limit = await checkRateLimit(
+      rl.name,
+      rateLimitKey(request.headers, ctx.userId),
+      rl.limit,
+      rl.windowSeconds
+    );
+    if (!limit.allowed) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'Rate limit exceeded',
+          message: `Too many level requests — retry in ${limit.resetSeconds}s`,
+        },
+        { status: 429, headers: rateLimitHeaders(limit) }
+      );
+    }
+
     if (range) {
       // Return historical levels
       const now = new Date();
-      const to = searchParams.get('to') || format(now, 'yyyy-MM-dd');
-      const from = searchParams.get('from') || format(subDays(now, 30), 'yyyy-MM-dd');
-      
+      const requestedTo = searchParams.get('to') || format(now, 'yyyy-MM-dd');
+      const requestedFrom = searchParams.get('from') || format(subDays(now, 30), 'yyyy-MM-dd');
+      // Delayed viewers are held to a DELAYED_RANGE_DAYS window ending at the
+      // cutoff, so the free tier is a sample rather than the whole archive.
+      // Entitled viewers pass through unchanged. Clamp BEFORE querying — never
+      // fetch the full requested range and clamp the response after the fact.
+      const { from, to, clamped } = gate.clampRange(requestedFrom, requestedTo);
+
       let historicalData;
       if (expiryDate) {
         // Fetch historical data for specific expiry
@@ -82,6 +118,28 @@ export async function GET(
       }
 
       const processedData = historicalData.map(data => {
+        // `oi`/`close` are deliberately outside the gate — the stock page's
+        // OI chart and price axis are built from this same response and must
+        // keep working on every plan.
+        const oi = {
+          callOi: data.CALL_OI,
+          putOi: data.PUT_OI,
+          oiDiff: data.OI_DIFF,
+        };
+
+        if (gate.withheld(data.TRADE_DATE)) {
+          return {
+            date: data.TRADE_DATE,
+            close: data.CLOSE,
+            levels: { put_low: null, put_int: null, put_call_int: null, call_int: null, call_high: null },
+            calculated: [],
+            closestLevel: null,
+            sevenLevels: [],
+            ratios: { upc: null, ucpr: null },
+            oi,
+          };
+        }
+
         const levels = calculateLevels(data);
         const closest = findClosestLevel(levels);
 
@@ -124,11 +182,7 @@ export async function GET(
             upc: data.UNUSED_PC,
             ucpr: data.UNUSED_PC_REV,
           },
-          oi: {
-            callOi: data.CALL_OI,
-            putOi: data.PUT_OI,
-            oiDiff: data.OI_DIFF,
-          },
+          oi,
         };
       });
 
@@ -139,13 +193,23 @@ export async function GET(
           from,
           to,
           history: processedData,
+          ...gate.meta,
+          // Echo the clamp so the client can say "showing a 10-day window"
+          // rather than silently appearing to have lost data.
+          rangeClamped: clamped,
+          maxRangeDays: gate.unrestricted ? null : DELAYED_RANGE_DAYS,
         },
-      });
+      }, { headers: rateLimitHeaders(limit) });
     } else {
       // Return single date levels
       let stockData;
-      
-      if (expiryDate) {
+
+      if (gate.meta.levelsWithheldAfter) {
+        // Delayed viewer: fetch the newest row OUTSIDE the withheld window
+        // rather than the latest row, so they see stale levels instead of a
+        // blank panel.
+        stockData = await getStockDataAsOf(symbol, gate.meta.levelsWithheldAfter, expiryDate);
+      } else if (expiryDate) {
         // Fetch data for specific expiry date
         stockData = await getStockDataByExpiry(symbol, expiryDate);
       } else {
@@ -158,7 +222,27 @@ export async function GET(
         return NextResponse.json({
           success: true,
           data: null,
+          levelAccess: gate.meta.levelAccess,
           message: 'Stock not found in database, using broker data only'
+        });
+      }
+
+      // getStockDataAsOf already excluded the withheld window, so anything that
+      // reaches here is showable. Belt-and-braces in case a future caller
+      // passes a row from elsewhere.
+      if (gate.withheld(stockData.TRADE_DATE)) {
+        return NextResponse.json({
+          success: true,
+          data: {
+            symbol: stockData.SYMBOL,
+            tradeDate: stockData.TRADE_DATE,
+            expiryDate: stockData.EXPIRY_DT,
+            close: stockData.CLOSE,
+            levels: { put_low: null, put_int: null, put_call_int: null, call_int: null, call_high: null },
+            calculated: [],
+            closestLevel: null,
+            ...gate.meta,
+          },
         });
       }
 
@@ -187,6 +271,7 @@ export async function GET(
             value: level.value,
           })),
           closestLevel: closest.name,
+          ...gate.meta,
         },
       });
     }

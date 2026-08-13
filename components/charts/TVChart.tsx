@@ -32,7 +32,10 @@ interface TVChartProps {
   }>;
   levels?: LevelCalculation[];
   closestLevel?: string;
-  historicalLevels?: Map<string, { levels: LevelCalculation[], closestLevel: string }>;
+  // `sevenLevels` is the DB's full level set (the 5 "official" levels plus
+  // put_high/call_low) — optional because callers that only need the 5-level
+  // proximity ladder don't populate it.
+  historicalLevels?: Map<string, { levels: LevelCalculation[], closestLevel: string, sevenLevels?: { name: string; price: number; value: number }[] }>;
   scanAlerts?: ScanAlert[];
   selectedExpiry?: string;
   isIntraday?: boolean;
@@ -384,6 +387,7 @@ export default function TVChart({
 
       let dateLevels: LevelCalculation[] = [];
       let dateClosestLevel: string | undefined = undefined;
+      let dateExtendedLevels: { name: string; price: number; value: number }[] = [];
       let hasHistoricalData = false;
 
       const hLevels = historicalLevelsRef.current;
@@ -392,6 +396,7 @@ export default function TVChart({
         if (historicalData && historicalData.levels && historicalData.levels.length > 0) {
           dateLevels = historicalData.levels;
           dateClosestLevel = historicalData.closestLevel;
+          dateExtendedLevels = (historicalData.sevenLevels ?? []).filter(l => l.name === 'put_high' || l.name === 'call_low');
           hasHistoricalData = true;
         }
       }
@@ -416,6 +421,13 @@ export default function TVChart({
           isProximity
         };
       }).reverse() : []; // Reverse the order: Call High -> Call Int -> Put/Call Int -> Put Int -> Put Low
+
+      // Extended levels (put_high/call_low) — shown separately from the 5-level
+      // proximity ladder above; never considered for isProximity/closest-level.
+      const EXTENDED_LEVEL_ORDER = ['call_low', 'put_high'];
+      const extendedLevelsWithDisplay = dateExtendedLevels
+        .map(level => ({ ...level, displayName: getLevelDisplayName(level.name) }))
+        .sort((a, b) => EXTENDED_LEVEL_ORDER.indexOf(a.name) - EXTENDED_LEVEL_ORDER.indexOf(b.name));
 
       // Build scan alerts section for tooltip
       const dateAlerts = scanAlertsByDateRef.current.get(dayKey) || [];
@@ -494,6 +506,17 @@ export default function TVChart({
               <span class="text-xs">Level data not available for this date</span>
             </div>
           `}
+          ${extendedLevelsWithDisplay.length > 0 ? `
+            <div class="mt-2 pt-2 border-t border-gray-200">
+              <div class="font-semibold mb-1 text-gray-500 text-[10px]">Extended Levels:</div>
+              ${extendedLevelsWithDisplay.map(level => `
+                <div class="flex justify-between gap-4 text-gray-600">
+                  <span>${level.displayName}:</span>
+                  <span>${formatCurrency(level.price)} (${formatPercentage(level.value)})</span>
+                </div>
+              `).join('')}
+            </div>
+          ` : ''}
         </div>
       `;
     };

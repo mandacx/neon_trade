@@ -131,6 +131,81 @@ export async function getHistoricalStockData(
 }
 
 /**
+ * Get the newest row for a symbol with trade_date <= asOf — used to serve
+ * delayed (non-Pro) viewers a stale-but-real row instead of nulling out a
+ * blocked latest row (see lib/levelAccess.ts).
+ */
+export async function getStockDataAsOf(symbol: string, asOf: string, expiryDate?: string | null): Promise<StockData | null> {
+  try {
+    const result = expiryDate
+      ? await sql`
+          SELECT
+            symbol as "SYMBOL",
+            expiry_dt::text as "EXPIRY_DT",
+            trade_date::text as "TRADE_DATE",
+            COALESCE(open, 0) as "OPEN",
+            COALESCE(high, 0) as "HIGH",
+            COALESCE(low, 0) as "LOW",
+            COALESCE(close, 0) as "CLOSE",
+            COALESCE(put_int, 0) as "PUT_INT",
+            COALESCE(call_int, 0) as "CALL_INT",
+            COALESCE(comb_int, 0) as "PUT_CALL_INT",
+            COALESCE(call_low, 0) as call_low,
+            COALESCE(put_high, 0) as "put_HIGH",
+            COALESCE(call_high, 0) as "call_HIGH",
+            COALESCE(put_low, 0) as "put_LOW",
+            COALESCE(unused_pc, 0) as "UNUSED_PC",
+            COALESCE(unused_pc_rev, 0) as "UNUSED_PC_REV",
+            COALESCE(call_oi, 0) as "CALL_OI",
+            COALESCE(put_oi, 0) as "PUT_OI",
+            COALESCE((put_oi - call_oi), 0) as "OI_DIFF"
+          FROM public.eod_usmkts_price
+          WHERE symbol = ${symbol.toUpperCase()}
+            AND expiry_dt = ${expiryDate}::date
+            AND trade_date <= ${asOf}::date
+          ORDER BY trade_date DESC
+          LIMIT 1
+        `
+      : await sql`
+          SELECT
+            symbol as "SYMBOL",
+            expiry_dt::text as "EXPIRY_DT",
+            trade_date::text as "TRADE_DATE",
+            COALESCE(open, 0) as "OPEN",
+            COALESCE(high, 0) as "HIGH",
+            COALESCE(low, 0) as "LOW",
+            COALESCE(close, 0) as "CLOSE",
+            COALESCE(put_int, 0) as "PUT_INT",
+            COALESCE(call_int, 0) as "CALL_INT",
+            COALESCE(comb_int, 0) as "PUT_CALL_INT",
+            COALESCE(call_low, 0) as call_low,
+            COALESCE(put_high, 0) as "put_HIGH",
+            COALESCE(call_high, 0) as "call_HIGH",
+            COALESCE(put_low, 0) as "put_LOW",
+            COALESCE(unused_pc, 0) as "UNUSED_PC",
+            COALESCE(unused_pc_rev, 0) as "UNUSED_PC_REV",
+            COALESCE(call_oi, 0) as "CALL_OI",
+            COALESCE(put_oi, 0) as "PUT_OI",
+            COALESCE((put_oi - call_oi), 0) as "OI_DIFF"
+          FROM public.eod_usmkts_price
+          WHERE symbol = ${symbol.toUpperCase()}
+            AND trade_date <= ${asOf}::date
+          ORDER BY trade_date DESC
+          LIMIT 1
+        `;
+
+    if (result.length === 0) {
+      return null;
+    }
+
+    return sanitizeStockData(result[0]);
+  } catch (error) {
+    console.error('Error fetching stock data as-of:', error);
+    throw error;
+  }
+}
+
+/**
  * Get all stocks for the latest trading date
  */
 export async function getAllStocksLatest(): Promise<StockData[]> {

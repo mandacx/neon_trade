@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getLatestStockData } from '@/lib/db';
+import { getLatestStockData, getStockDataAsOf } from '@/lib/db';
 import { processStockData } from '@/lib/calculations';
 import { formatPercentage } from '@/lib/utils';
+import { getCurrentUserContext } from '@/lib/appUsers';
+import { levelGate, LEVEL_POINT_RATE } from '@/lib/levelAccess';
+import { checkRateLimit, rateLimitKey, rateLimitHeaders } from '@/lib/rateLimit';
 
 export async function GET(
   request: NextRequest,
@@ -17,20 +20,42 @@ export async function GET(
       );
     }
 
-    // Get latest data from database
-    const stockData = await getLatestStockData(symbol);
+    // Levels are the paid product — unentitled viewers get the newest row
+    // outside the withheld window instead of the latest one, so the panel is
+    // stale rather than empty. See lib/levelAccess.ts.
+    const ctx = await getCurrentUserContext();
+    const gate = levelGate(ctx.features);
+
+    const limit = await checkRateLimit(
+      LEVEL_POINT_RATE.name,
+      rateLimitKey(request.headers, ctx.userId),
+      LEVEL_POINT_RATE.limit,
+      LEVEL_POINT_RATE.windowSeconds
+    );
+    if (!limit.allowed) {
+      return NextResponse.json(
+        { success: false, error: 'Rate limit exceeded', message: `Too many requests — retry in ${limit.resetSeconds}s` },
+        { status: 429, headers: rateLimitHeaders(limit) }
+      );
+    }
+
+    const stockData = gate.meta.levelsWithheldAfter
+      ? await getStockDataAsOf(symbol, gate.meta.levelsWithheldAfter)
+      : await getLatestStockData(symbol);
 
     if (!stockData) {
       // No database data - return success with null to indicate broker-only mode
       return NextResponse.json({
         success: true,
         data: null,
+        levelAccess: gate.meta.levelAccess,
         message: 'Stock not found in database, using broker data only'
       });
     }
 
     // Process and calculate levels
     const processed = processStockData(stockData);
+    const withheld = gate.withheld(processed.tradeDate);
 
     return NextResponse.json({
       success: true,
@@ -39,19 +64,22 @@ export async function GET(
         close: processed.close,
         tradeDate: processed.tradeDate,
         expiryDate: processed.expiryDate,
-        levels: processed.levels.map(level => ({
+        levels: withheld ? [] : processed.levels.map(level => ({
           name: level.name,
           value: level.value,
           price: level.price,
           distance: level.distance,
           percentage: formatPercentage(level.value),
         })),
-        closestLevel: {
-          name: processed.closestLevel.name,
-          value: processed.closestLevel.value,
-          price: processed.closestLevel.price,
-          percentage: formatPercentage(processed.closestLevel.value),
-        },
+        closestLevel: !withheld && processed.closestLevel
+          ? {
+              name: processed.closestLevel.name,
+              value: processed.closestLevel.value,
+              price: processed.closestLevel.price,
+              percentage: formatPercentage(processed.closestLevel.value),
+            }
+          : null,
+        ...gate.meta,
       },
     });
   } catch (error) {

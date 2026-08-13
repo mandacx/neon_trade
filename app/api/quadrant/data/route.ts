@@ -3,8 +3,14 @@ import { getAllStocksLatest, getAllStocksByDate, getAllStocksByDateAndExpiry, ge
 import { calculateLevels, findClosestLevel } from '@/lib/calculations';
 import { deriveFilterOptions, getSecuritiesFilterOptions, getSecuritiesMeta, applySecuritiesFilters, attachSecuritiesMeta } from '@/lib/securitiesFilters';
 import { format } from 'date-fns';
+import { requireFeatureApi } from '@/lib/routeGuards';
+import { levelGate } from '@/lib/levelAccess';
+import { FEATURE_QUADRANT } from '@/lib/features';
 
 export async function GET(request: NextRequest) {
+  const { ctx, blocked } = await requireFeatureApi(FEATURE_QUADRANT);
+  if (blocked) return blocked;
+
   try {
     const searchParams = request.nextUrl.searchParams;
     const date = searchParams.get('date');
@@ -97,7 +103,17 @@ export async function GET(request: NextRequest) {
     }
 
     // Attach securities metadata to output
-    const enriched = filteredStocks.map(s => attachSecuritiesMeta(s, secMeta));
+    const withMeta = filteredStocks.map(s => attachSecuritiesMeta(s, secMeta));
+
+    // Levels are stripped for delayed (non-Pro) viewers, applied after the
+    // value-based filters above so those filters keep seeing real numbers.
+    // `closestLevel`/`closestValue` are kept so the chart's X axis still
+    // works — QuadrantChart degrades to discrete rungs without `levels`.
+    const gate = levelGate(ctx.features);
+    const enriched = withMeta.map(s => {
+      const withheld = gate.withheld(s.tradeDate);
+      return { ...s, ...(withheld ? { levels: [] } : {}) };
+    });
 
     const tradeDate = processedStocks.length > 0
       ? processedStocks[0].tradeDate

@@ -6,11 +6,16 @@ import {
   getScanExpiryDatesInMonth,
 } from '@/lib/scanAlerts';
 import { deriveFilterOptions, getSecuritiesFilterOptions, getSecuritiesMeta, applySecuritiesFilters, attachSecuritiesMeta } from '@/lib/securitiesFilters';
+import { requireFeatureApi } from '@/lib/routeGuards';
+import { hasFeature, FEATURE_LEVELS, FEATURE_SCAN_ALERTS_HISTORY } from '@/lib/features';
 
 // Historical scan alerts: browsed by calendar month. `metadata=true` alone lists
 // available months; `metadata=true&month=YYYY-MM` scopes trade/expiry date
 // dropdowns to that month once selected.
 export async function GET(request: NextRequest) {
+  const { ctx, blocked } = await requireFeatureApi(FEATURE_SCAN_ALERTS_HISTORY);
+  if (blocked) return blocked;
+
   try {
     const searchParams = request.nextUrl.searchParams;
     const metadataOnly = searchParams.get('metadata') === 'true';
@@ -49,7 +54,13 @@ export async function GET(request: NextRequest) {
     const derivedFilterOptions = deriveFilterOptions(secMeta);
 
     alerts = applySecuritiesFilters(alerts, secMeta, { sector, industry, marketCapTier, indexCode });
-    const enriched = alerts.map(a => attachSecuritiesMeta(a, secMeta));
+
+    // See app/api/scan-alerts/latest/route.ts — same redaction pattern.
+    const levelsVisible = hasFeature(ctx.features, FEATURE_LEVELS);
+    const enriched = alerts.map(a => {
+      const withMeta = attachSecuritiesMeta(a, secMeta);
+      return levelsVisible ? withMeta : { ...withMeta, levels: [] };
+    });
 
     return NextResponse.json({
       success: true,
@@ -59,6 +70,7 @@ export async function GET(request: NextRequest) {
         alerts: enriched,
         filterOptions: derivedFilterOptions,
         hasSecurities: Object.keys(secMeta).length > 0,
+        levelsRedacted: !levelsVisible,
       },
     });
   } catch (error) {

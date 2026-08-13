@@ -5,12 +5,17 @@ import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import StockSearch from '@/components/ui/StockSearch';
+import { useAuthContext } from '@/components/providers/AuthContextProvider';
+import SignOutButton from '@/components/auth/SignOutButton';
 
 export default function Header() {
   const pathname = usePathname();
   const router = useRouter();
   const [scanMenuOpen, setScanMenuOpen] = useState(false);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const scanMenuRef = useRef<HTMLDivElement>(null);
+  const accountMenuRef = useRef<HTMLDivElement>(null);
+  const authCtx = useAuthContext();
 
   const isActive = (path: string) => pathname === path;
   const isScanAlertsPath = pathname?.startsWith('/scan-alerts');
@@ -19,6 +24,9 @@ export default function Header() {
     function onClickOutside(e: MouseEvent) {
       if (scanMenuRef.current && !scanMenuRef.current.contains(e.target as Node)) {
         setScanMenuOpen(false);
+      }
+      if (accountMenuRef.current && !accountMenuRef.current.contains(e.target as Node)) {
+        setAccountMenuOpen(false);
       }
     }
     document.addEventListener('mousedown', onClickOutside);
@@ -93,6 +101,47 @@ export default function Header() {
             >
               📈 Stock Analysis
             </button>
+
+            {authCtx.loggedIn ? (
+              <div className="relative" ref={accountMenuRef}>
+                <button
+                  onClick={() => setAccountMenuOpen(v => !v)}
+                  className="flex items-center gap-1.5 w-8 h-8 rounded-full bg-gray-700 text-white text-xs font-bold justify-center hover:bg-gray-800"
+                >
+                  {(authCtx.name ?? authCtx.email ?? '?').slice(0, 1).toUpperCase()}
+                </button>
+                {accountMenuOpen && (
+                  <div className="absolute right-0 mt-1 w-40 bg-white rounded-lg shadow-lg border border-gray-200 overflow-hidden z-30">
+                    <Link
+                      href="/profile"
+                      onClick={() => setAccountMenuOpen(false)}
+                      className="block px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                    >
+                      👤 Profile
+                    </Link>
+                    {authCtx.isAdmin && (
+                      <Link
+                        href="/admin"
+                        onClick={() => setAccountMenuOpen(false)}
+                        className="block px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50 border-t border-gray-100"
+                      >
+                        🛠️ Admin
+                      </Link>
+                    )}
+                    <div className="px-3 py-2 border-t border-gray-100">
+                      <SignOutButton />
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <button
+                onClick={() => router.push('/login')}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-gray-200 text-gray-700 hover:bg-gray-50"
+              >
+                Sign in
+              </button>
+            )}
           </div>
 
           {/* Mobile menu */}
@@ -140,6 +189,28 @@ export default function Header() {
           </button>
           <div className="px-3 pt-1">
             <StockSearch compact />
+          </div>
+          <div className="px-3 pt-2 border-t border-gray-100 mt-2">
+            {authCtx.loggedIn ? (
+              <div className="space-y-1">
+                <Link href="/profile" className="block px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 rounded-lg">
+                  👤 Profile
+                </Link>
+                {authCtx.isAdmin && (
+                  <Link href="/admin" className="block px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 rounded-lg">
+                    🛠️ Admin
+                  </Link>
+                )}
+                <SignOutButton />
+              </div>
+            ) : (
+              <button
+                onClick={() => router.push('/login')}
+                className="w-full text-left px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 rounded-lg border border-gray-200"
+              >
+                Sign in
+              </button>
+            )}
           </div>
         </div>
       </div>
