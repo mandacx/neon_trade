@@ -13,7 +13,7 @@ export default async function UpgradePage({ searchParams }: { searchParams: Prom
     searchParams,
     // Only active plans — retired ones stay in the table for historical
     // plan_id references but must not be offered.
-    sql`SELECT id, code, name, features FROM public.plans WHERE is_active ORDER BY sort_order, id` as unknown as Promise<PlanRow[]>,
+    sql`SELECT id, code, name, features FROM public.nt_plans WHERE is_active ORDER BY sort_order, id` as unknown as Promise<PlanRow[]>,
     getCurrentUserContext(),
   ]);
 

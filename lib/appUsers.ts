@@ -19,7 +19,7 @@ export interface CurrentUserContext {
 const FALLBACK_PLAN_CODE = 'FREE';
 
 async function freePlanContext(): Promise<Pick<CurrentUserContext, 'planCode' | 'features'>> {
-  const rows = await sql`SELECT code, features FROM public.plans WHERE code = ${FALLBACK_PLAN_CODE}`;
+  const rows = await sql`SELECT code, features FROM public.nt_plans WHERE code = ${FALLBACK_PLAN_CODE}`;
   const row = rows[0] as { code: string; features: string[] } | undefined;
   return { planCode: row?.code ?? FALLBACK_PLAN_CODE, features: row?.features ?? [] };
 }
@@ -40,7 +40,9 @@ function applyOverrides(planFeatures: string[], overrides: Array<{ feature: stri
 
 /**
  * Resolves identity (Neon Auth) + plan/feature entitlement (our own
- * app_user_profiles/plans/user_feature_overrides tables) for the current
+ * nt_app_user_profiles/nt_plans/nt_user_feature_overrides tables — `nt_`
+ * prefixed because this Neon database is shared with the sister neon_nifty
+ * app, which owns unprefixed tables of the same names) for the current
  * request. Call only from Server Components / Route Handlers —
  * auth.getSession() reads cookies via Next.js's request-scoped context, and
  * this hits the DB (a few small indexed queries), so it's not meant for
@@ -72,14 +74,14 @@ export async function getCurrentUserContext(): Promise<CurrentUserContext> {
   type ProfileRow = { plan_expires_at: string | null; telegram_chat_id: string | null; plan_code: string; features: string[] };
   const selectProfile = () => sql`
     SELECT u.plan_expires_at, u.telegram_chat_id, p.code AS plan_code, p.features
-    FROM public.app_user_profiles u
-    JOIN public.plans p ON p.id = u.plan_id
+    FROM public.nt_app_user_profiles u
+    JOIN public.nt_plans p ON p.id = u.plan_id
     WHERE u.user_id = ${user.id}
   ` as unknown as Promise<ProfileRow[]>;
 
   const [profileRows, overrideRows, roleRows, accountsResult] = await Promise.all([
     selectProfile(),
-    sql`SELECT feature, granted FROM public.user_feature_overrides WHERE user_id = ${user.id}`,
+    sql`SELECT feature, granted FROM public.nt_user_feature_overrides WHERE user_id = ${user.id}`,
     sql`SELECT role FROM neon_auth."user" WHERE id = ${user.id}`,
     auth.listAccounts(),
   ]);
@@ -89,8 +91,8 @@ export async function getCurrentUserContext(): Promise<CurrentUserContext> {
   if (!profile) {
     // First time we've seen this authenticated user — bootstrap onto Free.
     await sql`
-      INSERT INTO public.app_user_profiles (user_id, plan_id)
-      SELECT ${user.id}, id FROM public.plans WHERE code = ${FALLBACK_PLAN_CODE}
+      INSERT INTO public.nt_app_user_profiles (user_id, plan_id)
+      SELECT ${user.id}, id FROM public.nt_plans WHERE code = ${FALLBACK_PLAN_CODE}
       ON CONFLICT (user_id) DO NOTHING
     `;
     profile = (await selectProfile())[0];

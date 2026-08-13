@@ -27,7 +27,7 @@ let tableReady = false;
 async function ensureTable(): Promise<void> {
   if (tableReady) return;
   await sql`
-    CREATE TABLE IF NOT EXISTS public.rate_limit_hits (
+    CREATE TABLE IF NOT EXISTS public.nt_rate_limit_hits (
       bucket      TEXT NOT NULL,
       window_start TIMESTAMPTZ NOT NULL,
       hits        INT NOT NULL DEFAULT 0,
@@ -66,13 +66,13 @@ export async function checkRateLimit(
   try {
     await ensureTable();
     const rows = await sql`
-      INSERT INTO public.rate_limit_hits (bucket, window_start, hits)
+      INSERT INTO public.nt_rate_limit_hits (bucket, window_start, hits)
       VALUES (
         ${`${name}:${key}`},
         to_timestamp(floor(extract(epoch FROM now()) / ${windowSeconds}) * ${windowSeconds}),
         1
       )
-      ON CONFLICT (bucket, window_start) DO UPDATE SET hits = rate_limit_hits.hits + 1
+      ON CONFLICT (bucket, window_start) DO UPDATE SET hits = nt_rate_limit_hits.hits + 1
       RETURNING hits, extract(epoch FROM window_start)::bigint AS window_epoch
     `;
     const row = rows[0] as { hits: number; window_epoch: string } | undefined;
@@ -106,7 +106,7 @@ export function rateLimitHeaders(r: RateLimitResult): Record<string, string> {
  */
 export async function pruneRateLimitHits(): Promise<void> {
   try {
-    await sql`DELETE FROM public.rate_limit_hits WHERE window_start < now() - interval '1 day'`;
+    await sql`DELETE FROM public.nt_rate_limit_hits WHERE window_start < now() - interval '1 day'`;
   } catch (err) {
     console.error('rateLimit: prune failed', err);
   }

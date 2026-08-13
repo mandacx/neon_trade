@@ -56,22 +56,22 @@ export async function GET(request: NextRequest) {
             SELECT jsonb_agg(f) FROM (
               SELECT jsonb_array_elements_text(p.features) AS f
               EXCEPT
-              SELECT o.feature FROM public.user_feature_overrides o
+              SELECT o.feature FROM public.nt_user_feature_overrides o
                 WHERE o.user_id = u.user_id AND NOT o.granted
               UNION
-              SELECT o.feature FROM public.user_feature_overrides o
+              SELECT o.feature FROM public.nt_user_feature_overrides o
                 WHERE o.user_id = u.user_id AND o.granted
             ) x
           ), '[]'::jsonb) AS features
-        FROM public.app_user_profiles u
-        JOIN public.plans p ON p.id = u.plan_id
+        FROM public.nt_app_user_profiles u
+        JOIN public.nt_plans p ON p.id = u.plan_id
       )
       SELECT s.user_id, s.watchlist_id, u.telegram_chat_id,
              c.last_alert_time::timestamp::text as last_alert_time, c.consecutive_failures,
              (e.features ? 'telegram_alerts') AS tg_alerts
-      FROM public.telegram_alert_subscriptions s
-      JOIN public.app_user_profiles u ON u.user_id = s.user_id
-      JOIN public.telegram_alert_cursors c ON c.user_id = s.user_id
+      FROM public.nt_telegram_alert_subscriptions s
+      JOIN public.nt_app_user_profiles u ON u.user_id = s.user_id
+      JOIN public.nt_telegram_alert_cursors c ON c.user_id = s.user_id
       JOIN eff e ON e.user_id = s.user_id
       WHERE u.telegram_chat_id IS NOT NULL AND c.disabled_at IS NULL
         AND (e.plan_expires_at IS NULL OR e.plan_expires_at > now())
@@ -117,7 +117,7 @@ export async function GET(request: NextRequest) {
         if (matched.length === 0) {
           skippedEmpty++;
           if (newCursor !== sinceThisUser) {
-            await sql`UPDATE public.telegram_alert_cursors SET last_alert_time = ${newCursor}, updated_at = now() WHERE user_id = ${sub.user_id}`;
+            await sql`UPDATE public.nt_telegram_alert_cursors SET last_alert_time = ${newCursor}, updated_at = now() WHERE user_id = ${sub.user_id}`;
           }
           continue;
         }
@@ -128,7 +128,7 @@ export async function GET(request: NextRequest) {
         if (result.ok) {
           sent++;
           await sql`
-            UPDATE public.telegram_alert_cursors
+            UPDATE public.nt_telegram_alert_cursors
             SET last_alert_time = ${newCursor}, consecutive_failures = 0, updated_at = now()
             WHERE user_id = ${sub.user_id}
           `;
@@ -139,7 +139,7 @@ export async function GET(request: NextRequest) {
           // Telegram delivery is disabled) so a re-link later doesn't
           // trigger a backlog blast.
           await sql`
-            UPDATE public.telegram_alert_cursors
+            UPDATE public.nt_telegram_alert_cursors
             SET last_alert_time = ${newCursor}, disabled_at = now(), updated_at = now()
             WHERE user_id = ${sub.user_id}
           `;
@@ -150,7 +150,7 @@ export async function GET(request: NextRequest) {
           const disable = failures >= MAX_CONSECUTIVE_FAILURES;
           // Cursor NOT advanced on transient failure — must retry this batch next run.
           await sql`
-            UPDATE public.telegram_alert_cursors
+            UPDATE public.nt_telegram_alert_cursors
             SET consecutive_failures = ${failures}, disabled_at = ${disable ? sql`now()` : null}, updated_at = now()
             WHERE user_id = ${sub.user_id}
           `;

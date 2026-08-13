@@ -77,7 +77,7 @@ const LINK_CODE_TTL_MS = 15 * 60 * 1000;
 export async function createLinkCode(userId: string): Promise<string> {
   const code = generateLinkCode();
   const expiresAt = new Date(Date.now() + LINK_CODE_TTL_MS).toISOString();
-  await sql`INSERT INTO public.telegram_link_codes (code, user_id, expires_at) VALUES (${code}, ${userId}, ${expiresAt})`;
+  await sql`INSERT INTO public.nt_telegram_link_codes (code, user_id, expires_at) VALUES (${code}, ${userId}, ${expiresAt})`;
   return code;
 }
 
@@ -89,7 +89,7 @@ export async function createLinkCode(userId: string): Promise<string> {
  */
 export async function consumeLinkCode(code: string): Promise<string | null> {
   const rows = await sql`
-    UPDATE public.telegram_link_codes
+    UPDATE public.nt_telegram_link_codes
     SET consumed_at = now()
     WHERE code = ${code} AND consumed_at IS NULL AND expires_at > now()
     RETURNING user_id
@@ -106,7 +106,7 @@ export async function consumeLinkCode(code: string): Promise<string | null> {
 export async function linkTelegramChat(userId: string, chatId: string): Promise<boolean> {
   try {
     await sql`
-      UPDATE public.app_user_profiles
+      UPDATE public.nt_app_user_profiles
       SET telegram_chat_id = ${chatId}, telegram_linked_at = now(), updated_at = now()
       WHERE user_id = ${userId}
     `;
@@ -120,9 +120,9 @@ export async function linkTelegramChat(userId: string, chatId: string): Promise<
 }
 
 export async function unlinkTelegram(userId: string): Promise<void> {
-  await sql`UPDATE public.app_user_profiles SET telegram_chat_id = NULL, telegram_linked_at = NULL, updated_at = now() WHERE user_id = ${userId}`;
-  await sql`DELETE FROM public.telegram_alert_subscriptions WHERE user_id = ${userId}`;
-  await sql`DELETE FROM public.telegram_alert_cursors WHERE user_id = ${userId}`;
+  await sql`UPDATE public.nt_app_user_profiles SET telegram_chat_id = NULL, telegram_linked_at = NULL, updated_at = now() WHERE user_id = ${userId}`;
+  await sql`DELETE FROM public.nt_telegram_alert_subscriptions WHERE user_id = ${userId}`;
+  await sql`DELETE FROM public.nt_telegram_alert_cursors WHERE user_id = ${userId}`;
 }
 
 export interface TelegramStatus {
@@ -134,9 +134,9 @@ export interface TelegramStatus {
 export async function getTelegramStatus(userId: string): Promise<TelegramStatus> {
   const rows = await sql`
     SELECT u.telegram_chat_id, s.watchlist_id, c.disabled_at
-    FROM public.app_user_profiles u
-    LEFT JOIN public.telegram_alert_subscriptions s ON s.user_id = u.user_id
-    LEFT JOIN public.telegram_alert_cursors c ON c.user_id = u.user_id
+    FROM public.nt_app_user_profiles u
+    LEFT JOIN public.nt_telegram_alert_subscriptions s ON s.user_id = u.user_id
+    LEFT JOIN public.nt_telegram_alert_cursors c ON c.user_id = u.user_id
     WHERE u.user_id = ${userId}
   `;
   const row = rows[0] as { telegram_chat_id: string | null; watchlist_id: string | null; disabled_at: string | null } | undefined;
@@ -157,17 +157,17 @@ export async function getTelegramStatus(userId: string): Promise<TelegramStatus>
  */
 export async function setTelegramSubscription(userId: string, watchlistId: string): Promise<void> {
   await sql`
-    INSERT INTO public.telegram_alert_subscriptions (user_id, watchlist_id, updated_at)
+    INSERT INTO public.nt_telegram_alert_subscriptions (user_id, watchlist_id, updated_at)
     VALUES (${userId}, ${watchlistId}, now())
     ON CONFLICT (user_id) DO UPDATE SET watchlist_id = EXCLUDED.watchlist_id, updated_at = now()
   `;
   await sql`
-    INSERT INTO public.telegram_alert_cursors (user_id, last_alert_time)
+    INSERT INTO public.nt_telegram_alert_cursors (user_id, last_alert_time)
     VALUES (${userId}, now())
     ON CONFLICT (user_id) DO NOTHING
   `;
   // Re-enable delivery if a prior disable (e.g. from repeated send failures)
   // is still in effect — picking a new/same watchlist is an explicit signal
   // the user wants alerts again.
-  await sql`UPDATE public.telegram_alert_cursors SET disabled_at = NULL, consecutive_failures = 0 WHERE user_id = ${userId}`;
+  await sql`UPDATE public.nt_telegram_alert_cursors SET disabled_at = NULL, consecutive_failures = 0 WHERE user_id = ${userId}`;
 }

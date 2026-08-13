@@ -20,14 +20,14 @@ export interface AdminPlan {
 export async function listPlans(): Promise<AdminPlan[]> {
   const rows = await sql`
     SELECT id, code, name, features, is_active
-    FROM public.plans
+    FROM public.nt_plans
     ORDER BY is_active DESC, sort_order, id
   `;
   return rows as unknown as AdminPlan[];
 }
 
 export async function updatePlanFeatures(planId: number, features: string[]): Promise<void> {
-  await sql`UPDATE public.plans SET features = ${JSON.stringify(features)}::jsonb WHERE id = ${planId}`;
+  await sql`UPDATE public.nt_plans SET features = ${JSON.stringify(features)}::jsonb WHERE id = ${planId}`;
 }
 
 export interface AdminUserSummary {
@@ -52,8 +52,8 @@ export async function listUsers(opts: { search?: string | null; limit?: number; 
       SELECT u.id, u.email, u.name, u."emailVerified" AS email_verified, u.role, u.banned, u."createdAt" AS created_at,
              p.code AS plan_code, up.plan_expires_at, up.telegram_chat_id
       FROM neon_auth."user" u
-      LEFT JOIN public.app_user_profiles up ON up.user_id = u.id::text
-      LEFT JOIN public.plans p ON p.id = up.plan_id
+      LEFT JOIN public.nt_app_user_profiles up ON up.user_id = u.id::text
+      LEFT JOIN public.nt_plans p ON p.id = up.plan_id
       WHERE ${pattern}::text IS NULL OR u.email ILIKE ${pattern} OR u.name ILIKE ${pattern}
       ORDER BY u."createdAt" DESC
       LIMIT ${limit} OFFSET ${offset}
@@ -78,20 +78,20 @@ export async function getUserDetail(userId: string): Promise<AdminUserDetail | n
     SELECT u.id, u.email, u.name, u."emailVerified" AS email_verified, u.role, u.banned, u."createdAt" AS created_at,
            up.plan_id, p.code AS plan_code, up.plan_expires_at, up.telegram_chat_id, up.telegram_linked_at
     FROM neon_auth."user" u
-    LEFT JOIN public.app_user_profiles up ON up.user_id = u.id::text
-    LEFT JOIN public.plans p ON p.id = up.plan_id
+    LEFT JOIN public.nt_app_user_profiles up ON up.user_id = u.id::text
+    LEFT JOIN public.nt_plans p ON p.id = up.plan_id
     WHERE u.id = ${userId}
   `;
   const row = rows[0] as Omit<AdminUserDetail, 'overrides'> | undefined;
   if (!row) return null;
 
-  const overrides = await sql`SELECT feature, granted FROM public.user_feature_overrides WHERE user_id = ${userId} ORDER BY feature`;
+  const overrides = await sql`SELECT feature, granted FROM public.nt_user_feature_overrides WHERE user_id = ${userId} ORDER BY feature`;
   return { ...row, overrides: overrides as unknown as Array<{ feature: string; granted: boolean }> };
 }
 
 export async function updateUserPlan(userId: string, planId: number, planExpiresAt: string | null): Promise<void> {
   await sql`
-    INSERT INTO public.app_user_profiles (user_id, plan_id, plan_expires_at)
+    INSERT INTO public.nt_app_user_profiles (user_id, plan_id, plan_expires_at)
     VALUES (${userId}, ${planId}, ${planExpiresAt})
     ON CONFLICT (user_id) DO UPDATE SET plan_id = EXCLUDED.plan_id, plan_expires_at = EXCLUDED.plan_expires_at, updated_at = now()
   `;
@@ -103,14 +103,14 @@ export async function setUserRole(userId: string, role: 'user' | 'admin'): Promi
 
 export async function setFeatureOverride(userId: string, feature: string, granted: boolean, updatedBy: string): Promise<void> {
   await sql`
-    INSERT INTO public.user_feature_overrides (user_id, feature, granted, updated_by)
+    INSERT INTO public.nt_user_feature_overrides (user_id, feature, granted, updated_by)
     VALUES (${userId}, ${feature}, ${granted}, ${updatedBy})
     ON CONFLICT (user_id, feature) DO UPDATE SET granted = EXCLUDED.granted, updated_by = EXCLUDED.updated_by, updated_at = now()
   `;
 }
 
 export async function removeFeatureOverride(userId: string, feature: string): Promise<void> {
-  await sql`DELETE FROM public.user_feature_overrides WHERE user_id = ${userId} AND feature = ${feature}`;
+  await sql`DELETE FROM public.nt_user_feature_overrides WHERE user_id = ${userId} AND feature = ${feature}`;
 }
 
 export interface TodaysLoginRow { userId: string; email: string; createdAt: string; ipAddress: string | null }
@@ -161,7 +161,7 @@ export interface TelegramLinkedRow { userId: string; email: string; telegramLink
 export async function getTelegramLinkedUsers(limit: number = 500): Promise<TelegramLinkedRow[]> {
   const rows = await sql`
     SELECT up.user_id, u.email, up.telegram_linked_at::text AS telegram_linked_at
-    FROM public.app_user_profiles up
+    FROM public.nt_app_user_profiles up
     JOIN neon_auth."user" u ON u.id::text = up.user_id
     WHERE up.telegram_chat_id IS NOT NULL
     ORDER BY up.telegram_linked_at DESC
@@ -176,7 +176,7 @@ export interface PlanUserRow { userId: string; email: string; planExpiresAt: str
 export async function getUsersByPlan(planId: number, limit: number = 300): Promise<PlanUserRow[]> {
   const rows = await sql`
     SELECT up.user_id, u.email, up.plan_expires_at::text AS plan_expires_at
-    FROM public.app_user_profiles up
+    FROM public.nt_app_user_profiles up
     JOIN neon_auth."user" u ON u.id::text = up.user_id
     WHERE up.plan_id = ${planId}
     ORDER BY u."createdAt" DESC
@@ -198,12 +198,12 @@ export async function getDashboardStats(): Promise<AdminStats> {
     sql`SELECT count(*) FROM neon_auth."user"`,
     sql`
       SELECT p.code, p.name, count(up.user_id) AS count
-      FROM public.plans p
-      LEFT JOIN public.app_user_profiles up ON up.plan_id = p.id
+      FROM public.nt_plans p
+      LEFT JOIN public.nt_app_user_profiles up ON up.plan_id = p.id
       GROUP BY p.id, p.code, p.name
       ORDER BY p.id
     `,
-    sql`SELECT count(*) FROM public.app_user_profiles WHERE telegram_chat_id IS NOT NULL`,
+    sql`SELECT count(*) FROM public.nt_app_user_profiles WHERE telegram_chat_id IS NOT NULL`,
     sql`SELECT count(*) FROM neon_auth."user" WHERE "createdAt" >= now() - interval '7 days'`,
     sql`SELECT count(*) FROM neon_auth."session" WHERE "createdAt" >= CURRENT_DATE`,
   ]);
