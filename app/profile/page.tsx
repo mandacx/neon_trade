@@ -3,8 +3,9 @@ import { redirect } from 'next/navigation';
 import Header from '@/components/layout/Header';
 import SignOutButton from '@/components/auth/SignOutButton';
 import AccountEditor from '@/components/profile/AccountEditor';
+import TelegramCard from '@/components/profile/TelegramCard';
 import { getCurrentUserContext } from '@/lib/appUsers';
-import { ALL_FEATURES, FEATURE_TELEGRAM_ALERTS } from '@/lib/features';
+import { ALL_FEATURES, FEATURE_TELEGRAM_ALERTS, hasFeature } from '@/lib/features';
 
 // getCurrentUserContext() reads cookies, so this page can't be statically rendered.
 export const dynamic = 'force-dynamic';
@@ -12,6 +13,8 @@ export const dynamic = 'force-dynamic';
 export default async function ProfilePage() {
   const ctx = await getCurrentUserContext();
   if (!ctx.loggedIn) redirect('/login');
+
+  const canTelegram = hasFeature(ctx.features, FEATURE_TELEGRAM_ALERTS);
 
   return (
     <>
@@ -64,16 +67,20 @@ export default async function ProfilePage() {
                 <Link href="/upgrade" className="inline-block mt-3 text-xs font-semibold text-blue-600">View plans →</Link>
               </div>
 
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
-                <h3 className="text-sm font-semibold text-gray-700 mb-1">📨 Telegram alerts</h3>
-                <p className="text-xs text-gray-500 mb-3">Get scan alerts pushed straight to Telegram for any watchlist, the moment they fire. Coming soon.</p>
-                <Link
-                  href={`/upgrade?feature=${FEATURE_TELEGRAM_ALERTS}`}
-                  className="inline-block px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold"
-                >
-                  View plans
-                </Link>
-              </div>
+              {canTelegram ? (
+                <TelegramCard />
+              ) : (
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
+                  <h3 className="text-sm font-semibold text-gray-700 mb-1">📨 Telegram alerts</h3>
+                  <p className="text-xs text-gray-500 mb-3">Get scan alerts pushed straight to Telegram for any watchlist, the moment they fire.</p>
+                  <Link
+                    href={`/upgrade?feature=${FEATURE_TELEGRAM_ALERTS}`}
+                    className="inline-block px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold"
+                  >
+                    View plans
+                  </Link>
+                </div>
+              )}
             </div>
           </div>
         </div>
