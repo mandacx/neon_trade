@@ -138,6 +138,14 @@ export function usTradingDayKey(epochSeconds: number): string {
   return `${get('year')}-${get('month')}-${get('day')}`;
 }
 
+/** True if a 'yyyy-MM-dd' date string falls on the 3rd Friday of its month — the standard US monthly options expiry. */
+export function isThirdFridayOfMonth(dateStr: string): boolean {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  if (d.getUTCDay() !== 5) return false; // Friday
+  const day = d.getUTCDate();
+  return day >= 15 && day <= 21; // the 3rd Friday of any month always falls in this range
+}
+
 /** How a past scan alert's option position played out by expiry — see lib/alertPerformance.ts. */
 export type PerformanceOutcome = 'favorable' | 'unfavorable' | 'flat' | 'not_yet_expired' | 'awaiting_data';
 

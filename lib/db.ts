@@ -500,6 +500,53 @@ export async function getNearestExpiryLatestForSymbols(symbols: string[]): Promi
 }
 
 /**
+ * Batched level lookup pinned to one EXACT expiry_dt across a symbol set —
+ * for the watchlist-wide monthly-expiry toggle (see app/watchlists/page.tsx),
+ * as opposed to getNearestExpiryLatestForSymbols' per-symbol "nearest
+ * future" pick. A symbol with no row at this exact expiry simply doesn't
+ * appear in the result — callers should treat a missing symbol as "no data
+ * for this expiry", not an error.
+ */
+export async function getStockDataForSymbolsAtExpiry(symbols: string[], expiryDate: string): Promise<StockData[]> {
+  if (symbols.length === 0) return [];
+  const upper = symbols.map(s => s.toUpperCase());
+  try {
+    const result = await sql`
+      WITH ranked AS (
+        SELECT
+          p.symbol as "SYMBOL",
+          p.expiry_dt::text as "EXPIRY_DT",
+          p.trade_date::text as "TRADE_DATE",
+          COALESCE(p.open, 0) as "OPEN",
+          COALESCE(p.high, 0) as "HIGH",
+          COALESCE(p.low, 0) as "LOW",
+          COALESCE(p.close, 0) as "CLOSE",
+          COALESCE(p.put_int, 0) as "PUT_INT",
+          COALESCE(p.call_int, 0) as "CALL_INT",
+          COALESCE(p.comb_int, 0) as "PUT_CALL_INT",
+          COALESCE(p.call_low, 0) as call_low,
+          COALESCE(p.put_high, 0) as "put_HIGH",
+          COALESCE(p.call_high, 0) as "call_HIGH",
+          COALESCE(p.put_low, 0) as "put_LOW",
+          COALESCE(p.unused_pc, 0) as "UNUSED_PC",
+          COALESCE(p.unused_pc_rev, 0) as "UNUSED_PC_REV",
+          COALESCE(p.call_oi, 0) as "CALL_OI",
+          COALESCE(p.put_oi, 0) as "PUT_OI",
+          COALESCE((p.put_oi - p.call_oi), 0) as "OI_DIFF",
+          ROW_NUMBER() OVER (PARTITION BY p.symbol ORDER BY p.trade_date DESC) AS rn
+        FROM public.eod_usmkts_price p
+        WHERE p.symbol = ANY(${upper}) AND p.expiry_dt = ${expiryDate}::date
+      )
+      SELECT * FROM ranked WHERE rn = 1
+    `;
+    return result.map((row: any) => sanitizeStockData(row));
+  } catch (error) {
+    console.error('Error fetching stock data for symbols at expiry:', error);
+    return [];
+  }
+}
+
+/**
  * True if `symbol` is a known ticker in this app's own data (securities or
  * eod_usmkts_price). Used to validate watchlist additions — the search box
  * (app/api/stocks/search) surfaces a broader universe via Tradier, but a

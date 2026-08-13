@@ -31,6 +31,16 @@ interface LevelRow {
   requiredFeature: string | null;
 }
 
+type DirectionFilter = 'all' | 'up' | 'down';
+
+function fmtExpiry(dateStr: string): string {
+  try {
+    return new Date(`${dateStr}T00:00:00Z`).toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric' });
+  } catch {
+    return dateStr;
+  }
+}
+
 type ColumnKey = 'open' | 'dayLow' | 'dayHigh' | 'volume' | 'level';
 const OPTIONAL_COLUMNS: Array<{ key: ColumnKey; label: string }> = [
   { key: 'open', label: 'Open' },
@@ -114,6 +124,16 @@ export default function WatchlistsPage() {
   const [rows, setRows] = useState<QuoteRow[] | null>(null);
   const [rowsLoading, setRowsLoading] = useState(false);
   const [levelRows, setLevelRows] = useState<LevelRow[] | null>(null);
+  // Monthly (3rd-Friday) expiries available across the data, and the one
+  // currently selected — null while still loading, [] if none are available
+  // (in which case selectedExpiry stays '' and the levels/alerts routes fall
+  // back to their own per-symbol "nearest future expiry" behavior).
+  const [monthlyExpiries, setMonthlyExpiries] = useState<string[] | null>(null);
+  const [selectedExpiry, setSelectedExpiry] = useState('');
+  const [search, setSearch] = useState('');
+  const [directionFilter, setDirectionFilter] = useState<DirectionFilter>('all');
+  const [proximityEnabled, setProximityEnabled] = useState(false);
+  const [proximityThreshold, setProximityThreshold] = useState(5);
   const [condensed, setCondensed] = useState(false);
   const [visibleCols, setVisibleCols] = useState<Set<ColumnKey>>(new Set(OPTIONAL_COLUMNS.map(c => c.key)));
   const [customizeOpen, setCustomizeOpen] = useState(false);
@@ -130,6 +150,18 @@ export default function WatchlistsPage() {
   const canEdit = !!selected && !selected.isSystem;
   const levelBySymbol = new Map((levelRows ?? []).map(l => [l.symbol, l]));
 
+  const visibleRows = (rows ?? []).filter(r => {
+    const q = search.trim().toUpperCase();
+    if (q && !r.symbol.includes(q) && !r.name.toUpperCase().includes(q)) return false;
+    if (directionFilter === 'up' && !((r.change ?? 0) > 0)) return false;
+    if (directionFilter === 'down' && !((r.change ?? 0) < 0)) return false;
+    if (proximityEnabled) {
+      const distancePercent = levelBySymbol.get(r.symbol)?.distancePercent;
+      if (distancePercent == null || Math.abs(distancePercent) > proximityThreshold) return false;
+    }
+    return true;
+  });
+
   async function refreshLists(keepSelection: boolean) {
     const res = await fetch('/api/watchlists');
     const json = await res.json();
@@ -144,6 +176,20 @@ export default function WatchlistsPage() {
 
   useEffect(() => { refreshLists(false); }, []);
 
+  // Monthly expiries are global (independent of which watchlist is
+  // selected), so this fetches once and defaults the toggle to the earliest
+  // upcoming one rather than re-resolving per watchlist switch.
+  useEffect(() => {
+    fetch('/api/watchlists/expiry-dates')
+      .then(res => res.json())
+      .then(json => {
+        const list: string[] = json.success ? json.data.monthlyExpiries : [];
+        setMonthlyExpiries(list);
+        if (list.length > 0) setSelectedExpiry(list[0]);
+      })
+      .catch(() => setMonthlyExpiries([]));
+  }, []);
+
   async function loadRows(id: string) {
     setRowsLoading(true);
     const res = await fetch(`/api/watchlists/${id}/quotes`);
@@ -152,18 +198,24 @@ export default function WatchlistsPage() {
     setRows(json.success ? json.data.rows : []);
   }
 
-  async function loadLevels(id: string) {
-    const res = await fetch(`/api/watchlists/${id}/levels`);
+  async function loadLevels(id: string, expiry: string) {
+    const url = `/api/watchlists/${id}/levels${expiry ? `?expiry=${encodeURIComponent(expiry)}` : ''}`;
+    const res = await fetch(url);
     const json = await res.json();
     setLevelRows(json.success ? json.data.rows : []);
   }
 
   useEffect(() => {
-    if (selectedId) {
-      loadRows(selectedId);
-      loadLevels(selectedId);
-    }
+    if (selectedId) loadRows(selectedId);
   }, [selectedId]);
+
+  // Gated on monthlyExpiries !== null (not just selectedExpiry) so this
+  // doesn't deadlock waiting for a selection that may never come (e.g. no
+  // monthly expiries currently in the data) — an empty selectedExpiry just
+  // means "no expiry param", falling back to each symbol's own nearest.
+  useEffect(() => {
+    if (selectedId && monthlyExpiries !== null) loadLevels(selectedId, selectedExpiry);
+  }, [selectedId, selectedExpiry, monthlyExpiries]);
 
   useEffect(() => {
     setNameInput(selected?.name ?? '');
@@ -226,13 +278,13 @@ export default function WatchlistsPage() {
     const json = await res.json();
     setBusy(false);
     if (!json.success) { setError(json.error ?? 'Could not add symbol.'); return; }
-    await Promise.all([loadRows(selected.id), loadLevels(selected.id), refreshLists(true)]);
+    await Promise.all([loadRows(selected.id), loadLevels(selected.id, selectedExpiry), refreshLists(true)]);
   }
 
   async function handleRemoveSymbol(symbol: string) {
     if (!selected) return;
     await fetch(`/api/watchlists/${selected.id}/items?symbol=${encodeURIComponent(symbol)}`, { method: 'DELETE' });
-    await Promise.all([loadRows(selected.id), loadLevels(selected.id), refreshLists(true)]);
+    await Promise.all([loadRows(selected.id), loadLevels(selected.id, selectedExpiry), refreshLists(true)]);
   }
 
   const colSpan = 3 + visibleCols.size + (canEdit ? 1 : 0);
@@ -259,24 +311,39 @@ export default function WatchlistsPage() {
           </div>
 
           {/* Toolbar */}
-          <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 mb-4">
+          <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 mb-4 space-y-3">
             <div className="flex flex-wrap items-end justify-between gap-4">
-              <div>
-                <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">View</label>
-                <select
-                  value={selectedId}
-                  onChange={e => setSelectedId(e.target.value)}
-                  className="px-3 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white min-w-[240px]"
-                >
-                  {custom.length > 0 && (
-                    <optgroup label="My Watchlists">
-                      {custom.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+              <div className="flex flex-wrap items-end gap-4">
+                <div>
+                  <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">View</label>
+                  <select
+                    value={selectedId}
+                    onChange={e => setSelectedId(e.target.value)}
+                    className="px-3 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white min-w-[240px]"
+                  >
+                    {custom.length > 0 && (
+                      <optgroup label="My Watchlists">
+                        {custom.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+                      </optgroup>
+                    )}
+                    <optgroup label="Sectors & Indices">
+                      {system.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
                     </optgroup>
-                  )}
-                  <optgroup label="Sectors & Indices">
-                    {system.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
-                  </optgroup>
-                </select>
+                  </select>
+                </div>
+
+                {monthlyExpiries !== null && monthlyExpiries.length > 0 && (
+                  <div>
+                    <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">Expiry</label>
+                    <select
+                      value={selectedExpiry}
+                      onChange={e => setSelectedExpiry(e.target.value)}
+                      className="px-3 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white"
+                    >
+                      {monthlyExpiries.map(d => <option key={d} value={d}>{fmtExpiry(d)}</option>)}
+                    </select>
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center gap-4">
@@ -308,6 +375,47 @@ export default function WatchlistsPage() {
                 </div>
               </div>
             </div>
+
+            <div className="flex flex-wrap items-end gap-4 pt-3 border-t border-gray-100">
+              <div>
+                <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">Search</label>
+                <input
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  placeholder="Symbol or name…"
+                  className="px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white w-48"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">Direction</label>
+                <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
+                  {(['all', 'up', 'down'] as DirectionFilter[]).map(d => (
+                    <button
+                      key={d}
+                      onClick={() => setDirectionFilter(d)}
+                      className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-colors ${directionFilter === d ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500'}`}
+                    >
+                      {d === 'all' ? 'All' : d === 'up' ? '▲ Gainers' : '▼ Losers'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="flex items-center gap-1.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1 cursor-pointer select-none">
+                  <input type="checkbox" checked={proximityEnabled} onChange={e => setProximityEnabled(e.target.checked)} className="accent-blue-600" />
+                  Near a level: {proximityThreshold}%
+                </label>
+                <input
+                  type="range" min="1" max="20" step="0.5"
+                  value={proximityThreshold}
+                  disabled={!proximityEnabled}
+                  onChange={e => setProximityThreshold(parseFloat(e.target.value))}
+                  className="w-40 accent-blue-500 disabled:opacity-40"
+                />
+              </div>
+            </div>
           </div>
 
           <div className="flex flex-col lg:flex-row gap-4">
@@ -324,9 +432,13 @@ export default function WatchlistsPage() {
               ) : (
                 <>
                   <span className="font-semibold text-sm text-gray-900">{selected?.name}</span>
-                  <span className="text-[11px] text-gray-400">{rows?.length ?? selected?.symbolCount ?? 0} symbols</span>
+                  <span className="text-[11px] text-gray-400">
+                    {rows && visibleRows.length !== rows.length
+                      ? `${visibleRows.length} of ${rows.length} symbols`
+                      : `${rows?.length ?? selected?.symbolCount ?? 0} symbols`}
+                  </span>
                   <button
-                    onClick={() => selectedId && (loadRows(selectedId), loadLevels(selectedId))}
+                    onClick={() => selectedId && (loadRows(selectedId), loadLevels(selectedId, selectedExpiry))}
                     disabled={rowsLoading}
                     title="Refresh quotes"
                     className="text-gray-400 hover:text-blue-600 disabled:opacity-40 transition-colors"
@@ -381,7 +493,7 @@ export default function WatchlistsPage() {
                 </tr>
               </thead>
               <tbody>
-                {rows?.map(r => (
+                {visibleRows.map(r => (
                   <tr key={r.symbol} className="border-b border-gray-50 hover:bg-blue-50/40 transition-colors">
                     <td className={cellPad}>
                       <Link href={`/stock/${encodeURIComponent(r.symbol)}`} className="flex items-center gap-1.5 hover:underline">
@@ -418,6 +530,9 @@ export default function WatchlistsPage() {
                 {!rowsLoading && rows?.length === 0 && (
                   <tr><td colSpan={colSpan} className="text-center text-gray-400 py-8 text-xs">No symbols in this watchlist yet.</td></tr>
                 )}
+                {!rowsLoading && rows && rows.length > 0 && visibleRows.length === 0 && (
+                  <tr><td colSpan={colSpan} className="text-center text-gray-400 py-8 text-xs">No symbols match your filters.</td></tr>
+                )}
               </tbody>
             </table>
 
@@ -430,7 +545,7 @@ export default function WatchlistsPage() {
           </div>
 
           <div className="w-full lg:w-80 shrink-0">
-            {selectedId && <AlertsWidget watchlistId={selectedId} />}
+            {selectedId && <AlertsWidget watchlistId={selectedId} expiry={selectedExpiry || undefined} />}
           </div>
           </div>
         </div>

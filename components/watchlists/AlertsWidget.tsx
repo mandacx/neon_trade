@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { format } from 'date-fns';
 import { getLevelColor, getLevelDisplayName, formatCurrency } from '@/lib/utils';
@@ -23,16 +23,23 @@ function fmtTime(iso: string): string {
   }
 }
 
-/** Compact "latest fired alerts" feed for a watchlist's symbols — sidebar companion to the table. */
-export default function AlertsWidget({ watchlistId }: { watchlistId: string }) {
+/**
+ * Compact "latest fired alerts" feed for a watchlist's symbols — sidebar
+ * companion to the table. `expiry`, when set, pins the fetch to that one
+ * exact expiry so this stays consistent with whatever expiry the table is
+ * showing; omitted, it falls back to the route's own recent-expiries window.
+ */
+export default function AlertsWidget({ watchlistId, expiry }: { watchlistId: string; expiry?: string }) {
   const [alerts, setAlerts] = useState<Alert[] | null>(null);
   const [levelsRedacted, setLevelsRedacted] = useState(false);
+  const [search, setSearch] = useState('');
 
   useEffect(() => {
     if (!watchlistId) return;
     let cancelled = false;
     setAlerts(null);
-    fetch(`/api/watchlists/${watchlistId}/alerts`)
+    const url = `/api/watchlists/${watchlistId}/alerts${expiry ? `?expiry=${encodeURIComponent(expiry)}` : ''}`;
+    fetch(url)
       .then(res => res.json())
       .then(json => {
         if (cancelled) return;
@@ -41,7 +48,13 @@ export default function AlertsWidget({ watchlistId }: { watchlistId: string }) {
       })
       .catch(() => { if (!cancelled) setAlerts([]); });
     return () => { cancelled = true; };
-  }, [watchlistId]);
+  }, [watchlistId, expiry]);
+
+  const visibleAlerts = useMemo(() => {
+    if (!alerts) return alerts;
+    const q = search.trim().toUpperCase();
+    return q ? alerts.filter(a => a.symbol.includes(q)) : alerts;
+  }, [alerts, search]);
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
@@ -52,6 +65,15 @@ export default function AlertsWidget({ watchlistId }: { watchlistId: string }) {
         </span>
       </div>
 
+      {alerts !== null && alerts.length > 0 && (
+        <input
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Filter by symbol…"
+          className="w-full mb-3 px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
+        />
+      )}
+
       {alerts === null && (
         <p className="text-xs text-gray-400">Loading…</p>
       )}
@@ -60,9 +82,13 @@ export default function AlertsWidget({ watchlistId }: { watchlistId: string }) {
         <p className="text-xs text-gray-400">No alerts have fired yet for this watchlist&apos;s current expiries.</p>
       )}
 
-      {alerts && alerts.length > 0 && (
+      {alerts !== null && alerts.length > 0 && visibleAlerts?.length === 0 && (
+        <p className="text-xs text-gray-400">No alerts match &quot;{search}&quot;.</p>
+      )}
+
+      {visibleAlerts && visibleAlerts.length > 0 && (
         <div className="space-y-1.5 max-h-[520px] overflow-y-auto">
-          {alerts.map(a => (
+          {visibleAlerts.map(a => (
             <Link
               key={a.id}
               href={`/stock/${encodeURIComponent(a.symbol)}`}

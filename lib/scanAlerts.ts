@@ -300,36 +300,53 @@ export interface AlertsByExpiryOptions {
   /** Most recent N distinct expiry_dt values across the symbol set, default 6, capped 24.
    * Kept generous because per-symbol US options expiry cycles can diverge a lot within one
    * watchlist (unlike NSE's weekly-index/monthly-stock split), so a small N can miss a
-   * symbol's own recent alerts entirely if another symbol in the list has more expiries. */
+   * symbol's own recent alerts entirely if another symbol in the list has more expiries.
+   * Ignored when `expiryDate` is set. */
   expiryCount?: number;
+  /** Pin to one exact expiry_dt instead of the N-most-recent-distinct-expiries window — for the
+   * watchlist-wide monthly-expiry toggle (see app/watchlists/page.tsx). Takes precedence over expiryCount. */
+  expiryDate?: string;
 }
 
-/** Alerts for a set of symbols, bounded to the N most recent distinct expiry_dt values across that symbol set. */
+/** Alerts for a set of symbols, bounded to one exact expiry or the N most recent distinct expiry_dt values across that symbol set. */
 export async function getAlertsForSymbolsByExpiry(symbols: string[], opts: AlertsByExpiryOptions = {}): Promise<TickerAlert[]> {
   if (symbols.length === 0) return [];
-  const expiryCount = Math.min(opts.expiryCount ?? 6, 24);
   const upperSymbols = symbols.map(s => s.toUpperCase());
 
   try {
-    const rows = await sql`
-      WITH recent_expiries AS (
-        SELECT DISTINCT expiry_dt FROM public.intra_us_scanner_eod
-        WHERE symbol = ANY(${upperSymbols})
-        ORDER BY expiry_dt DESC
-        LIMIT ${expiryCount}
-      )
-      SELECT
-        symbol, last_price,
-        expiry_dt::text as expiry_dt, trade_date::text as trade_date,
-        COALESCE(put_low, 0) as put_low, COALESCE(put_int, 0) as put_int,
-        COALESCE(cmb_int, 0) as cmb_int, COALESCE(call_int, 0) as call_int,
-        COALESCE(call_high, 0) as call_high,
-        load_dt_tm::text as load_dt_tm, scan_code
-      FROM public.intra_us_scanner_eod
-      WHERE symbol = ANY(${upperSymbols}) AND expiry_dt IN (SELECT expiry_dt FROM recent_expiries)
-      ORDER BY trade_date DESC, load_dt_tm DESC
-      LIMIT 5000
-    `;
+    const rows = opts.expiryDate
+      ? await sql`
+          SELECT
+            symbol, last_price,
+            expiry_dt::text as expiry_dt, trade_date::text as trade_date,
+            COALESCE(put_low, 0) as put_low, COALESCE(put_int, 0) as put_int,
+            COALESCE(cmb_int, 0) as cmb_int, COALESCE(call_int, 0) as call_int,
+            COALESCE(call_high, 0) as call_high,
+            load_dt_tm::text as load_dt_tm, scan_code
+          FROM public.intra_us_scanner_eod
+          WHERE symbol = ANY(${upperSymbols}) AND expiry_dt = ${opts.expiryDate}::date
+          ORDER BY trade_date DESC, load_dt_tm DESC
+          LIMIT 5000
+        `
+      : await sql`
+          WITH recent_expiries AS (
+            SELECT DISTINCT expiry_dt FROM public.intra_us_scanner_eod
+            WHERE symbol = ANY(${upperSymbols})
+            ORDER BY expiry_dt DESC
+            LIMIT ${Math.min(opts.expiryCount ?? 6, 24)}
+          )
+          SELECT
+            symbol, last_price,
+            expiry_dt::text as expiry_dt, trade_date::text as trade_date,
+            COALESCE(put_low, 0) as put_low, COALESCE(put_int, 0) as put_int,
+            COALESCE(cmb_int, 0) as cmb_int, COALESCE(call_int, 0) as call_int,
+            COALESCE(call_high, 0) as call_high,
+            load_dt_tm::text as load_dt_tm, scan_code
+          FROM public.intra_us_scanner_eod
+          WHERE symbol = ANY(${upperSymbols}) AND expiry_dt IN (SELECT expiry_dt FROM recent_expiries)
+          ORDER BY trade_date DESC, load_dt_tm DESC
+          LIMIT 5000
+        `;
     return (rows as any[]).map(toTickerAlert).filter((a): a is TickerAlert => a !== null);
   } catch (error) {
     console.error('Error fetching alerts for symbols by expiry:', error);

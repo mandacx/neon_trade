@@ -1,19 +1,21 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { requireFeatureApi } from '@/lib/routeGuards';
 import { FEATURE_WATCHLISTS } from '@/lib/features';
 import { getWatchlistSymbols } from '@/lib/watchlists';
-import { getNearestExpiryLatestForSymbols } from '@/lib/db';
+import { getNearestExpiryLatestForSymbols, getStockDataForSymbolsAtExpiry } from '@/lib/db';
 import { calculateLevels, findClosestLevel } from '@/lib/calculations';
 import { levelGate } from '@/lib/levelAccess';
 
 export const dynamic = 'force-dynamic';
 
-// Nearest-level-to-price for every symbol in one watchlist, for its own
-// nearest future expiry cycle — the table view's "which level is price
-// closest to" column. DB-only (no market-data vendor call), so this stays
-// its own route rather than folding into quotes/route.ts, mirroring that
-// route's own split rationale: different data source, different cost shape.
-export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+// Nearest-level-to-price for every symbol in one watchlist. Defaults to each
+// symbol's own nearest future expiry cycle; an explicit `?expiry=YYYY-MM-DD`
+// (the watchlist page's monthly-expiry toggle) pins every symbol to that one
+// exact expiry instead — a symbol with no data at that expiry just won't
+// appear in `rows`. DB-only (no market-data vendor call), so this stays its
+// own route rather than folding into quotes/route.ts, mirroring that route's
+// own split rationale: different data source, different cost shape.
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { ctx, blocked } = await requireFeatureApi(FEATURE_WATCHLISTS);
   if (blocked) return blocked;
 
@@ -23,7 +25,10 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json({ success: true, data: { rows: [] } });
   }
 
-  const stockRows = await getNearestExpiryLatestForSymbols(symbols);
+  const expiry = request.nextUrl.searchParams.get('expiry');
+  const stockRows = expiry
+    ? await getStockDataForSymbolsAtExpiry(symbols, expiry)
+    : await getNearestExpiryLatestForSymbols(symbols);
   const gate = levelGate(ctx.features);
 
   const rows = stockRows.map(data => {
