@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { useParams } from 'next/navigation';
+import Link from 'next/link';
 import TVChart from '@/components/charts/TVChart';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import ErrorDisplay from '@/components/ui/ErrorDisplay';
@@ -559,7 +560,10 @@ export default function StockPage() {
           <div className="grid md:grid-cols-2 gap-4">
             {/* Level Details Table */}
             <div className="bg-white rounded-lg shadow-md p-4">
-              <h3 className="text-base font-bold mb-2">Price Levels</h3>
+              <h3 className="text-base font-bold mb-2">
+                Price Levels
+                <Link href="/guide" className="ml-2 text-xs font-medium text-blue-600 hover:underline">What do these mean?</Link>
+              </h3>
               {levels.length === 0 ? (
                 <div className="text-center py-4 text-gray-500 text-sm">
                   <p className="mb-1">Level data not available in database</p>

@@ -117,6 +117,14 @@ export default function Header() {
             >
               🏆 Performance
             </button>
+            <button
+              onClick={() => router.push('/guide')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                pathname?.startsWith('/guide') ? 'bg-slate-700 text-white' : 'bg-slate-600 text-white hover:bg-slate-700'
+              }`}
+            >
+              📘 Guide
+            </button>
 
             {authCtx.loggedIn ? (
               <div className="relative" ref={accountMenuRef}>
@@ -214,6 +222,12 @@ export default function Header() {
             className="w-full text-left px-3 py-2 text-sm font-semibold text-teal-700 hover:bg-teal-50 rounded-lg"
           >
             🏆 Performance
+          </button>
+          <button
+            onClick={() => router.push('/guide')}
+            className="w-full text-left px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 rounded-lg"
+          >
+            📘 Guide
           </button>
           <div className="px-3 pt-1">
             <StockSearch compact />
