@@ -446,3 +446,75 @@ export async function getStockDataByExpiry(symbol: string, expiryDate: string): 
     throw error;
   }
 }
+
+/**
+ * Batched "nearest level" lookup for a watchlist: per symbol, the latest
+ * trade_date row within that symbol's own nearest FUTURE expiry cycle (not
+ * just the newest trade_date overall, which could be an already-expired
+ * contract). One query for the whole symbol set rather than N single-symbol
+ * calls.
+ */
+export async function getNearestExpiryLatestForSymbols(symbols: string[]): Promise<StockData[]> {
+  if (symbols.length === 0) return [];
+  const upper = symbols.map(s => s.toUpperCase());
+  try {
+    const result = await sql`
+      WITH nearest_expiry AS (
+        SELECT symbol, MIN(expiry_dt) AS expiry_dt
+        FROM public.eod_usmkts_price
+        WHERE symbol = ANY(${upper}) AND expiry_dt >= CURRENT_DATE
+        GROUP BY symbol
+      ),
+      ranked AS (
+        SELECT
+          p.symbol as "SYMBOL",
+          p.expiry_dt::text as "EXPIRY_DT",
+          p.trade_date::text as "TRADE_DATE",
+          COALESCE(p.open, 0) as "OPEN",
+          COALESCE(p.high, 0) as "HIGH",
+          COALESCE(p.low, 0) as "LOW",
+          COALESCE(p.close, 0) as "CLOSE",
+          COALESCE(p.put_int, 0) as "PUT_INT",
+          COALESCE(p.call_int, 0) as "CALL_INT",
+          COALESCE(p.comb_int, 0) as "PUT_CALL_INT",
+          COALESCE(p.call_low, 0) as call_low,
+          COALESCE(p.put_high, 0) as "put_HIGH",
+          COALESCE(p.call_high, 0) as "call_HIGH",
+          COALESCE(p.put_low, 0) as "put_LOW",
+          COALESCE(p.unused_pc, 0) as "UNUSED_PC",
+          COALESCE(p.unused_pc_rev, 0) as "UNUSED_PC_REV",
+          COALESCE(p.call_oi, 0) as "CALL_OI",
+          COALESCE(p.put_oi, 0) as "PUT_OI",
+          COALESCE((p.put_oi - p.call_oi), 0) as "OI_DIFF",
+          ROW_NUMBER() OVER (PARTITION BY p.symbol ORDER BY p.trade_date DESC) AS rn
+        FROM public.eod_usmkts_price p
+        JOIN nearest_expiry ne ON ne.symbol = p.symbol AND ne.expiry_dt = p.expiry_dt
+      )
+      SELECT * FROM ranked WHERE rn = 1
+    `;
+    return result.map((row: any) => sanitizeStockData(row));
+  } catch (error) {
+    console.error('Error fetching nearest-expiry latest data for symbols:', error);
+    return [];
+  }
+}
+
+/**
+ * True if `symbol` is a known ticker in this app's own data (securities or
+ * eod_usmkts_price). Used to validate watchlist additions — the search box
+ * (app/api/stocks/search) surfaces a broader universe via Tradier, but a
+ * symbol outside this app's options-levels pipeline has no levels/OI to show
+ * on a watchlist row, so additions are restricted to this narrower set.
+ */
+export async function symbolExists(symbol: string): Promise<boolean> {
+  const upper = symbol.toUpperCase();
+  try {
+    const rows = await sql`SELECT 1 FROM public.securities WHERE symbol = ${upper} LIMIT 1`;
+    if (rows.length > 0) return true;
+    const rows2 = await sql`SELECT 1 FROM public.eod_usmkts_price WHERE symbol = ${upper} LIMIT 1`;
+    return rows2.length > 0;
+  } catch (error) {
+    console.error('Error checking symbol existence:', error);
+    return false;
+  }
+}

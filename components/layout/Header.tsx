@@ -101,6 +101,14 @@ export default function Header() {
             >
               📈 Stock Analysis
             </button>
+            <button
+              onClick={() => router.push('/watchlists')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                pathname?.startsWith('/watchlists') ? 'bg-amber-700 text-white' : 'bg-amber-600 text-white hover:bg-amber-700'
+              }`}
+            >
+              ⭐ Watchlists
+            </button>
 
             {authCtx.loggedIn ? (
               <div className="relative" ref={accountMenuRef}>
@@ -186,6 +194,12 @@ export default function Header() {
             className="w-full text-left px-3 py-2 text-sm font-semibold text-green-700 hover:bg-green-50 rounded-lg"
           >
             📈 Stock Analysis
+          </button>
+          <button
+            onClick={() => router.push('/watchlists')}
+            className="w-full text-left px-3 py-2 text-sm font-semibold text-amber-700 hover:bg-amber-50 rounded-lg"
+          >
+            ⭐ Watchlists
           </button>
           <div className="px-3 pt-1">
             <StockSearch compact />

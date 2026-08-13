@@ -130,6 +130,36 @@ export async function getLatestTrade(symbol: string) {
   }
 }
 
+export interface AlpacaSnapshot {
+  latestTrade?: { p: number; s: number; t: string };
+  dailyBar?: { o: number; h: number; l: number; c: number; v: number; t: string };
+  prevDailyBar?: { c: number };
+}
+
+/**
+ * Batch quote+day-range lookup for watchlists — one call for up to a few
+ * hundred symbols via Alpaca's /v2/stocks/snapshots, instead of fanning out
+ * a single-symbol call per row. Returns {} (not a throw) on failure so a
+ * flaky Alpaca call degrades to an empty quotes column rather than taking
+ * down the whole watchlist response.
+ */
+export async function getSnapshotsMulti(symbols: string[]): Promise<Record<string, AlpacaSnapshot>> {
+  if (symbols.length === 0) return {};
+  try {
+    const response = await alpacaClient.get('/v2/stocks/snapshots', {
+      params: { symbols: symbols.map(s => s.toUpperCase()).join(','), feed: 'iex' },
+    });
+    return response.data?.snapshots ?? response.data ?? {};
+  } catch (error) {
+    console.error('Error fetching snapshots from Alpaca:', error);
+    if (axios.isAxiosError(error)) {
+      console.error('Response data:', error.response?.data);
+      console.error('Response status:', error.response?.status);
+    }
+    return {};
+  }
+}
+
 export type ChartInterval = '1min' | '5min' | '15min' | '30min' | '1hour' | 'daily' | 'weekly' | 'monthly';
 
 /**

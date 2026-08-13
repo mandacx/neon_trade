@@ -10,8 +10,7 @@ import { auth } from '@/lib/auth/server';
 // do their own requireFeatureApi() check instead of being matched here.
 //
 // Deliberately NOT matched (stay public): `/`, `/stock/*`, `/login`,
-// `/upgrade`. /watchlists and /performance will be added here once those
-// pages exist.
+// `/upgrade`. /performance will be added here once that page exists.
 export default auth.middleware({ loginUrl: '/login' });
 
 export const config = {
@@ -21,5 +20,6 @@ export const config = {
     '/quadrant/:path*',
     '/scan-alerts/latest/:path*',
     '/scan-alerts/historical/:path*',
+    '/watchlists/:path*',
   ],
 };

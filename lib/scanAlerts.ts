@@ -239,3 +239,133 @@ export async function getScanAlertMonths(): Promise<{ yearMonth: string; count: 
     return [];
   }
 }
+
+// ---------------------------------------------------------------------------
+// TickerAlert — additive machinery for Watchlists/Performance/Telegram
+// (Phases 3/4/6). Deliberately separate from the ScanAlert shape above (used
+// by the Latest/Historical pages + ScanAlertsTicker) since those callers
+// already depend on ScanAlert's exact fields/signatures.
+//
+// `intra_us_scanner_eod`'s `scan_code` is always a bare level label here
+// (e.g. "CALL INT") — unlike some scanners there is no "Buy Above"/"Sell
+// Below" text prefix, so direction is ALWAYS derived from last_price vs. the
+// level's own price, never parsed from scan_code. The table's real primary
+// key is (symbol, expiry_dt, trade_date, scan_code) — it's an upsert table
+// the external scanner updates in place as it re-evaluates through the day,
+// not an append-only event log, so that tuple is a safe, unique id with no
+// separate seq_no/dedup problem to solve.
+// ---------------------------------------------------------------------------
+
+export type ScanLevelName = 'put_low' | 'put_int' | 'put_call_int' | 'call_int' | 'call_high';
+export type ScanDirection = 'buy_above' | 'sell_below';
+
+export interface TickerAlert {
+  id: string;
+  symbol: string;
+  level: ScanLevelName;
+  direction: ScanDirection;
+  price: number;
+  tradeDate: string;
+  expiryDate: string;
+  loadDateTime: string; // load_dt_tm
+}
+
+function toTickerAlert(row: any): TickerAlert | null {
+  const level = SCAN_CODE_TO_LEVEL[row.scan_code] as ScanLevelName | undefined;
+  if (!level) return null;
+
+  const levelPriceByName: Record<ScanLevelName, number> = {
+    put_low: sanitizeNum(row.put_low),
+    put_int: sanitizeNum(row.put_int),
+    put_call_int: sanitizeNum(row.cmb_int),
+    call_int: sanitizeNum(row.call_int),
+    call_high: sanitizeNum(row.call_high),
+  };
+  const price = levelPriceByName[level];
+  const lastPrice = sanitizeNum(row.last_price);
+
+  return {
+    id: `${row.symbol}__${row.trade_date}__${row.expiry_dt}__${row.scan_code}`,
+    symbol: row.symbol,
+    level,
+    direction: lastPrice >= price ? 'buy_above' : 'sell_below',
+    price,
+    tradeDate: row.trade_date,
+    expiryDate: row.expiry_dt,
+    loadDateTime: row.load_dt_tm,
+  };
+}
+
+export interface AlertsByExpiryOptions {
+  /** Most recent N distinct expiry_dt values across the symbol set, default 6, capped 24.
+   * Kept generous because per-symbol US options expiry cycles can diverge a lot within one
+   * watchlist (unlike NSE's weekly-index/monthly-stock split), so a small N can miss a
+   * symbol's own recent alerts entirely if another symbol in the list has more expiries. */
+  expiryCount?: number;
+}
+
+/** Alerts for a set of symbols, bounded to the N most recent distinct expiry_dt values across that symbol set. */
+export async function getAlertsForSymbolsByExpiry(symbols: string[], opts: AlertsByExpiryOptions = {}): Promise<TickerAlert[]> {
+  if (symbols.length === 0) return [];
+  const expiryCount = Math.min(opts.expiryCount ?? 6, 24);
+  const upperSymbols = symbols.map(s => s.toUpperCase());
+
+  try {
+    const rows = await sql`
+      WITH recent_expiries AS (
+        SELECT DISTINCT expiry_dt FROM public.intra_us_scanner_eod
+        WHERE symbol = ANY(${upperSymbols})
+        ORDER BY expiry_dt DESC
+        LIMIT ${expiryCount}
+      )
+      SELECT
+        symbol, last_price,
+        expiry_dt::text as expiry_dt, trade_date::text as trade_date,
+        COALESCE(put_low, 0) as put_low, COALESCE(put_int, 0) as put_int,
+        COALESCE(cmb_int, 0) as cmb_int, COALESCE(call_int, 0) as call_int,
+        COALESCE(call_high, 0) as call_high,
+        load_dt_tm::text as load_dt_tm, scan_code
+      FROM public.intra_us_scanner_eod
+      WHERE symbol = ANY(${upperSymbols}) AND expiry_dt IN (SELECT expiry_dt FROM recent_expiries)
+      ORDER BY trade_date DESC, load_dt_tm DESC
+      LIMIT 5000
+    `;
+    return (rows as any[]).map(toTickerAlert).filter((a): a is TickerAlert => a !== null);
+  } catch (error) {
+    console.error('Error fetching alerts for symbols by expiry:', error);
+    return [];
+  }
+}
+
+/**
+ * Alerts loaded after `since` — for the Telegram cron cursor (Phase 6) and
+ * any other polling consumer. Named distinctly from getRecentScanAlerts()
+ * above (different signature/callers — that one is limit-only, for the
+ * ticker) to avoid an accidental overload collision.
+ */
+export async function getScanAlertsSince(since: string, limit: number = 500): Promise<TickerAlert[]> {
+  try {
+    const rows = await sql`
+      SELECT
+        symbol, last_price,
+        expiry_dt::text as expiry_dt, trade_date::text as trade_date,
+        COALESCE(put_low, 0) as put_low, COALESCE(put_int, 0) as put_int,
+        COALESCE(cmb_int, 0) as cmb_int, COALESCE(call_int, 0) as call_int,
+        COALESCE(call_high, 0) as call_high,
+        load_dt_tm::text as load_dt_tm, scan_code
+      FROM public.intra_us_scanner_eod
+      WHERE load_dt_tm > ${since}
+      ORDER BY load_dt_tm ASC
+      LIMIT ${limit}
+    `;
+    return (rows as any[]).map(toTickerAlert).filter((a): a is TickerAlert => a !== null);
+  } catch (error) {
+    console.error('Error fetching scan alerts since cursor:', error);
+    return [];
+  }
+}
+
+/** Nulls the level-revealing fields — used when the caller lacks FEATURE_LEVELS. */
+export function redactTickerAlerts(alerts: TickerAlert[]): Array<Omit<TickerAlert, 'level' | 'price'> & { level: null; price: null }> {
+  return alerts.map(a => ({ ...a, level: null, price: null }));
+}
