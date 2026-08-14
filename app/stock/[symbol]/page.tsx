@@ -41,6 +41,16 @@ type LevelHistoryEntry = {
 };
 const SEVEN_LEVEL_ORDER = ['put_low', 'put_int', 'put_call_int', 'call_int', 'call_high', 'call_low', 'put_high'];
 
+type RangePreset = '10d' | '7d' | '30d' | '90d' | 'custom';
+const RANGE_PRESET_DAYS: Record<Exclude<RangePreset, 'custom'>, number> = { '10d': 10, '7d': 7, '30d': 30, '90d': 90 };
+const RANGE_PRESET_LABELS: Record<RangePreset, string> = { '10d': '10D', '7d': '7D', '30d': '30D', '90d': '90D', custom: 'Custom' };
+
+type OptChainRow = { optType: 'put' | 'call'; strike: number; ltp: number; oi: number; oiChg: number; close: number };
+
+function Spinner() {
+  return <div className="inline-block animate-spin h-3.5 w-3.5 border-2 border-blue-600 border-t-transparent rounded-full" />;
+}
+
 export default function StockPage() {
   const params = useParams();
   const symbol = params?.symbol as string;
@@ -60,6 +70,26 @@ export default function StockPage() {
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [chartInterval, setChartInterval] = useState<SelectableInterval>('daily');
   const [livePrice, setLivePrice] = useState<number | undefined>(undefined);
+
+  // Price Levels History table — deliberately independent of the chart's own
+  // date range (which grows unbounded as the user scrolls back): its own
+  // fetch, its own date window, defaulting to the last 10 days.
+  const [priceHistoryMap, setPriceHistoryMap] = useState<Map<string, LevelHistoryEntry>>(new Map());
+  const [priceHistoryLoading, setPriceHistoryLoading] = useState(false);
+  const [priceHistoryCollapsed, setPriceHistoryCollapsed] = useState(false);
+  const [priceHistoryPreset, setPriceHistoryPreset] = useState<RangePreset>('10d');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
+
+  // Option-chain OI (public.us_opt_chg_rpt) — per-strike put/call OI snapshot
+  // for the selected expiry, refetched whenever the expiry changes.
+  const [optChainRows, setOptChainRows] = useState<OptChainRow[]>([]);
+  const [optChainLoading, setOptChainLoading] = useState(false);
+  const [optChainLoadDate, setOptChainLoadDate] = useState<string | null>(null);
+  const [optChainCollapsed, setOptChainCollapsed] = useState(false);
+  const [optChainSearch, setOptChainSearch] = useState('');
+  const [optChainTypeFilter, setOptChainTypeFilter] = useState<'all' | 'call' | 'put'>('all');
+  const [optChainColFilters, setOptChainColFilters] = useState({ strike: '', ltp: '', oi: '', oiChg: '' });
 
   // Track loaded date ranges to avoid duplicate fetches
   const loadedRangesRef = useRef<{ from: string; to: string }[]>([]);
@@ -273,6 +303,71 @@ export default function StockPage() {
     fetchHistoricalLevels();
   }, [selectedExpiry, symbol, isInitialLoad, ohlcData]);
 
+  // Price Levels History table — its own independent fetch/date-range, not
+  // tied to the chart's (see state comment above). Re-fetches on symbol,
+  // expiry, or range-preset/custom-date change.
+  useEffect(() => {
+    if (!symbol || !selectedExpiry) return;
+
+    let from: string, to: string;
+    if (priceHistoryPreset === 'custom') {
+      if (!customFrom || !customTo) return; // wait for both custom dates before fetching
+      from = customFrom;
+      to = customTo;
+    } else {
+      to = format(new Date(), 'yyyy-MM-dd');
+      from = format(subDays(new Date(), RANGE_PRESET_DAYS[priceHistoryPreset]), 'yyyy-MM-dd');
+    }
+
+    let cancelled = false;
+    setPriceHistoryLoading(true);
+    fetch(`/api/stocks/${symbol}/levels?expiry=${selectedExpiry}&range=true&from=${from}&to=${to}`)
+      .then(res => res.json())
+      .then(json => {
+        if (cancelled) return;
+        const map = new Map<string, LevelHistoryEntry>();
+        if (json.success && json.data?.history) {
+          json.data.history.forEach((item: any) => {
+            map.set(item.date, {
+              levels: item.calculated,
+              closestLevel: item.closestLevel,
+              close: item.close,
+              sevenLevels: item.sevenLevels || [],
+              oi: item.oi,
+              ratios: item.ratios,
+            });
+          });
+        }
+        setPriceHistoryMap(map);
+      })
+      .catch(() => { if (!cancelled) setPriceHistoryMap(new Map()); })
+      .finally(() => { if (!cancelled) setPriceHistoryLoading(false); });
+
+    return () => { cancelled = true; };
+  }, [symbol, selectedExpiry, priceHistoryPreset, customFrom, customTo]);
+
+  // Option-chain OI — always the latest available snapshot for the selected expiry.
+  useEffect(() => {
+    if (!symbol || !selectedExpiry) return;
+    let cancelled = false;
+    setOptChainLoading(true);
+    fetch(`/api/stocks/${symbol}/opt-chain?expiry=${selectedExpiry}`)
+      .then(res => res.json())
+      .then(json => {
+        if (cancelled) return;
+        if (json.success) {
+          setOptChainRows(json.data.rows || []);
+          setOptChainLoadDate(json.data.loadDate);
+        } else {
+          setOptChainRows([]);
+          setOptChainLoadDate(null);
+        }
+      })
+      .catch(() => { if (!cancelled) { setOptChainRows([]); setOptChainLoadDate(null); } })
+      .finally(() => { if (!cancelled) setOptChainLoading(false); });
+    return () => { cancelled = true; };
+  }, [symbol, selectedExpiry]);
+
   // Live price — polls Alpaca's latest trade. Fast during market hours for a
   // genuinely "live" feel, much slower off-hours since the price can't move.
   useEffect(() => {
@@ -453,12 +548,24 @@ export default function StockPage() {
     oiDiff: d.oiDiff,
   })), [oiData]);
 
-  // Most-recent-first rows for the historical 7-level table below the main chart
-  const levelHistoryRows = useMemo(() => {
-    return Array.from(historicalLevels.entries())
+  // Most-recent-first rows for the Price Levels History table — from its own
+  // independently-fetched map, not the chart's historicalLevels.
+  const priceHistoryRows = useMemo(() => {
+    return Array.from(priceHistoryMap.entries())
       .map(([date, entry]) => ({ date, ...entry }))
       .sort((a, b) => b.date.localeCompare(a.date));
-  }, [historicalLevels]);
+  }, [priceHistoryMap]);
+
+  const visibleOptChainRows = optChainRows.filter(r => {
+    if (optChainTypeFilter !== 'all' && r.optType !== optChainTypeFilter) return false;
+    const q = optChainSearch.trim().toLowerCase();
+    if (q && !String(r.strike).includes(q) && !r.optType.includes(q)) return false;
+    if (optChainColFilters.strike && !String(r.strike).includes(optChainColFilters.strike)) return false;
+    if (optChainColFilters.ltp && !String(r.ltp).includes(optChainColFilters.ltp)) return false;
+    if (optChainColFilters.oi && !String(r.oi).includes(optChainColFilters.oi)) return false;
+    if (optChainColFilters.oiChg && !String(r.oiChg).includes(optChainColFilters.oiChg)) return false;
+    return true;
+  });
 
   const intervalSelector = (
     <div className="flex items-center gap-1">
@@ -665,73 +772,224 @@ export default function StockPage() {
             </div>
           </div>
 
-          {/* 7-Level Historical Table — close price, all 7 raw DB levels, OI, and the UPC/UCPR ratio columns */}
+          {/* Price Levels History — close price, all 7 raw DB levels, OI, and the UPC/UCPR ratio columns.
+              Independently rangeable (10D default, or 7D/30D/90D/Custom) rather than tied to the chart. */}
           <div className="mt-6 bg-white rounded-lg shadow-md p-4">
-            <h3 className="text-base font-bold mb-2">Historical Levels &amp; OI</h3>
-            {levelHistoryRows.length === 0 ? (
-              <div className="text-center py-4 text-gray-500 text-sm">
-                No historical level data available{selectedExpiry ? ` for expiry ${selectedExpiry}` : ''}.
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs whitespace-nowrap">
-                  <thead>
-                    <tr className="border-b border-gray-200 text-gray-500">
-                      <th className="text-left py-1.5 pr-3 font-medium">Date</th>
-                      <th className="text-right py-1.5 px-2 font-medium">Close</th>
-                      {SEVEN_LEVEL_ORDER.map((name) => (
-                        <th key={name} className="text-right py-1.5 px-2 font-medium">
-                          {getLevelDisplayName(name)}
-                        </th>
-                      ))}
-                      <th className="text-right py-1.5 px-2 font-medium">Call OI</th>
-                      <th className="text-right py-1.5 px-2 font-medium">Put OI</th>
-                      <th className="text-right py-1.5 px-2 font-medium">OI Diff</th>
-                      <th className="text-right py-1.5 pl-2 font-medium">UPC</th>
-                      <th className="text-right py-1.5 pl-2 font-medium">UCPR</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {levelHistoryRows.map((row) => {
-                      const closest = row.sevenLevels.length > 0
-                        ? row.sevenLevels.reduce((c, l) => Math.abs(l.value) < Math.abs(c.value) ? l : c)
-                        : null;
-                      const levelsByName = new Map(row.sevenLevels.map(l => [l.name, l]));
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
+              <button
+                onClick={() => setPriceHistoryCollapsed(v => !v)}
+                className="flex items-center gap-1.5 text-base font-bold hover:text-gray-700"
+              >
+                <span className={`inline-block transition-transform text-gray-400 ${priceHistoryCollapsed ? '' : 'rotate-90'}`}>▶</span>
+                Price Levels History
+              </button>
 
-                      return (
-                        <tr key={row.date} className="border-b border-gray-100 last:border-0 hover:bg-gray-50">
-                          <td className="py-1.5 pr-3 text-gray-600">{row.date}</td>
-                          <td className="text-right py-1.5 px-2 font-semibold">{formatCurrency(row.close)}</td>
-                          {SEVEN_LEVEL_ORDER.map((name) => {
-                            const lvl = levelsByName.get(name);
-                            const isClosest = !!closest && lvl && closest.name === lvl.name;
-                            return (
-                              <td
-                                key={name}
-                                className={`text-right py-1.5 px-2 font-mono ${
-                                  isClosest ? 'bg-blue-50 text-blue-700 font-bold rounded' : ''
-                                }`}
-                              >
-                                {lvl ? formatCurrency(lvl.price) : '—'}
-                                {lvl && (
-                                  <span className={`ml-1 ${isClosest ? 'text-blue-500' : 'text-gray-400'}`}>
-                                    ({formatPercentage(lvl.value)})
-                                  </span>
-                                )}
-                              </td>
-                            );
-                          })}
-                          <td className="text-right py-1.5 px-2 text-gray-600">{row.oi?.callOi?.toLocaleString() ?? '—'}</td>
-                          <td className="text-right py-1.5 px-2 text-gray-600">{row.oi?.putOi?.toLocaleString() ?? '—'}</td>
-                          <td className="text-right py-1.5 px-2 text-gray-600">{row.oi?.oiDiff?.toLocaleString() ?? '—'}</td>
-                          <td className="text-right py-1.5 pl-2 text-gray-600">{row.ratios?.upc ?? '—'}</td>
-                          <td className="text-right py-1.5 pl-2 text-gray-600">{row.ratios?.ucpr ?? '—'}</td>
+              {!priceHistoryCollapsed && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
+                    {(['10d', '7d', '30d', '90d', 'custom'] as RangePreset[]).map(p => (
+                      <button
+                        key={p}
+                        onClick={() => setPriceHistoryPreset(p)}
+                        className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-colors ${
+                          priceHistoryPreset === p ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500'
+                        }`}
+                      >
+                        {RANGE_PRESET_LABELS[p]}
+                      </button>
+                    ))}
+                  </div>
+                  {priceHistoryPreset === 'custom' && (
+                    <div className="flex items-center gap-1.5 text-xs">
+                      <input
+                        type="date"
+                        value={customFrom}
+                        onChange={e => setCustomFrom(e.target.value)}
+                        className="px-2 py-1 border border-gray-200 rounded text-xs"
+                      />
+                      <span className="text-gray-400">to</span>
+                      <input
+                        type="date"
+                        value={customTo}
+                        onChange={e => setCustomTo(e.target.value)}
+                        className="px-2 py-1 border border-gray-200 rounded text-xs"
+                      />
+                    </div>
+                  )}
+                  {priceHistoryLoading && <Spinner />}
+                </div>
+              )}
+            </div>
+
+            {!priceHistoryCollapsed && (
+              priceHistoryRows.length === 0 ? (
+                <div className="text-center py-4 text-gray-500 text-sm">
+                  {priceHistoryLoading
+                    ? 'Loading…'
+                    : `No historical level data available${selectedExpiry ? ` for expiry ${selectedExpiry}` : ''} in this range.`}
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs whitespace-nowrap">
+                    <thead>
+                      <tr className="border-b border-gray-200 text-gray-500">
+                        <th className="text-left py-1.5 pr-3 font-medium">Date</th>
+                        <th className="text-right py-1.5 px-2 font-medium">Close</th>
+                        {SEVEN_LEVEL_ORDER.map((name) => (
+                          <th key={name} className="text-right py-1.5 px-2 font-medium">
+                            {getLevelDisplayName(name)}
+                          </th>
+                        ))}
+                        <th className="text-right py-1.5 px-2 font-medium">Call OI</th>
+                        <th className="text-right py-1.5 px-2 font-medium">Put OI</th>
+                        <th className="text-right py-1.5 px-2 font-medium">OI Diff</th>
+                        <th className="text-right py-1.5 pl-2 font-medium">UPC</th>
+                        <th className="text-right py-1.5 pl-2 font-medium">UCPR</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {priceHistoryRows.map((row) => {
+                        const closest = row.sevenLevels.length > 0
+                          ? row.sevenLevels.reduce((c, l) => Math.abs(l.value) < Math.abs(c.value) ? l : c)
+                          : null;
+                        const levelsByName = new Map(row.sevenLevels.map(l => [l.name, l]));
+
+                        return (
+                          <tr key={row.date} className="border-b border-gray-100 last:border-0 hover:bg-gray-50">
+                            <td className="py-1.5 pr-3 text-gray-600">{row.date}</td>
+                            <td className="text-right py-1.5 px-2 font-semibold">{formatCurrency(row.close)}</td>
+                            {SEVEN_LEVEL_ORDER.map((name) => {
+                              const lvl = levelsByName.get(name);
+                              const isClosest = !!closest && lvl && closest.name === lvl.name;
+                              return (
+                                <td
+                                  key={name}
+                                  className={`text-right py-1.5 px-2 font-mono ${
+                                    isClosest ? 'bg-blue-50 text-blue-700 font-bold rounded' : ''
+                                  }`}
+                                >
+                                  {lvl ? formatCurrency(lvl.price) : '—'}
+                                  {lvl && (
+                                    <span className={`ml-1 ${isClosest ? 'text-blue-500' : 'text-gray-400'}`}>
+                                      ({formatPercentage(lvl.value)})
+                                    </span>
+                                  )}
+                                </td>
+                              );
+                            })}
+                            <td className="text-right py-1.5 px-2 text-gray-600">{row.oi?.callOi?.toLocaleString() ?? '—'}</td>
+                            <td className="text-right py-1.5 px-2 text-gray-600">{row.oi?.putOi?.toLocaleString() ?? '—'}</td>
+                            <td className="text-right py-1.5 px-2 text-gray-600">{row.oi?.oiDiff?.toLocaleString() ?? '—'}</td>
+                            <td className="text-right py-1.5 pl-2 text-gray-600">{row.ratios?.upc ?? '—'}</td>
+                            <td className="text-right py-1.5 pl-2 text-gray-600">{row.ratios?.ucpr ?? '—'}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )
+            )}
+          </div>
+
+          {/* Option Chain OI (public.us_opt_chg_rpt) — per-strike put/call OI
+              snapshot for the selected expiry (latest available load_dt),
+              with per-column filters plus a strike/type search. */}
+          <div className="mt-6 bg-white rounded-lg shadow-md p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
+              <button
+                onClick={() => setOptChainCollapsed(v => !v)}
+                className="flex items-center gap-1.5 text-base font-bold hover:text-gray-700"
+              >
+                <span className={`inline-block transition-transform text-gray-400 ${optChainCollapsed ? '' : 'rotate-90'}`}>▶</span>
+                Open Interest — Option Chain
+                {optChainLoadDate && <span className="text-xs font-normal text-gray-400">as of {optChainLoadDate}</span>}
+              </button>
+              {optChainLoading && !optChainCollapsed && <Spinner />}
+            </div>
+
+            {!optChainCollapsed && (
+              <>
+                <div className="flex flex-wrap items-end gap-3 mb-3">
+                  <div>
+                    <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1">Search</label>
+                    <input
+                      value={optChainSearch}
+                      onChange={e => setOptChainSearch(e.target.value)}
+                      placeholder="Strike or type…"
+                      className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white w-40"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1">Type</label>
+                    <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
+                      {(['all', 'call', 'put'] as const).map(t => (
+                        <button
+                          key={t}
+                          onClick={() => setOptChainTypeFilter(t)}
+                          className={`px-2.5 py-1 rounded-md text-xs font-semibold capitalize transition-colors ${
+                            optChainTypeFilter === t ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500'
+                          }`}
+                        >
+                          {t}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {visibleOptChainRows.length !== optChainRows.length && (
+                    <span className="text-[11px] text-gray-400 pb-1.5">{visibleOptChainRows.length} of {optChainRows.length} rows</span>
+                  )}
+                </div>
+
+                {optChainRows.length === 0 ? (
+                  <div className="text-center py-4 text-gray-500 text-sm">
+                    {optChainLoading ? 'Loading…' : `No option chain data available${selectedExpiry ? ` for expiry ${selectedExpiry}` : ''}.`}
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs whitespace-nowrap">
+                      <thead>
+                        <tr className="border-b border-gray-200 text-gray-500">
+                          <th className="text-left py-1.5 pr-3 font-medium">Type</th>
+                          <th className="text-right py-1.5 px-2 font-medium">Strike</th>
+                          <th className="text-right py-1.5 px-2 font-medium">LTP</th>
+                          <th className="text-right py-1.5 px-2 font-medium">OI</th>
+                          <th className="text-right py-1.5 pl-2 font-medium">OI Chg</th>
                         </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+                        <tr className="border-b border-gray-200 bg-gray-50">
+                          <th className="py-1 pr-3"></th>
+                          {(['strike', 'ltp', 'oi', 'oiChg'] as const).map(col => (
+                            <th key={col} className="py-1 px-2">
+                              <input
+                                value={optChainColFilters[col]}
+                                onChange={e => setOptChainColFilters(prev => ({ ...prev, [col]: e.target.value }))}
+                                placeholder="Filter…"
+                                className="w-full px-1.5 py-0.5 border border-gray-200 rounded text-[11px] text-right font-normal focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
+                              />
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {visibleOptChainRows.map((r, i) => (
+                          <tr key={`${r.optType}-${r.strike}-${i}`} className="border-b border-gray-100 last:border-0 hover:bg-gray-50">
+                            <td className={`py-1.5 pr-3 font-semibold capitalize ${r.optType === 'call' ? 'text-green-600' : 'text-red-600'}`}>{r.optType}</td>
+                            <td className="text-right py-1.5 px-2 font-mono">{formatCurrency(r.strike)}</td>
+                            <td className="text-right py-1.5 px-2 text-gray-600">{formatCurrency(r.ltp)}</td>
+                            <td className="text-right py-1.5 px-2 text-gray-600">{r.oi.toLocaleString()}</td>
+                            <td className={`text-right py-1.5 pl-2 font-semibold ${r.oiChg > 0 ? 'text-green-600' : r.oiChg < 0 ? 'text-red-600' : 'text-gray-500'}`}>
+                              {r.oiChg > 0 ? '+' : ''}{r.oiChg.toLocaleString()}
+                            </td>
+                          </tr>
+                        ))}
+                        {visibleOptChainRows.length === 0 && (
+                          <tr><td colSpan={5} className="text-center py-4 text-gray-400">No rows match your filters.</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>
