@@ -26,6 +26,11 @@ export async function GET(
     const upperSymbol = symbol.toUpperCase();
     const from = request.nextUrl.searchParams.get('from');
     const to = request.nextUrl.searchParams.get('to');
+    // Optional single-contract scope — used by the option-contract popup to
+    // pull just one strike/type's full history instead of the whole chain.
+    const strikeParam = request.nextUrl.searchParams.get('strike');
+    const strike = strikeParam ? Number(strikeParam) : null;
+    const optType = request.nextUrl.searchParams.get('optType');
 
     if (from && to) {
       const rows = await sql`
@@ -40,6 +45,8 @@ export async function GET(
         FROM public.us_opt_chg_rpt
         WHERE symbol_und = ${upperSymbol} AND expiry_dt = ${expiry}::date
           AND load_dt >= ${from}::date AND load_dt <= ${to}::date
+          AND (${strike}::numeric IS NULL OR strike_pr = ${strike}::numeric)
+          AND (${optType}::text IS NULL OR TRIM(opt_type) = ${optType}::text)
         ORDER BY load_dt DESC, strike_pr ASC, opt_type ASC
       `;
       const chain = (rows as any[]).map(r => ({

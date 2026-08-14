@@ -192,3 +192,51 @@ export function convertIntervalToTimeframe(interval: ChartInterval): string {
 export function isIntradayInterval(interval: ChartInterval): boolean {
   return interval === '1min' || interval === '5min' || interval === '15min' || interval === '30min' || interval === '1hour';
 }
+
+/**
+ * Builds the standard OCC option symbol Alpaca's options endpoints key on,
+ * e.g. buildOccOptionSymbol('AAPL', '2026-08-21', 'put', 290) -> 'AAPL260821P00290000'.
+ * Root symbol is used as-is (Alpaca does not left-pad it to 6 chars like the
+ * official OCC spec) — verified against real occ_symbol values already
+ * present elsewhere in this database.
+ */
+export function buildOccOptionSymbol(underlying: string, expiryDate: string, optType: 'call' | 'put', strike: number): string {
+  const [y, m, d] = expiryDate.split('-');
+  const cp = optType === 'call' ? 'C' : 'P';
+  const strikeStr = String(Math.round(strike * 1000)).padStart(8, '0');
+  return `${underlying.toUpperCase()}${y.slice(2)}${m}${d}${cp}${strikeStr}`;
+}
+
+/**
+ * Historical OHLCV bars for a single option contract (OCC symbol) via
+ * Alpaca's Options Market Data API. Confirmed live: this account's
+ * subscription 403s ("subscription does not permit querying recent OPRA
+ * data") for any request whose range includes the CURRENT trading day —
+ * everything through the prior trading day works fine. Callers should cap
+ * `end` at yesterday rather than relying on this to throw (see
+ * app/api/stocks/[symbol]/option-bars/route.ts).
+ */
+export async function getOptionBars(occSymbol: string, timeframe: string, start: string, end: string): Promise<AlpacaBar[]> {
+  try {
+    const bars: AlpacaBar[] = [];
+    let pageToken: string | undefined;
+    for (let page = 0; page < 20; page++) {
+      const params: any = { symbols: occSymbol, timeframe, limit: 10000, start, end };
+      if (pageToken) params.page_token = pageToken;
+
+      const response = await alpacaClient.get<AlpacaHistoryResponse>('/v1beta1/options/bars', { params });
+
+      bars.push(...(response.data?.bars?.[occSymbol] || []));
+      pageToken = response.data?.next_page_token;
+      if (!pageToken) break;
+    }
+    return bars;
+  } catch (error) {
+    if (axios.isAxiosError(error)) {
+      console.error('Alpaca options API error:', error.response?.status, error.response?.data);
+    } else {
+      console.error('Error fetching option bars from Alpaca:', error);
+    }
+    throw error;
+  }
+}

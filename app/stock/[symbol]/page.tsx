@@ -8,6 +8,7 @@ import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import ErrorDisplay from '@/components/ui/ErrorDisplay';
 import Header from '@/components/layout/Header';
 import ScanAlertsTicker from '@/components/ui/ScanAlertsTicker';
+import OptionContractModal from '@/components/stock/OptionContractModal';
 import { LevelCalculation, ScanAlert } from '@/types/stock';
 import { getLevelColor, getLevelDisplayName, formatCurrency, formatPercentage, isUsMarketHours } from '@/lib/utils';
 import { isIntradayInterval } from '@/lib/alpaca';
@@ -46,6 +47,7 @@ const RANGE_PRESET_DAYS: Record<Exclude<RangePreset, 'custom'>, number> = { '10d
 const RANGE_PRESET_LABELS: Record<RangePreset, string> = { '10d': '10D', '30d': '30D', '90d': '90D', custom: 'Custom' };
 
 type OptChainRow = { optType: 'put' | 'call'; strike: number; ltp: number; oi: number; oiChg: number; close: number; loadDate: string };
+type OptChainSortKey = 'loadDate' | 'close' | 'strike' | 'optType' | 'ltp' | 'oi' | 'oiChg' | 'absOiChg' | 'chgOpenIntPrice' | 'absChgOpenIntPrice';
 
 type OptChainPreset = '10d' | '30d' | '90d' | 'all';
 const OPT_CHAIN_PRESET_DAYS: Record<Exclude<OptChainPreset, 'all'>, number> = { '10d': 10, '30d': 30, '90d': 90 };
@@ -57,6 +59,17 @@ const OPT_CHAIN_ALL_FROM = '2000-01-01';
 
 function Spinner() {
   return <div className="inline-block animate-spin h-3.5 w-3.5 border-2 border-blue-600 border-t-transparent rounded-full" />;
+}
+
+function OptChainSortLabel({ label, active, dir, onClick, align = 'right' }: {
+  label: string; active: boolean; dir: 'asc' | 'desc'; onClick: () => void; align?: 'left' | 'right';
+}) {
+  return (
+    <button onClick={onClick} className={`flex items-center gap-0.5 hover:text-gray-700 ${align === 'right' ? 'ml-auto' : ''}`}>
+      {label}
+      <span className={active ? 'text-blue-500' : 'text-gray-300'}>{active ? (dir === 'asc' ? '▲' : '▼') : '↕'}</span>
+    </button>
+  );
 }
 
 export default function StockPage() {
@@ -99,6 +112,19 @@ export default function StockPage() {
   const [optChainSearch, setOptChainSearch] = useState('');
   const [optChainTypeFilter, setOptChainTypeFilter] = useState<'all' | 'call' | 'put'>('all');
   const [optChainColFilters, setOptChainColFilters] = useState({ strike: '' });
+  const [optChainSortKey, setOptChainSortKey] = useState<OptChainSortKey>('loadDate');
+  const [optChainSortDir, setOptChainSortDir] = useState<'asc' | 'desc'>('desc');
+
+  // Selected contract for the OHLCV popup — set by clicking an Option Chain row.
+  const [selectedOptContract, setSelectedOptContract] = useState<{ strike: number; optType: 'call' | 'put' } | null>(null);
+
+  const priceLevelsSectionRef = useRef<HTMLDivElement>(null);
+  const optChainSectionRef = useRef<HTMLDivElement>(null);
+
+  function jumpToSection(ref: React.RefObject<HTMLDivElement | null>, expand?: () => void) {
+    expand?.();
+    requestAnimationFrame(() => ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  }
 
   // Track loaded date ranges to avoid duplicate fetches
   const loadedRangesRef = useRef<{ from: string; to: string }[]>([]);
@@ -570,13 +596,40 @@ export default function StockPage() {
       .sort((a, b) => b.date.localeCompare(a.date));
   }, [priceHistoryMap]);
 
-  const visibleOptChainRows = optChainRows.filter(r => {
-    if (optChainTypeFilter !== 'all' && r.optType !== optChainTypeFilter) return false;
-    const q = optChainSearch.trim().toLowerCase();
-    if (q && !String(r.strike).includes(q) && !r.optType.includes(q)) return false;
-    if (optChainColFilters.strike && !String(r.strike).includes(optChainColFilters.strike)) return false;
-    return true;
-  });
+  function handleOptChainSort(key: OptChainSortKey) {
+    if (optChainSortKey === key) {
+      setOptChainSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setOptChainSortKey(key);
+      setOptChainSortDir('desc');
+    }
+  }
+
+  const visibleOptChainRows = optChainRows
+    .filter(r => {
+      if (optChainTypeFilter !== 'all' && r.optType !== optChainTypeFilter) return false;
+      const q = optChainSearch.trim().toLowerCase();
+      if (q && !String(r.strike).includes(q) && !r.optType.includes(q)) return false;
+      if (optChainColFilters.strike && !String(r.strike).includes(optChainColFilters.strike)) return false;
+      return true;
+    })
+    // Notional $ value of the OI change: contracts changed * premium * 100 shares/contract.
+    .map(r => ({ ...r, chgOpenIntPrice: r.oiChg * r.ltp * 100 }))
+    .sort((a, b) => {
+      const dir = optChainSortDir === 'asc' ? 1 : -1;
+      let av: number | string;
+      let bv: number | string;
+      switch (optChainSortKey) {
+        case 'absOiChg':
+          av = Math.abs(a.oiChg); bv = Math.abs(b.oiChg); break;
+        case 'absChgOpenIntPrice':
+          av = Math.abs(a.chgOpenIntPrice); bv = Math.abs(b.chgOpenIntPrice); break;
+        default:
+          av = a[optChainSortKey]; bv = b[optChainSortKey];
+      }
+      if (typeof av === 'string' && typeof bv === 'string') return av.localeCompare(bv) * dir;
+      return ((av as number) - (bv as number)) * dir;
+    });
 
   const intervalSelector = (
     <div className="flex items-center gap-1">
@@ -625,30 +678,48 @@ export default function StockPage() {
 
           {/* Expiry Selector — drives both the price level lines and the scan alert markers on the chart */}
           {!isLoading && expiryDates.length > 0 && (
-            <div className="mb-6 flex flex-wrap items-center gap-1.5">
-              <span className="text-xs font-semibold text-gray-500 mr-1">Expiry Date:</span>
-              {expiryDates.map((date) => {
-                const isActive = date === selectedExpiry;
-                const alertCount = scanAlerts.filter(a => a.expiryDate === date).length;
-                return (
-                  <button
-                    key={date}
-                    onClick={() => setSelectedExpiry(date)}
-                    className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
-                      isActive
-                        ? 'border-blue-600 bg-blue-600 text-white'
-                        : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
-                    }`}
-                  >
-                    {date}
-                    {alertCount > 0 && (
-                      <span className={`ml-1.5 ${isActive ? 'opacity-90' : 'text-purple-600'}`}>
-                        🔔{alertCount}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
+            <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-xs font-semibold text-gray-500 mr-1">Expiry Date:</span>
+                {expiryDates.map((date) => {
+                  const isActive = date === selectedExpiry;
+                  const alertCount = scanAlerts.filter(a => a.expiryDate === date).length;
+                  return (
+                    <button
+                      key={date}
+                      onClick={() => setSelectedExpiry(date)}
+                      className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
+                        isActive
+                          ? 'border-blue-600 bg-blue-600 text-white'
+                          : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                      }`}
+                    >
+                      {date}
+                      {alertCount > 0 && (
+                        <span className={`ml-1.5 ${isActive ? 'opacity-90' : 'text-purple-600'}`}>
+                          🔔{alertCount}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Quick jump to the two data-heavy sections below the chart. */}
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => jumpToSection(priceLevelsSectionRef, () => setPriceHistoryCollapsed(false))}
+                  className="px-3 py-1.5 rounded-full text-xs font-medium border border-gray-200 bg-white text-gray-600 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700 transition-colors"
+                >
+                  📊 Price Levels
+                </button>
+                <button
+                  onClick={() => jumpToSection(optChainSectionRef, () => setOptChainCollapsed(false))}
+                  className="px-3 py-1.5 rounded-full text-xs font-medium border border-gray-200 bg-white text-gray-600 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700 transition-colors"
+                >
+                  📈 Open Interest
+                </button>
+              </div>
             </div>
           )}
 
@@ -785,7 +856,7 @@ export default function StockPage() {
 
           {/* Price Levels History — close price, all 7 raw DB levels, OI, and the UPC/UCPR ratio columns.
               Independently rangeable (10D default, or 7D/30D/90D/Custom) rather than tied to the chart. */}
-          <div className="mt-6 bg-white rounded-lg shadow-md p-4">
+          <div ref={priceLevelsSectionRef} className="mt-6 bg-white rounded-lg shadow-md p-4">
             <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
               <button
                 onClick={() => setPriceHistoryCollapsed(v => !v)}
@@ -906,7 +977,7 @@ export default function StockPage() {
           {/* Option Chain OI (public.us_opt_chg_rpt) — per-strike put/call OI
               snapshot for the selected expiry (latest available load_dt),
               with per-column filters plus a strike/type search. */}
-          <div className="mt-6 bg-white rounded-lg shadow-md p-4">
+          <div ref={optChainSectionRef} className="mt-6 bg-white rounded-lg shadow-md p-4">
             <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
               <button
                 onClick={() => setOptChainCollapsed(v => !v)}
@@ -965,10 +1036,14 @@ export default function StockPage() {
                         <tr className="border-b border-gray-200 text-gray-500 align-bottom">
                           <th className="text-left py-1.5 pr-3 font-medium">Symbol</th>
                           <th className="text-left py-1.5 px-2 font-medium">Expiry</th>
-                          <th className="text-left py-1.5 px-2 font-medium">Trade Date</th>
-                          <th className="text-right py-1.5 px-2 font-medium">CMP</th>
+                          <th className="text-left py-1.5 px-2 font-medium">
+                            <OptChainSortLabel label="Trade Date" align="left" active={optChainSortKey === 'loadDate'} dir={optChainSortDir} onClick={() => handleOptChainSort('loadDate')} />
+                          </th>
                           <th className="text-right py-1.5 px-2 font-medium">
-                            <div>Strike Price</div>
+                            <OptChainSortLabel label="CMP" active={optChainSortKey === 'close'} dir={optChainSortDir} onClick={() => handleOptChainSort('close')} />
+                          </th>
+                          <th className="text-right py-1.5 px-2 font-medium">
+                            <OptChainSortLabel label="Strike Price" active={optChainSortKey === 'strike'} dir={optChainSortDir} onClick={() => handleOptChainSort('strike')} />
                             <input
                               value={optChainColFilters.strike}
                               onChange={e => setOptChainColFilters(prev => ({ ...prev, strike: e.target.value }))}
@@ -977,7 +1052,7 @@ export default function StockPage() {
                             />
                           </th>
                           <th className="text-left py-1.5 px-2 font-medium">
-                            <div>Opt Typ</div>
+                            <OptChainSortLabel label="Opt Typ" align="left" active={optChainSortKey === 'optType'} dir={optChainSortDir} onClick={() => handleOptChainSort('optType')} />
                             <select
                               value={optChainTypeFilter}
                               onChange={e => setOptChainTypeFilter(e.target.value as 'all' | 'call' | 'put')}
@@ -988,20 +1063,36 @@ export default function StockPage() {
                               <option value="put">Put</option>
                             </select>
                           </th>
-                          <th className="text-right py-1.5 px-2 font-medium">Opt LTP</th>
-                          <th className="text-right py-1.5 px-2 font-medium">Open Int</th>
-                          <th className="text-right py-1.5 px-2 font-medium">Chg Open Int</th>
-                          <th className="text-right py-1.5 px-2 font-medium">ABS Chg Open Int</th>
-                          <th className="text-right py-1.5 px-2 font-medium">Chg Open Int Price</th>
-                          <th className="text-right py-1.5 pl-2 font-medium">ABS Chg Open Int Price</th>
+                          <th className="text-right py-1.5 px-2 font-medium">
+                            <OptChainSortLabel label="Opt LTP" active={optChainSortKey === 'ltp'} dir={optChainSortDir} onClick={() => handleOptChainSort('ltp')} />
+                          </th>
+                          <th className="text-right py-1.5 px-2 font-medium">
+                            <OptChainSortLabel label="Open Int" active={optChainSortKey === 'oi'} dir={optChainSortDir} onClick={() => handleOptChainSort('oi')} />
+                          </th>
+                          <th className="text-right py-1.5 px-2 font-medium">
+                            <OptChainSortLabel label="Chg Open Int" active={optChainSortKey === 'oiChg'} dir={optChainSortDir} onClick={() => handleOptChainSort('oiChg')} />
+                          </th>
+                          <th className="text-right py-1.5 px-2 font-medium">
+                            <OptChainSortLabel label="ABS Chg Open Int" active={optChainSortKey === 'absOiChg'} dir={optChainSortDir} onClick={() => handleOptChainSort('absOiChg')} />
+                          </th>
+                          <th className="text-right py-1.5 px-2 font-medium">
+                            <OptChainSortLabel label="Chg Open Int Price" active={optChainSortKey === 'chgOpenIntPrice'} dir={optChainSortDir} onClick={() => handleOptChainSort('chgOpenIntPrice')} />
+                          </th>
+                          <th className="text-right py-1.5 pl-2 font-medium">
+                            <OptChainSortLabel label="ABS Chg Open Int Price" active={optChainSortKey === 'absChgOpenIntPrice'} dir={optChainSortDir} onClick={() => handleOptChainSort('absChgOpenIntPrice')} />
+                          </th>
                         </tr>
                       </thead>
                       <tbody>
                         {visibleOptChainRows.map((r, i) => {
-                          // Notional $ value of the OI change: contracts changed * premium * 100 shares/contract.
-                          const chgOpenIntPrice = r.oiChg * r.ltp * 100;
+                          const chgOpenIntPrice = r.chgOpenIntPrice;
                           return (
-                            <tr key={`${r.loadDate}-${r.optType}-${r.strike}-${i}`} className="border-b border-gray-100 last:border-0 hover:bg-gray-50">
+                            <tr
+                              key={`${r.loadDate}-${r.optType}-${r.strike}-${i}`}
+                              onClick={() => setSelectedOptContract({ strike: r.strike, optType: r.optType })}
+                              title="View option contract chart"
+                              className="border-b border-gray-100 last:border-0 hover:bg-blue-50 cursor-pointer"
+                            >
                               <td className="py-1.5 pr-3 text-gray-600">{symbol.toUpperCase()}</td>
                               <td className="py-1.5 px-2 text-gray-600">{selectedExpiry}</td>
                               <td className="py-1.5 px-2 text-gray-600">{r.loadDate}</td>
@@ -1033,6 +1124,16 @@ export default function StockPage() {
           </div>
         </div>
       </div>
+
+      {selectedOptContract && selectedExpiry && (
+        <OptionContractModal
+          symbol={symbol}
+          expiry={selectedExpiry}
+          strike={selectedOptContract.strike}
+          optType={selectedOptContract.optType}
+          onClose={() => setSelectedOptContract(null)}
+        />
+      )}
     </>
   );
 }
