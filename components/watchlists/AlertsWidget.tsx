@@ -29,7 +29,18 @@ function fmtTime(iso: string): string {
  * exact expiry so this stays consistent with whatever expiry the table is
  * showing; omitted, it falls back to the route's own recent-expiries window.
  */
-export default function AlertsWidget({ watchlistId, expiry }: { watchlistId: string; expiry?: string }) {
+export default function AlertsWidget({
+  watchlistId,
+  expiry,
+  symbolFilter,
+  onClearSymbolFilter,
+}: {
+  watchlistId: string;
+  expiry?: string;
+  /** When set (from clicking a row in the watchlist table), pins the feed to just this symbol and takes over from the free-text search box. */
+  symbolFilter?: string | null;
+  onClearSymbolFilter?: () => void;
+}) {
   const [alerts, setAlerts] = useState<Alert[] | null>(null);
   const [levelsRedacted, setLevelsRedacted] = useState(false);
   const [search, setSearch] = useState('');
@@ -52,9 +63,10 @@ export default function AlertsWidget({ watchlistId, expiry }: { watchlistId: str
 
   const visibleAlerts = useMemo(() => {
     if (!alerts) return alerts;
+    if (symbolFilter) return alerts.filter(a => a.symbol === symbolFilter);
     const q = search.trim().toUpperCase();
     return q ? alerts.filter(a => a.symbol.includes(q)) : alerts;
-  }, [alerts, search]);
+  }, [alerts, search, symbolFilter]);
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
@@ -65,13 +77,23 @@ export default function AlertsWidget({ watchlistId, expiry }: { watchlistId: str
         </span>
       </div>
 
-      {alerts !== null && alerts.length > 0 && (
-        <input
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="Filter by symbol…"
-          className="w-full mb-3 px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
-        />
+      {symbolFilter ? (
+        <button
+          onClick={onClearSymbolFilter}
+          className="w-full mb-3 flex items-center justify-between px-2.5 py-1.5 border border-blue-200 rounded-lg text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 transition-colors"
+        >
+          Showing: {symbolFilter}
+          <span aria-hidden>✕</span>
+        </button>
+      ) : (
+        alerts !== null && alerts.length > 0 && (
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Filter by symbol…"
+            className="w-full mb-3 px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
+          />
+        )
       )}
 
       {alerts === null && (
@@ -83,7 +105,7 @@ export default function AlertsWidget({ watchlistId, expiry }: { watchlistId: str
       )}
 
       {alerts !== null && alerts.length > 0 && visibleAlerts?.length === 0 && (
-        <p className="text-xs text-gray-400">No alerts match &quot;{search}&quot;.</p>
+        <p className="text-xs text-gray-400">No alerts match &quot;{symbolFilter || search}&quot;.</p>
       )}
 
       {visibleAlerts && visibleAlerts.length > 0 && (

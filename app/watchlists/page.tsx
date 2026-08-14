@@ -32,6 +32,7 @@ interface LevelRow {
 }
 
 type DirectionFilter = 'all' | 'up' | 'down';
+type ViewMode = 'thin' | 'broad';
 type LevelKey = 'put_low' | 'put_int' | 'put_call_int' | 'call_int' | 'call_high';
 const LEVEL_FILTER_OPTIONS: LevelKey[] = ['call_high', 'call_int', 'put_call_int', 'put_int', 'put_low'];
 
@@ -100,12 +101,13 @@ function SortHeader({ label, active, dir, align = 'left', onClick }: { label: st
   );
 }
 
-function LevelCell({ level }: { level: LevelRow | undefined }) {
+function LevelCell({ level, compact = false }: { level: LevelRow | undefined; compact?: boolean }) {
   if (!level) return <span className="text-xs text-gray-300">—</span>;
   if (!level.closestLevel) {
     return level.levelAccess === 'delayed' ? (
       <Link
         href={`/upgrade${level.requiredFeature ? `?feature=${level.requiredFeature}` : ''}`}
+        onClick={e => e.stopPropagation()}
         className="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 hover:bg-amber-100"
       >
         Delayed
@@ -115,6 +117,21 @@ function LevelCell({ level }: { level: LevelRow | undefined }) {
     );
   }
   const color = getLevelColor(level.closestLevel);
+  if (compact) {
+    return (
+      <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
+        <span
+          className="inline-block text-[11px] font-bold px-1.5 py-0.5 rounded"
+          style={{ backgroundColor: `${color}1A`, color }}
+        >
+          {getLevelDisplayName(level.closestLevel)}
+        </span>
+        <span className="text-[11px] text-gray-500 tabular-nums">
+          {formatCurrency(level.closestPrice ?? 0)} · {level.distancePercent?.toFixed(2)}%
+        </span>
+      </div>
+    );
+  }
   return (
     <div className="text-right">
       <span
@@ -153,7 +170,8 @@ export default function WatchlistsPage() {
   const [proximityThreshold, setProximityThreshold] = useState(5);
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
-  const [condensed, setCondensed] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>('broad');
+  const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [visibleCols, setVisibleCols] = useState<Set<ColumnKey>>(new Set(OPTIONAL_COLUMNS.map(c => c.key)));
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
@@ -165,7 +183,8 @@ export default function WatchlistsPage() {
   const selected = lists.find(l => l.id === selectedId) ?? null;
   const custom = lists.filter(l => !l.isSystem);
   const system = lists.filter(l => l.isSystem);
-  const cellPad = condensed ? 'px-3 py-1' : 'px-4 py-2.5';
+  const thin = viewMode === 'thin';
+  const cellPad = thin ? 'px-3 py-1' : 'px-4 py-2.5';
   const canEdit = !!selected && !selected.isSystem;
   const levelBySymbol = new Map((levelRows ?? []).map(l => [l.symbol, l]));
 
@@ -262,6 +281,7 @@ export default function WatchlistsPage() {
 
   useEffect(() => {
     if (selectedId) loadRows(selectedId);
+    setSelectedSymbol(null);
   }, [selectedId]);
 
   // Gated on monthlyExpiries !== null (not just selectedExpiry) so this
@@ -453,10 +473,21 @@ export default function WatchlistsPage() {
               </div>
 
               <div className="flex items-center gap-4">
-                <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer select-none">
-                  <input type="checkbox" checked={condensed} onChange={e => setCondensed(e.target.checked)} className="accent-blue-600" />
-                  Condensed Table View
-                </label>
+                <div>
+                  <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">Row Height</label>
+                  <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
+                    {(['thin', 'broad'] as ViewMode[]).map(m => (
+                      <button
+                        key={m}
+                        onClick={() => setViewMode(m)}
+                        title={m === 'thin' ? 'One line per stock — see more at once' : 'Full detail per stock'}
+                        className={`px-2.5 py-1.5 rounded-md text-xs font-semibold transition-colors capitalize ${viewMode === m ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500'}`}
+                      >
+                        {m}
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 <div className="relative">
                   <button
                     onClick={() => setCustomizeOpen(v => !v)}
@@ -564,26 +595,48 @@ export default function WatchlistsPage() {
                 </tr>
               </thead>
               <tbody>
-                {sortedRows.map(r => (
-                  <tr key={r.symbol} className="border-b border-gray-50 hover:bg-blue-50/40 transition-colors">
+                {sortedRows.map(r => {
+                  const isSelected = selectedSymbol === r.symbol;
+                  return (
+                  <tr
+                    key={r.symbol}
+                    onClick={() => setSelectedSymbol(prev => prev === r.symbol ? null : r.symbol)}
+                    title={isSelected ? 'Click to clear alert filter' : 'Click to filter alerts for this symbol'}
+                    className={`border-b border-gray-50 cursor-pointer transition-colors ${isSelected ? 'bg-blue-50 hover:bg-blue-50' : 'hover:bg-blue-50/40'}`}
+                  >
                     <td className={cellPad}>
-                      <Link href={`/stock/${encodeURIComponent(r.symbol)}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 hover:underline">
+                      <Link
+                        href={`/stock/${encodeURIComponent(r.symbol)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={e => e.stopPropagation()}
+                        className={`flex items-center gap-1.5 hover:underline ${thin ? 'whitespace-nowrap' : ''}`}
+                      >
                         <ChangeDot change={r.change} />
                         <span className="font-semibold text-gray-900">{r.symbol}</span>
+                        {thin && <span className="text-[11px] text-gray-400 truncate max-w-[160px]">{r.name}</span>}
                       </Link>
-                      <div className="text-[11px] text-gray-400 truncate max-w-[220px] pl-3">{r.name}</div>
+                      {!thin && <div className="text-[11px] text-gray-400 truncate max-w-[220px] pl-3">{r.name}</div>}
                     </td>
-                    <td className={`${cellPad} text-right font-semibold text-gray-800 tabular-nums`}>{fmtPrice(r.lastPrice)}</td>
-                    <td className={`${cellPad} text-right`}><ChangeCell change={r.change} changePercent={r.changePercent} /></td>
+                    <td className={`${cellPad} text-right font-semibold text-gray-800 tabular-nums`}>
+                      <Link href={`/stock/${encodeURIComponent(r.symbol)}`} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="hover:underline">
+                        {fmtPrice(r.lastPrice)}
+                      </Link>
+                    </td>
+                    <td className={`${cellPad} text-right`}>
+                      <Link href={`/stock/${encodeURIComponent(r.symbol)}`} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="inline-block hover:underline">
+                        <ChangeCell change={r.change} changePercent={r.changePercent} />
+                      </Link>
+                    </td>
                     {visibleCols.has('open') && <td className={`${cellPad} text-right text-gray-600 tabular-nums`}>{fmtPrice(r.open)}</td>}
                     {visibleCols.has('dayLow') && <td className={`${cellPad} text-right text-gray-600 tabular-nums`}>{fmtPrice(r.dayLow)}</td>}
                     {visibleCols.has('dayHigh') && <td className={`${cellPad} text-right text-gray-600 tabular-nums`}>{fmtPrice(r.dayHigh)}</td>}
                     {visibleCols.has('volume') && <td className={`${cellPad} text-right text-gray-600 tabular-nums`}>{fmtVolume(r.volume)}</td>}
-                    {visibleCols.has('level') && <td className={cellPad}><LevelCell level={levelBySymbol.get(r.symbol)} /></td>}
+                    {visibleCols.has('level') && <td className={cellPad}><LevelCell level={levelBySymbol.get(r.symbol)} compact={thin} /></td>}
                     {canEdit && (
                       <td className={`${cellPad} text-right`}>
                         <button
-                          onClick={() => handleRemoveSymbol(r.symbol)}
+                          onClick={e => { e.stopPropagation(); handleRemoveSymbol(r.symbol); }}
                           title={`Remove ${r.symbol}`}
                           className="text-gray-300 hover:text-red-600 hover:bg-red-50 rounded-full p-1 transition-colors leading-none"
                         >
@@ -594,7 +647,8 @@ export default function WatchlistsPage() {
                       </td>
                     )}
                   </tr>
-                ))}
+                  );
+                })}
                 {rowsLoading && (
                   <tr><td colSpan={colSpan} className="text-center text-gray-400 py-8 text-xs"><Spinner /> <span className="ml-2">Loading quotes…</span></td></tr>
                 )}
@@ -617,7 +671,14 @@ export default function WatchlistsPage() {
           </div>
 
           <div className="w-full lg:w-80 shrink-0">
-            {selectedId && <AlertsWidget watchlistId={selectedId} expiry={selectedExpiry || undefined} />}
+            {selectedId && (
+              <AlertsWidget
+                watchlistId={selectedId}
+                expiry={selectedExpiry || undefined}
+                symbolFilter={selectedSymbol}
+                onClearSymbolFilter={() => setSelectedSymbol(null)}
+              />
+            )}
           </div>
           </div>
         </div>
