@@ -89,7 +89,7 @@ export default function StockPage() {
   const [optChainCollapsed, setOptChainCollapsed] = useState(false);
   const [optChainSearch, setOptChainSearch] = useState('');
   const [optChainTypeFilter, setOptChainTypeFilter] = useState<'all' | 'call' | 'put'>('all');
-  const [optChainColFilters, setOptChainColFilters] = useState({ strike: '', ltp: '', oi: '', oiChg: '' });
+  const [optChainColFilters, setOptChainColFilters] = useState({ strike: '' });
 
   // Track loaded date ranges to avoid duplicate fetches
   const loadedRangesRef = useRef<{ from: string; to: string }[]>([]);
@@ -561,9 +561,6 @@ export default function StockPage() {
     const q = optChainSearch.trim().toLowerCase();
     if (q && !String(r.strike).includes(q) && !r.optType.includes(q)) return false;
     if (optChainColFilters.strike && !String(r.strike).includes(optChainColFilters.strike)) return false;
-    if (optChainColFilters.ltp && !String(r.ltp).includes(optChainColFilters.ltp)) return false;
-    if (optChainColFilters.oi && !String(r.oi).includes(optChainColFilters.oi)) return false;
-    if (optChainColFilters.oiChg && !String(r.oiChg).includes(optChainColFilters.oiChg)) return false;
     return true;
   });
 
@@ -920,22 +917,6 @@ export default function StockPage() {
                       className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white w-40"
                     />
                   </div>
-                  <div>
-                    <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1">Type</label>
-                    <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
-                      {(['all', 'call', 'put'] as const).map(t => (
-                        <button
-                          key={t}
-                          onClick={() => setOptChainTypeFilter(t)}
-                          className={`px-2.5 py-1 rounded-md text-xs font-semibold capitalize transition-colors ${
-                            optChainTypeFilter === t ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500'
-                          }`}
-                        >
-                          {t}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
                   {visibleOptChainRows.length !== optChainRows.length && (
                     <span className="text-[11px] text-gray-400 pb-1.5">{visibleOptChainRows.length} of {optChainRows.length} rows</span>
                   )}
@@ -949,41 +930,67 @@ export default function StockPage() {
                   <div className="overflow-x-auto">
                     <table className="w-full text-xs whitespace-nowrap">
                       <thead>
-                        <tr className="border-b border-gray-200 text-gray-500">
-                          <th className="text-left py-1.5 pr-3 font-medium">Type</th>
-                          <th className="text-right py-1.5 px-2 font-medium">Strike</th>
-                          <th className="text-right py-1.5 px-2 font-medium">LTP</th>
-                          <th className="text-right py-1.5 px-2 font-medium">OI</th>
-                          <th className="text-right py-1.5 pl-2 font-medium">OI Chg</th>
-                        </tr>
-                        <tr className="border-b border-gray-200 bg-gray-50">
-                          <th className="py-1 pr-3"></th>
-                          {(['strike', 'ltp', 'oi', 'oiChg'] as const).map(col => (
-                            <th key={col} className="py-1 px-2">
-                              <input
-                                value={optChainColFilters[col]}
-                                onChange={e => setOptChainColFilters(prev => ({ ...prev, [col]: e.target.value }))}
-                                placeholder="Filter…"
-                                className="w-full px-1.5 py-0.5 border border-gray-200 rounded text-[11px] text-right font-normal focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
-                              />
-                            </th>
-                          ))}
+                        <tr className="border-b border-gray-200 text-gray-500 align-bottom">
+                          <th className="text-left py-1.5 pr-3 font-medium">Symbol</th>
+                          <th className="text-left py-1.5 px-2 font-medium">Expiry</th>
+                          <th className="text-left py-1.5 px-2 font-medium">Trade Date</th>
+                          <th className="text-right py-1.5 px-2 font-medium">CMP</th>
+                          <th className="text-right py-1.5 px-2 font-medium">
+                            <div>Strike Price</div>
+                            <input
+                              value={optChainColFilters.strike}
+                              onChange={e => setOptChainColFilters(prev => ({ ...prev, strike: e.target.value }))}
+                              placeholder="Filter…"
+                              className="mt-1 w-full px-1.5 py-0.5 border border-gray-200 rounded text-[11px] text-right font-normal focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
+                            />
+                          </th>
+                          <th className="text-left py-1.5 px-2 font-medium">
+                            <div>Opt Typ</div>
+                            <select
+                              value={optChainTypeFilter}
+                              onChange={e => setOptChainTypeFilter(e.target.value as 'all' | 'call' | 'put')}
+                              className="mt-1 px-1 py-0.5 border border-gray-200 rounded text-[11px] font-normal capitalize focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
+                            >
+                              <option value="all">All</option>
+                              <option value="call">Call</option>
+                              <option value="put">Put</option>
+                            </select>
+                          </th>
+                          <th className="text-right py-1.5 px-2 font-medium">Opt LTP</th>
+                          <th className="text-right py-1.5 px-2 font-medium">Open Int</th>
+                          <th className="text-right py-1.5 px-2 font-medium">Chg Open Int</th>
+                          <th className="text-right py-1.5 px-2 font-medium">ABS Chg Open Int</th>
+                          <th className="text-right py-1.5 px-2 font-medium">Chg Open Int Price</th>
+                          <th className="text-right py-1.5 pl-2 font-medium">ABS Chg Open Int Price</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {visibleOptChainRows.map((r, i) => (
-                          <tr key={`${r.optType}-${r.strike}-${i}`} className="border-b border-gray-100 last:border-0 hover:bg-gray-50">
-                            <td className={`py-1.5 pr-3 font-semibold capitalize ${r.optType === 'call' ? 'text-green-600' : 'text-red-600'}`}>{r.optType}</td>
-                            <td className="text-right py-1.5 px-2 font-mono">{formatCurrency(r.strike)}</td>
-                            <td className="text-right py-1.5 px-2 text-gray-600">{formatCurrency(r.ltp)}</td>
-                            <td className="text-right py-1.5 px-2 text-gray-600">{r.oi.toLocaleString()}</td>
-                            <td className={`text-right py-1.5 pl-2 font-semibold ${r.oiChg > 0 ? 'text-green-600' : r.oiChg < 0 ? 'text-red-600' : 'text-gray-500'}`}>
-                              {r.oiChg > 0 ? '+' : ''}{r.oiChg.toLocaleString()}
-                            </td>
-                          </tr>
-                        ))}
+                        {visibleOptChainRows.map((r, i) => {
+                          // Notional $ value of the OI change: contracts changed * premium * 100 shares/contract.
+                          const chgOpenIntPrice = r.oiChg * r.ltp * 100;
+                          return (
+                            <tr key={`${r.optType}-${r.strike}-${i}`} className="border-b border-gray-100 last:border-0 hover:bg-gray-50">
+                              <td className="py-1.5 pr-3 text-gray-600">{symbol.toUpperCase()}</td>
+                              <td className="py-1.5 px-2 text-gray-600">{selectedExpiry}</td>
+                              <td className="py-1.5 px-2 text-gray-600">{optChainLoadDate}</td>
+                              <td className="text-right py-1.5 px-2 text-gray-600">{r.close}</td>
+                              <td className="text-right py-1.5 px-2 font-mono">{r.strike}</td>
+                              <td className={`py-1.5 px-2 font-semibold capitalize ${r.optType === 'call' ? 'text-green-600' : 'text-red-600'}`}>{r.optType}</td>
+                              <td className="text-right py-1.5 px-2 text-gray-600">{r.ltp}</td>
+                              <td className="text-right py-1.5 px-2 text-gray-600">{r.oi.toLocaleString()}</td>
+                              <td className={`text-right py-1.5 px-2 font-semibold ${r.oiChg > 0 ? 'text-green-600' : r.oiChg < 0 ? 'text-red-600' : 'text-gray-500'}`}>
+                                {r.oiChg > 0 ? '+' : ''}{r.oiChg.toLocaleString()}
+                              </td>
+                              <td className="text-right py-1.5 px-2 text-gray-600">{Math.abs(r.oiChg).toLocaleString()}</td>
+                              <td className={`text-right py-1.5 px-2 font-semibold ${chgOpenIntPrice > 0 ? 'text-green-600' : chgOpenIntPrice < 0 ? 'text-red-600' : 'text-gray-500'}`}>
+                                {chgOpenIntPrice > 0 ? '+' : ''}{chgOpenIntPrice.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                              </td>
+                              <td className="text-right py-1.5 pl-2 text-gray-600">{Math.abs(chgOpenIntPrice).toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+                            </tr>
+                          );
+                        })}
                         {visibleOptChainRows.length === 0 && (
-                          <tr><td colSpan={5} className="text-center py-4 text-gray-400">No rows match your filters.</td></tr>
+                          <tr><td colSpan={12} className="text-center py-4 text-gray-400">No rows match your filters.</td></tr>
                         )}
                       </tbody>
                     </table>
