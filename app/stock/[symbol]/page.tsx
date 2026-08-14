@@ -45,7 +45,15 @@ type RangePreset = '10d' | '30d' | '90d' | 'custom';
 const RANGE_PRESET_DAYS: Record<Exclude<RangePreset, 'custom'>, number> = { '10d': 10, '30d': 30, '90d': 90 };
 const RANGE_PRESET_LABELS: Record<RangePreset, string> = { '10d': '10D', '30d': '30D', '90d': '90D', custom: 'Custom' };
 
-type OptChainRow = { optType: 'put' | 'call'; strike: number; ltp: number; oi: number; oiChg: number; close: number };
+type OptChainRow = { optType: 'put' | 'call'; strike: number; ltp: number; oi: number; oiChg: number; close: number; loadDate: string };
+
+type OptChainPreset = '10d' | '30d' | '90d' | 'all';
+const OPT_CHAIN_PRESET_DAYS: Record<Exclude<OptChainPreset, 'all'>, number> = { '10d': 10, '30d': 30, '90d': 90 };
+const OPT_CHAIN_PRESET_LABELS: Record<OptChainPreset, string> = { '10d': '10D', '30d': '30D', '90d': '90D', all: 'All' };
+// us_opt_chg_rpt history per symbol+expiry runs to roughly a few months
+// (confirmed ~80 trading days for a typical contract) — far enough back to
+// stand in for "all" without a separate unbounded-query code path.
+const OPT_CHAIN_ALL_FROM = '2000-01-01';
 
 function Spinner() {
   return <div className="inline-block animate-spin h-3.5 w-3.5 border-2 border-blue-600 border-t-transparent rounded-full" />;
@@ -85,8 +93,9 @@ export default function StockPage() {
   // for the selected expiry, refetched whenever the expiry changes.
   const [optChainRows, setOptChainRows] = useState<OptChainRow[]>([]);
   const [optChainLoading, setOptChainLoading] = useState(false);
-  const [optChainLoadDate, setOptChainLoadDate] = useState<string | null>(null);
+  const [optChainRange, setOptChainRange] = useState<{ from: string; to: string } | null>(null);
   const [optChainCollapsed, setOptChainCollapsed] = useState(false);
+  const [optChainPreset, setOptChainPreset] = useState<OptChainPreset>('10d');
   const [optChainSearch, setOptChainSearch] = useState('');
   const [optChainTypeFilter, setOptChainTypeFilter] = useState<'all' | 'call' | 'put'>('all');
   const [optChainColFilters, setOptChainColFilters] = useState({ strike: '' });
@@ -346,27 +355,32 @@ export default function StockPage() {
     return () => { cancelled = true; };
   }, [symbol, selectedExpiry, priceHistoryPreset, customFrom, customTo]);
 
-  // Option-chain OI — always the latest available snapshot for the selected expiry.
+  // Option-chain OI — fetches every daily snapshot within the selected
+  // window (10D/30D/90D/All) for the selected expiry, not just the latest day.
   useEffect(() => {
     if (!symbol || !selectedExpiry) return;
+
+    const to = format(new Date(), 'yyyy-MM-dd');
+    const from = optChainPreset === 'all' ? OPT_CHAIN_ALL_FROM : format(subDays(new Date(), OPT_CHAIN_PRESET_DAYS[optChainPreset]), 'yyyy-MM-dd');
+
     let cancelled = false;
     setOptChainLoading(true);
-    fetch(`/api/stocks/${symbol}/opt-chain?expiry=${selectedExpiry}`)
+    fetch(`/api/stocks/${symbol}/opt-chain?expiry=${selectedExpiry}&from=${from}&to=${to}`)
       .then(res => res.json())
       .then(json => {
         if (cancelled) return;
         if (json.success) {
           setOptChainRows(json.data.rows || []);
-          setOptChainLoadDate(json.data.loadDate);
+          setOptChainRange({ from: json.data.from, to: json.data.to });
         } else {
           setOptChainRows([]);
-          setOptChainLoadDate(null);
+          setOptChainRange(null);
         }
       })
-      .catch(() => { if (!cancelled) { setOptChainRows([]); setOptChainLoadDate(null); } })
+      .catch(() => { if (!cancelled) { setOptChainRows([]); setOptChainRange(null); } })
       .finally(() => { if (!cancelled) setOptChainLoading(false); });
     return () => { cancelled = true; };
-  }, [symbol, selectedExpiry]);
+  }, [symbol, selectedExpiry, optChainPreset]);
 
   // Live price — polls Alpaca's latest trade. Fast during market hours for a
   // genuinely "live" feel, much slower off-hours since the price can't move.
@@ -900,9 +914,27 @@ export default function StockPage() {
               >
                 <span className={`inline-block transition-transform text-gray-400 ${optChainCollapsed ? '' : 'rotate-90'}`}>▶</span>
                 Open Interest — Option Chain
-                {optChainLoadDate && <span className="text-xs font-normal text-gray-400">as of {optChainLoadDate}</span>}
+                {optChainRange && <span className="text-xs font-normal text-gray-400">{optChainRange.from} to {optChainRange.to}</span>}
               </button>
-              {optChainLoading && !optChainCollapsed && <Spinner />}
+
+              {!optChainCollapsed && (
+                <div className="flex items-center gap-2">
+                  <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
+                    {(['10d', '30d', '90d', 'all'] as OptChainPreset[]).map(p => (
+                      <button
+                        key={p}
+                        onClick={() => setOptChainPreset(p)}
+                        className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-colors ${
+                          optChainPreset === p ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500'
+                        }`}
+                      >
+                        {OPT_CHAIN_PRESET_LABELS[p]}
+                      </button>
+                    ))}
+                  </div>
+                  {optChainLoading && <Spinner />}
+                </div>
+              )}
             </div>
 
             {!optChainCollapsed && (
@@ -969,10 +1001,10 @@ export default function StockPage() {
                           // Notional $ value of the OI change: contracts changed * premium * 100 shares/contract.
                           const chgOpenIntPrice = r.oiChg * r.ltp * 100;
                           return (
-                            <tr key={`${r.optType}-${r.strike}-${i}`} className="border-b border-gray-100 last:border-0 hover:bg-gray-50">
+                            <tr key={`${r.loadDate}-${r.optType}-${r.strike}-${i}`} className="border-b border-gray-100 last:border-0 hover:bg-gray-50">
                               <td className="py-1.5 pr-3 text-gray-600">{symbol.toUpperCase()}</td>
                               <td className="py-1.5 px-2 text-gray-600">{selectedExpiry}</td>
-                              <td className="py-1.5 px-2 text-gray-600">{optChainLoadDate}</td>
+                              <td className="py-1.5 px-2 text-gray-600">{r.loadDate}</td>
                               <td className="text-right py-1.5 px-2 text-gray-600">{r.close}</td>
                               <td className="text-right py-1.5 px-2 font-mono">{r.strike}</td>
                               <td className={`py-1.5 px-2 font-semibold capitalize ${r.optType === 'call' ? 'text-green-600' : 'text-red-600'}`}>{r.optType}</td>
