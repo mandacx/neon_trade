@@ -41,9 +41,9 @@ type LevelHistoryEntry = {
 };
 const SEVEN_LEVEL_ORDER = ['put_low', 'put_int', 'put_call_int', 'call_int', 'call_high', 'call_low', 'put_high'];
 
-type RangePreset = '10d' | '7d' | '30d' | '90d' | 'custom';
-const RANGE_PRESET_DAYS: Record<Exclude<RangePreset, 'custom'>, number> = { '10d': 10, '7d': 7, '30d': 30, '90d': 90 };
-const RANGE_PRESET_LABELS: Record<RangePreset, string> = { '10d': '10D', '7d': '7D', '30d': '30D', '90d': '90D', custom: 'Custom' };
+type RangePreset = '10d' | '30d' | '90d' | 'custom';
+const RANGE_PRESET_DAYS: Record<Exclude<RangePreset, 'custom'>, number> = { '10d': 10, '30d': 30, '90d': 90 };
+const RANGE_PRESET_LABELS: Record<RangePreset, string> = { '10d': '10D', '30d': '30D', '90d': '90D', custom: 'Custom' };
 
 type OptChainRow = { optType: 'put' | 'call'; strike: number; ltp: number; oi: number; oiChg: number; close: number };
 
@@ -787,7 +787,7 @@ export default function StockPage() {
               {!priceHistoryCollapsed && (
                 <div className="flex flex-wrap items-center gap-2">
                   <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
-                    {(['10d', '7d', '30d', '90d', 'custom'] as RangePreset[]).map(p => (
+                    {(['10d', '30d', '90d', 'custom'] as RangePreset[]).map(p => (
                       <button
                         key={p}
                         onClick={() => setPriceHistoryPreset(p)}
