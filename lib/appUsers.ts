@@ -18,6 +18,29 @@ export interface CurrentUserContext {
 
 const FALLBACK_PLAN_CODE = 'FREE';
 
+/**
+ * Neon Auth's session-data cache cookie (~5 min TTL) expires between
+ * requests, and refreshing it means writing a cookie — which Next.js only
+ * allows from a Server Action or Route Handler. This function is called from
+ * plain Server Components (every layout/page, via the root layout), so once
+ * the cache goes stale a hard refresh throws "Cookies can only be modified in
+ * a Server Action or Route Handler" instead of returning session data. Treat
+ * that specific error as a cache-refresh miss rather than a crash — the
+ * cookie gets refreshed next time any Route Handler runs (any /api/* call),
+ * so this self-heals within a request or two.
+ */
+async function withCookieWriteFallback<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
+  try {
+    return await fn();
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('Cookies can only be modified')) {
+      console.warn('[appUsers] Neon Auth session refresh skipped (not in a Server Action/Route Handler):', error.message);
+      return fallback;
+    }
+    throw error;
+  }
+}
+
 async function freePlanContext(): Promise<Pick<CurrentUserContext, 'planCode' | 'features'>> {
   const rows = await sql`SELECT code, features FROM public.nt_plans WHERE code = ${FALLBACK_PLAN_CODE}`;
   const row = rows[0] as { code: string; features: string[] } | undefined;
@@ -60,7 +83,7 @@ function applyOverrides(planFeatures: string[], overrides: Array<{ feature: stri
  * accepted as a minor, cosmetic, bounded staleness.
  */
 export async function getCurrentUserContext(): Promise<CurrentUserContext> {
-  const { data } = await auth.getSession();
+  const { data } = await withCookieWriteFallback(() => auth.getSession(), { data: null, error: null });
   if (!data?.user) {
     const { planCode, features } = await freePlanContext();
     return {
@@ -83,7 +106,7 @@ export async function getCurrentUserContext(): Promise<CurrentUserContext> {
     selectProfile(),
     sql`SELECT feature, granted FROM public.nt_user_feature_overrides WHERE user_id = ${user.id}`,
     sql`SELECT role FROM neon_auth."user" WHERE id = ${user.id}`,
-    auth.listAccounts(),
+    withCookieWriteFallback(() => auth.listAccounts(), { data: [], error: null }),
   ]);
   const hasPassword = (accountsResult.data ?? []).some(a => a.providerId === 'credential');
 
