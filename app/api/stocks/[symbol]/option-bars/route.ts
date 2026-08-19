@@ -59,11 +59,12 @@ export async function GET(
 
     // The historical endpoint above always 403s for the current trading day
     // (capped at `effectiveTo` = yesterday), so today never shows up in
-    // `barsData`. For intraday views, append today's running bar (via the
-    // options snapshot endpoint, the only current-day data this Alpaca plan
-    // permits) so the chart isn't just silently missing today.
+    // `barsData`. Append today's running bar (via the options snapshot
+    // endpoint, the only current-day data this Alpaca plan permits) for
+    // daily and intraday views — weekly/monthly stay historical-only since a
+    // single day's bar isn't the right shape for a partial week/month candle.
     const today = format(new Date(), 'yyyy-MM-dd');
-    if (isIntradayInterval(interval) && to >= today) {
+    if ((interval === 'daily' || isIntradayInterval(interval)) && to >= today) {
       const todayBar = await getOptionTodaySnapshotBar(symbol, expiry, strike, occSymbol);
       const timestamp = todayBar ? Math.floor(new Date(todayBar.t).getTime() / 1000) : 0;
       // Snapshot's dailyBar can be stale (e.g. Friday's bar showing on a
