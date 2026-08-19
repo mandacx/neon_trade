@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getOptionBars, buildOccOptionSymbol, convertIntervalToTimeframe, ChartInterval } from '@/lib/alpaca';
+import { getOptionBars, getOptionTodaySnapshotBar, buildOccOptionSymbol, convertIntervalToTimeframe, isIntradayInterval, ChartInterval } from '@/lib/alpaca';
 import { usTradingDayKey } from '@/lib/utils';
 import { format, subDays } from 'date-fns';
 import axios from 'axios';
@@ -56,6 +56,31 @@ export async function GET(
         volume: bar.v,
       };
     });
+
+    // The historical endpoint above always 403s for the current trading day
+    // (capped at `effectiveTo` = yesterday), so today never shows up in
+    // `barsData`. For intraday views, append today's running bar (via the
+    // options snapshot endpoint, the only current-day data this Alpaca plan
+    // permits) so the chart isn't just silently missing today.
+    const today = format(new Date(), 'yyyy-MM-dd');
+    if (isIntradayInterval(interval) && to >= today) {
+      const todayBar = await getOptionTodaySnapshotBar(symbol, expiry, strike, occSymbol);
+      const timestamp = todayBar ? Math.floor(new Date(todayBar.t).getTime() / 1000) : 0;
+      // Snapshot's dailyBar can be stale (e.g. Friday's bar showing on a
+      // weekend view) — only append if it's genuinely today's bar, so we
+      // never duplicate a day already covered by barsData above.
+      if (todayBar && usTradingDayKey(timestamp) === today) {
+        barsData.push({
+          date: usTradingDayKey(timestamp),
+          timestamp,
+          open: todayBar.o,
+          high: todayBar.h,
+          low: todayBar.l,
+          close: todayBar.c,
+          volume: todayBar.v,
+        });
+      }
+    }
 
     return NextResponse.json({
       success: true,

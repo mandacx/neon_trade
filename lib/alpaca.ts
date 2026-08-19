@@ -240,3 +240,29 @@ export async function getOptionBars(occSymbol: string, timeframe: string, start:
     throw error;
   }
 }
+
+/**
+ * Today's running OHLCV for a single option contract, via Alpaca's options
+ * snapshot endpoint (/v1beta1/options/snapshots/{underlying}). Unlike
+ * getOptionBars, this is NOT blocked for the current trading day on this
+ * account's subscription — it's the only way to see any current-day option
+ * data at all, but it returns exactly one point (today's bar so far), never
+ * a historical intraday series. Returns null on any failure or if the
+ * contract has no bar yet (e.g. hasn't traded today).
+ */
+export async function getOptionTodaySnapshotBar(
+  underlying: string,
+  expiryDate: string,
+  strike: number,
+  occSymbol: string
+): Promise<AlpacaBar | null> {
+  try {
+    const response = await alpacaClient.get(`/v1beta1/options/snapshots/${underlying.toUpperCase()}`, {
+      params: { expiration_date: expiryDate, strike_price_gte: strike, strike_price_lte: strike },
+    });
+    return response.data?.snapshots?.[occSymbol]?.dailyBar ?? null;
+  } catch (error) {
+    console.error('Error fetching option snapshot from Alpaca:', axios.isAxiosError(error) ? error.response?.data : error);
+    return null;
+  }
+}
