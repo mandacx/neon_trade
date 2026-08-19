@@ -23,6 +23,14 @@ function fmtTime(iso: string): string {
   }
 }
 
+function fmtExpiry(date: string): string {
+  try {
+    return format(new Date(`${date}T00:00:00`), 'MMM d');
+  } catch {
+    return date;
+  }
+}
+
 /**
  * Compact "latest fired alerts" feed for a watchlist's symbols — sidebar
  * companion to the table. `expiry`, when set, pins the fetch to that one
@@ -137,6 +145,7 @@ export default function AlertsWidget({
                 )}
                 <span className="text-[10px] text-gray-400">{fmtTime(a.loadDateTime)}</span>
               </div>
+              <div className="text-[10px] text-gray-400 mt-0.5">Exp {fmtExpiry(a.expiryDate)}</div>
             </Link>
           ))}
         </div>
