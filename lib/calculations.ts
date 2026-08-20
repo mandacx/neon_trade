@@ -47,6 +47,12 @@ export function calculateLevels(data: StockData): LevelCalculation[] {
  * Find the level closest to 0 (closest to current price)
  */
 export function findClosestLevel(levels: LevelCalculation[]): LevelCalculation {
+  if (levels.length === 0) {
+    // calculateLevels() returns [] when CLOSE is missing/0 — no real price
+    // data to find a "closest" level from. value: 1 matches the existing
+    // "100% away" sentinel callers already use to mean "no data here".
+    return { name: 'put_low', value: 1, price: 0, distance: 0 };
+  }
   return levels.reduce((closest, current) => {
     return Math.abs(current.value) < Math.abs(closest.value) ? current : closest;
   });
