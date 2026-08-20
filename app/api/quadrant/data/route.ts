@@ -5,7 +5,8 @@ import { deriveFilterOptions, getSecuritiesFilterOptions, getSecuritiesMeta, app
 import { format } from 'date-fns';
 import { requireFeatureApi } from '@/lib/routeGuards';
 import { levelGate } from '@/lib/levelAccess';
-import { FEATURE_QUADRANT } from '@/lib/features';
+import { FEATURE_QUADRANT, FEATURE_WATCHLISTS, hasFeature } from '@/lib/features';
+import { getWatchlistsForUser, getWatchlistSymbols } from '@/lib/watchlists';
 
 export async function GET(request: NextRequest) {
   const { ctx, blocked } = await requireFeatureApi(FEATURE_QUADRANT);
@@ -22,13 +23,16 @@ export async function GET(request: NextRequest) {
     const industry = searchParams.get('industry');
     const marketCapTier = searchParams.get('marketCapTier');
     const indexCode = searchParams.get('index');
+    const watchlistId = searchParams.get('watchlist');
+    const watchlistsEnabled = hasFeature(ctx.features, FEATURE_WATCHLISTS);
 
     // If requesting metadata only (dates + filter options)
     if (metadataOnly) {
-      const [tradeDates, expiryDates, filterOptions] = await Promise.all([
+      const [tradeDates, expiryDates, filterOptions, watchlists] = await Promise.all([
         getAvailableDates(30),
         getAvailableExpiryDates(),
         getSecuritiesFilterOptions(),
+        watchlistsEnabled ? getWatchlistsForUser(ctx.userId) : Promise.resolve([]),
       ]);
 
       return NextResponse.json({
@@ -37,6 +41,7 @@ export async function GET(request: NextRequest) {
           tradeDates,
           expiryDates,
           filterOptions,
+          watchlists,
         },
       });
     }
@@ -86,6 +91,12 @@ export async function GET(request: NextRequest) {
 
     // Apply securities-based filters
     filteredStocks = applySecuritiesFilters(filteredStocks, secMeta, { sector, industry, marketCapTier, indexCode });
+
+    // Restrict to a personal/curated watchlist's symbols (Pro only)
+    if (watchlistId && watchlistsEnabled) {
+      const watchlistSymbols = new Set(await getWatchlistSymbols(watchlistId, ctx.userId));
+      filteredStocks = filteredStocks.filter(stock => watchlistSymbols.has(stock.symbol));
+    }
 
     // Filter by threshold
     if (threshold !== undefined) {

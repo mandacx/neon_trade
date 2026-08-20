@@ -15,6 +15,13 @@ interface FilterOptions {
   indices?: { code: string; name: string }[];
 }
 
+interface WatchlistOption {
+  id: string;
+  name: string;
+  isSystem: boolean;
+  symbolCount: number;
+}
+
 const LEVEL_COLORS: Record<string, string> = {
   put_low: '#dc2626', put_int: '#ea580c', put_call_int: '#16a34a',
   call_int: '#2563eb', call_high: '#9333ea',
@@ -39,6 +46,7 @@ function QuadrantPageInner() {
   const [tradeDates, setTradeDates] = useState<string[]>([]);
   const [expiryDates, setExpiryDates] = useState<string[]>([]);
   const [filterOptions, setFilterOptions] = useState<FilterOptions>({});
+  const [watchlists, setWatchlists] = useState<WatchlistOption[]>([]);
 
   // Collapsible state
   const [filtersOpen, setFiltersOpen] = useState(true);
@@ -51,6 +59,7 @@ function QuadrantPageInner() {
   const [industry, setIndustry] = useState(searchParams.get('industry') || '');
   const [marketCapTier, setMarketCapTier] = useState(searchParams.get('marketCapTier') || '');
   const [indexCode, setIndexCode] = useState(searchParams.get('index') || '');
+  const [watchlistId, setWatchlistId] = useState(searchParams.get('watchlist') || '');
 
   useEffect(() => {
     const fetchMetadata = async () => {
@@ -62,6 +71,7 @@ function QuadrantPageInner() {
           setTradeDates(result.data.tradeDates);
           setExpiryDates(result.data.expiryDates);
           setFilterOptions(result.data.filterOptions || {});
+          setWatchlists(result.data.watchlists || []);
           if (result.data.tradeDates.length > 0) setTradeDate(result.data.tradeDates[0]);
           if (result.data.expiryDates.length > 0) setExpiryDate(result.data.expiryDates[0]);
         }
@@ -83,6 +93,7 @@ function QuadrantPageInner() {
         if (industry) params.set('industry', industry);
         if (marketCapTier) params.set('marketCapTier', marketCapTier);
         if (indexCode) params.set('index', indexCode);
+        if (watchlistId) params.set('watchlist', watchlistId);
         const response = await fetch(`/api/quadrant/data?${params}`);
         if (!response.ok) throw new Error('Failed to fetch quadrant data');
         const result = await response.json();
@@ -98,7 +109,7 @@ function QuadrantPageInner() {
       }
     };
     fetchData();
-  }, [tradeDate, expiryDate, sector, industry, marketCapTier, indexCode]);
+  }, [tradeDate, expiryDate, sector, industry, marketCapTier, indexCode, watchlistId]);
 
   useEffect(() => {
     let filtered = stocks;
@@ -118,7 +129,7 @@ function QuadrantPageInner() {
     || (filterOptions.marketCapTiers?.length ?? 0) > 0
     || (filterOptions.indices?.length ?? 0) > 0;
 
-  const hasActiveFilters = !!(sector || industry || marketCapTier || indexCode);
+  const hasActiveFilters = !!(sector || industry || marketCapTier || indexCode || watchlistId);
 
   const selectClass = "px-2 py-1.5 border border-gray-200 rounded-md text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white max-w-[180px]";
   const labelClass = "block text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-0.5";
@@ -217,10 +228,23 @@ function QuadrantPageInner() {
                       </select>
                     </div>
                   )}
+                  {watchlists.length > 0 && (
+                    <div>
+                      <label className={labelClass}>Watchlist</label>
+                      <select value={watchlistId} onChange={e => setWatchlistId(e.target.value)} className={selectClass}>
+                        <option value="">All Stocks</option>
+                        {watchlists.map(w => (
+                          <option key={w.id} value={w.id}>
+                            {w.name} ({w.symbolCount})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                   {hasActiveFilters && (
                     <div className="flex items-end pb-0.5">
                       <button
-                        onClick={() => { setSector(''); setIndustry(''); setMarketCapTier(''); setIndexCode(''); }}
+                        onClick={() => { setSector(''); setIndustry(''); setMarketCapTier(''); setIndexCode(''); setWatchlistId(''); }}
                         className="px-2.5 py-1.5 text-xs text-gray-500 border border-gray-200 rounded-md hover:bg-gray-50"
                       >
                         Clear
