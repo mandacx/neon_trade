@@ -12,7 +12,7 @@ import OptionContractModal from '@/components/stock/OptionContractModal';
 import { LevelCalculation, ScanAlert } from '@/types/stock';
 import { getLevelColor, getLevelDisplayName, formatCurrency, formatPercentage, isUsMarketHours } from '@/lib/utils';
 import { isIntradayInterval } from '@/lib/alpaca';
-import { format, subDays } from 'date-fns';
+import { format, subDays, addDays } from 'date-fns';
 
 type SelectableInterval = '1min' | '5min' | '15min' | '30min' | '1hour' | 'daily';
 
@@ -57,6 +57,20 @@ const OPT_CHAIN_PRESET_LABELS: Record<OptChainPreset, string> = { '10d': '10D', 
 // stand in for "all" without a separate unbounded-query code path.
 const OPT_CHAIN_ALL_FROM = '2000-01-01';
 
+type ExpiryMode = 'current' | 'historical';
+
+// Buckets already-most-recent-first-sorted expiry dates by year, preserving
+// that order — most recent year first, most recent date first within a year.
+function groupExpiriesByYear(dates: string[]): { year: string; dates: string[] }[] {
+  const byYear = new Map<string, string[]>();
+  dates.forEach(date => {
+    const year = date.slice(0, 4);
+    if (!byYear.has(year)) byYear.set(year, []);
+    byYear.get(year)!.push(date);
+  });
+  return Array.from(byYear.entries()).map(([year, dates]) => ({ year, dates }));
+}
+
 function Spinner() {
   return <div className="inline-block animate-spin h-3.5 w-3.5 border-2 border-blue-600 border-t-transparent rounded-full" />;
 }
@@ -88,6 +102,9 @@ export default function StockPage() {
   const [error, setError] = useState<string | null>(null);
   const [expiryDates, setExpiryDates] = useState<string[]>([]);
   const [selectedExpiry, setSelectedExpiry] = useState<string>('');
+  const [expiryMode, setExpiryMode] = useState<ExpiryMode>('current');
+  const [historicalExpiryDates, setHistoricalExpiryDates] = useState<string[]>([]);
+  const [expandedYears, setExpandedYears] = useState<Set<string>>(new Set());
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [chartInterval, setChartInterval] = useState<SelectableInterval>('daily');
   const [livePrice, setLivePrice] = useState<number | undefined>(undefined);
@@ -126,8 +143,33 @@ export default function StockPage() {
     requestAnimationFrame(() => ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
   }
 
+  function handleExpiryModeChange(mode: ExpiryMode) {
+    setExpiryMode(mode);
+    if (mode === 'historical') {
+      if (historicalExpiryDates.length > 0) {
+        setSelectedExpiry(historicalExpiryDates[0]);
+        setExpandedYears(new Set([historicalExpiryDates[0].slice(0, 4)]));
+      }
+    } else if (expiryDates.length > 0) {
+      setSelectedExpiry(expiryDates[0]);
+    }
+  }
+
+  function toggleExpiryYear(year: string) {
+    setExpandedYears(prev => {
+      const next = new Set(prev);
+      if (next.has(year)) next.delete(year); else next.add(year);
+      return next;
+    });
+  }
+
   // Track loaded date ranges to avoid duplicate fetches
   const loadedRangesRef = useRef<{ from: string; to: string }[]>([]);
+
+  // Gates the chart-window-jump effect below so it only fires on an actual
+  // current<->historical transition, not on every mount (which is already
+  // 'current' by default and already loads its own today-anchored window).
+  const prevExpiryModeRef = useRef<ExpiryMode>('current');
 
   // Stable refs so handleLoadMore never changes reference (prevents chart recreation)
   const ohlcDataRef = useRef<any[]>([]);
@@ -154,12 +196,13 @@ export default function StockPage() {
         // Track initial loaded range
         loadedRangesRef.current = [{ from, to }];
 
-        // Fetch stock details, levels, expiry dates, and scan alerts
-        const [detailsRes, ohlcRes, levelsRes, expiryRes, scanAlertsRes] = await Promise.all([
+        // Fetch stock details, levels, expiry dates (current + historical), and scan alerts
+        const [detailsRes, ohlcRes, levelsRes, expiryRes, historicalExpiryRes, scanAlertsRes] = await Promise.all([
           fetch(`/api/stocks/${symbol}`),
           fetch(`/api/stocks/${symbol}/ohlc?from=${from}&to=${to}&interval=${chartInterval}`),
           fetch(`/api/stocks/${symbol}/levels`),
           fetch(`/api/stocks/${symbol}/expiry-dates`),
+          fetch(`/api/stocks/${symbol}/expiry-dates?historical=true`),
           fetch(`/api/stocks/${symbol}/scan-alerts?from=${from}&to=${to}`),
         ]);
 
@@ -178,6 +221,8 @@ export default function StockPage() {
         const details = detailsRes.ok ? await detailsRes.json() : { success: true, data: null };
         const levelsData = levelsRes.ok ? await levelsRes.json() : { success: true, data: null };
         const expiryData = expiryRes.ok ? await expiryRes.json() : { success: true, data: { expiryDates: [] } };
+        const historicalExpiryData = historicalExpiryRes.ok ? await historicalExpiryRes.json() : { success: true, data: { expiryDates: [] } };
+        if (historicalExpiryData.success) setHistoricalExpiryDates(historicalExpiryData.data.expiryDates || []);
 
         // Set OHLC data (always required)
         setOhlcData(ohlc.data.data || []);
@@ -338,6 +383,66 @@ export default function StockPage() {
     fetchHistoricalLevels();
   }, [selectedExpiry, symbol, isInitialLoad, ohlcData]);
 
+  // Jump the chart's loaded OHLC window to surround the selected expiry when
+  // switching into (or between) historical expiries, rather than requiring a
+  // manual scroll-back via handleLoadMore. Gated by prevExpiryModeRef so it's
+  // a no-op on mount and while staying in 'current' mode — the mount effect
+  // above already loads that default today-anchored window. The existing
+  // historical-levels-overlay effect just above already depends on
+  // `ohlcData` and recomputes its own range from it, so replacing `ohlcData`
+  // here is enough to make that effect re-fetch the matching levels/OI too.
+  useEffect(() => {
+    const prevMode = prevExpiryModeRef.current;
+    prevExpiryModeRef.current = expiryMode;
+    if (!symbol || !selectedExpiry || isInitialLoad) return;
+    if (expiryMode === 'current' && prevMode === 'current') return;
+
+    let cancelled = false;
+
+    const jumpToWindow = async () => {
+      const { initialDays } = INTERVAL_CONFIG[chartInterval];
+      let from: string, to: string;
+      if (expiryMode === 'historical') {
+        // A little padding past expiry (the underlying keeps trading after
+        // the option contract expires) capped at today, so the window never
+        // reaches into dates with no data at all.
+        const todayStr = format(new Date(), 'yyyy-MM-dd');
+        const paddedTo = format(addDays(new Date(selectedExpiry), 5), 'yyyy-MM-dd');
+        to = paddedTo < todayStr ? paddedTo : todayStr;
+        from = format(subDays(new Date(selectedExpiry), initialDays), 'yyyy-MM-dd');
+      } else {
+        // Returning to 'current' — restore the same default window the
+        // mount effect computes.
+        to = format(new Date(), 'yyyy-MM-dd');
+        from = format(subDays(new Date(), initialDays), 'yyyy-MM-dd');
+      }
+
+      loadedRangesRef.current = [{ from, to }];
+
+      try {
+        const [ohlcRes, scanAlertsRes] = await Promise.all([
+          fetch(`/api/stocks/${symbol}/ohlc?from=${from}&to=${to}&interval=${chartInterval}`),
+          fetch(`/api/stocks/${symbol}/scan-alerts?from=${from}&to=${to}`),
+        ]);
+        if (cancelled) return;
+
+        if (ohlcRes.ok) {
+          const ohlc = await ohlcRes.json();
+          if (!cancelled && ohlc.success) setOhlcData(ohlc.data.data || []);
+        }
+        if (scanAlertsRes.ok) {
+          const scanAlertsData = await scanAlertsRes.json();
+          if (!cancelled && scanAlertsData.success) setScanAlerts(scanAlertsData.data.alerts || []);
+        }
+      } catch (err) {
+        console.error('Error jumping chart window to expiry:', err);
+      }
+    };
+
+    jumpToWindow();
+    return () => { cancelled = true; };
+  }, [symbol, selectedExpiry, expiryMode, chartInterval, isInitialLoad]);
+
   // Price Levels History table — its own independent fetch/date-range, not
   // tied to the chart's (see state comment above). Re-fetches on symbol,
   // expiry, or range-preset/custom-date change.
@@ -350,8 +455,11 @@ export default function StockPage() {
       from = customFrom;
       to = customTo;
     } else {
-      to = format(new Date(), 'yyyy-MM-dd');
-      from = format(subDays(new Date(), RANGE_PRESET_DAYS[priceHistoryPreset]), 'yyyy-MM-dd');
+      // For an already-expired expiry, "last 10/30/90 days" means the N days
+      // leading up to expiry, not the N days up to today — today's data has
+      // nothing to do with a contract that already expired.
+      to = expiryMode === 'historical' ? selectedExpiry : format(new Date(), 'yyyy-MM-dd');
+      from = format(subDays(new Date(to), RANGE_PRESET_DAYS[priceHistoryPreset]), 'yyyy-MM-dd');
     }
 
     let cancelled = false;
@@ -379,15 +487,16 @@ export default function StockPage() {
       .finally(() => { if (!cancelled) setPriceHistoryLoading(false); });
 
     return () => { cancelled = true; };
-  }, [symbol, selectedExpiry, priceHistoryPreset, customFrom, customTo]);
+  }, [symbol, selectedExpiry, expiryMode, priceHistoryPreset, customFrom, customTo]);
 
   // Option-chain OI — fetches every daily snapshot within the selected
   // window (10D/30D/90D/All) for the selected expiry, not just the latest day.
   useEffect(() => {
     if (!symbol || !selectedExpiry) return;
 
-    const to = format(new Date(), 'yyyy-MM-dd');
-    const from = optChainPreset === 'all' ? OPT_CHAIN_ALL_FROM : format(subDays(new Date(), OPT_CHAIN_PRESET_DAYS[optChainPreset]), 'yyyy-MM-dd');
+    // Same expiry-anchoring as the Price Levels History effect above.
+    const to = expiryMode === 'historical' ? selectedExpiry : format(new Date(), 'yyyy-MM-dd');
+    const from = optChainPreset === 'all' ? OPT_CHAIN_ALL_FROM : format(subDays(new Date(to), OPT_CHAIN_PRESET_DAYS[optChainPreset]), 'yyyy-MM-dd');
 
     let cancelled = false;
     setOptChainLoading(true);
@@ -406,7 +515,7 @@ export default function StockPage() {
       .catch(() => { if (!cancelled) { setOptChainRows([]); setOptChainRange(null); } })
       .finally(() => { if (!cancelled) setOptChainLoading(false); });
     return () => { cancelled = true; };
-  }, [symbol, selectedExpiry, optChainPreset]);
+  }, [symbol, selectedExpiry, expiryMode, optChainPreset]);
 
   // Live price — polls Alpaca's latest trade. Fast during market hours for a
   // genuinely "live" feel, much slower off-hours since the price can't move.
@@ -677,32 +786,96 @@ export default function StockPage() {
           </div>
 
           {/* Expiry Selector — drives both the price level lines and the scan alert markers on the chart */}
-          {!isLoading && expiryDates.length > 0 && (
+          {!isLoading && (expiryDates.length > 0 || historicalExpiryDates.length > 0) && (
             <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
               <div className="flex flex-wrap items-center gap-1.5">
                 <span className="text-xs font-semibold text-gray-500 mr-1">Expiry Date:</span>
-                {expiryDates.map((date) => {
-                  const isActive = date === selectedExpiry;
-                  const alertCount = scanAlerts.filter(a => a.expiryDate === date).length;
-                  return (
+
+                {historicalExpiryDates.length > 0 && (
+                  <div className="flex gap-0.5 bg-gray-100 p-0.5 rounded-full mr-1.5">
                     <button
-                      key={date}
-                      onClick={() => setSelectedExpiry(date)}
-                      className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
-                        isActive
-                          ? 'border-blue-600 bg-blue-600 text-white'
-                          : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                      onClick={() => handleExpiryModeChange('current')}
+                      className={`px-2.5 py-1 rounded-full text-xs font-semibold transition-colors ${
+                        expiryMode === 'current' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500'
                       }`}
                     >
-                      {date}
-                      {alertCount > 0 && (
-                        <span className={`ml-1.5 ${isActive ? 'opacity-90' : 'text-purple-600'}`}>
-                          🔔{alertCount}
-                        </span>
-                      )}
+                      Current
                     </button>
-                  );
-                })}
+                    <button
+                      onClick={() => handleExpiryModeChange('historical')}
+                      className={`px-2.5 py-1 rounded-full text-xs font-semibold transition-colors ${
+                        expiryMode === 'historical' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500'
+                      }`}
+                    >
+                      Historical
+                    </button>
+                  </div>
+                )}
+
+                {expiryMode === 'current' ? (
+                  expiryDates.map((date) => {
+                    const isActive = date === selectedExpiry;
+                    const alertCount = scanAlerts.filter(a => a.expiryDate === date).length;
+                    return (
+                      <button
+                        key={date}
+                        onClick={() => setSelectedExpiry(date)}
+                        className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
+                          isActive
+                            ? 'border-blue-600 bg-blue-600 text-white'
+                            : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                        }`}
+                      >
+                        {date}
+                        {alertCount > 0 && (
+                          <span className={`ml-1.5 ${isActive ? 'opacity-90' : 'text-purple-600'}`}>
+                            🔔{alertCount}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })
+                ) : historicalExpiryDates.length === 0 ? (
+                  <span className="text-xs text-gray-400">No historical expiries found for this symbol.</span>
+                ) : (
+                  groupExpiriesByYear(historicalExpiryDates).map(({ year, dates }) => {
+                    const isExpanded = expandedYears.has(year);
+                    return (
+                      <div key={year} className="flex flex-wrap items-center gap-1.5">
+                        <button
+                          onClick={() => toggleExpiryYear(year)}
+                          className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+                        >
+                          <span className={`inline-block transition-transform text-gray-400 ${isExpanded ? 'rotate-90' : ''}`}>▶</span>
+                          {year}
+                          <span className="text-gray-400 font-normal">({dates.length})</span>
+                        </button>
+                        {isExpanded && dates.map((date) => {
+                          const isActive = date === selectedExpiry;
+                          const alertCount = scanAlerts.filter(a => a.expiryDate === date).length;
+                          return (
+                            <button
+                              key={date}
+                              onClick={() => setSelectedExpiry(date)}
+                              className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
+                                isActive
+                                  ? 'border-blue-600 bg-blue-600 text-white'
+                                  : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                              }`}
+                            >
+                              {date}
+                              {alertCount > 0 && (
+                                <span className={`ml-1.5 ${isActive ? 'opacity-90' : 'text-purple-600'}`}>
+                                  🔔{alertCount}
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    );
+                  })
+                )}
               </div>
 
               {/* Quick jump to the two data-heavy sections below the chart. */}
@@ -736,7 +909,7 @@ export default function StockPage() {
               scanAlerts={scanAlerts}
               selectedExpiry={selectedExpiry}
               isIntraday={isIntradayInterval(chartInterval)}
-              livePrice={livePrice}
+              livePrice={expiryMode === 'current' ? livePrice : undefined}
               currentPrice={stockData?.close}
               headerExtra={intervalSelector}
               height={600}

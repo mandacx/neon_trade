@@ -15,7 +15,8 @@ export async function GET(
       );
     }
 
-    const expiryDates = await getExpiryDates(symbol);
+    const historical = request.nextUrl.searchParams.get('historical') === 'true';
+    const expiryDates = await getExpiryDates(symbol, { historical });
 
     return NextResponse.json({
       success: true,

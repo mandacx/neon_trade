@@ -383,18 +383,30 @@ export async function getAllStocksByDateAndExpiry(tradeDate: string, expiryDate:
 }
 
 /**
- * Get available expiry dates for a symbol
+ * Get available expiry dates for a symbol. By default only unexpired
+ * expiries (ascending). `historical: true` flips to already-expired
+ * expiries, most recent first — the order the stock page's historical
+ * expiry picker defaults its selection from.
  */
-export async function getExpiryDates(symbol: string): Promise<string[]> {
+export async function getExpiryDates(symbol: string, opts?: { historical?: boolean }): Promise<string[]> {
   try {
-    const result = await sql`
-      SELECT DISTINCT expiry_dt::text
-      FROM public.eod_usmkts_price
-      WHERE symbol = ${symbol.toUpperCase()}
-        AND expiry_dt IS NOT NULL
-        AND expiry_dt >= CURRENT_DATE
-      ORDER BY expiry_dt ASC
-    `;
+    const result = opts?.historical
+      ? await sql`
+        SELECT DISTINCT expiry_dt::text
+        FROM public.eod_usmkts_price
+        WHERE symbol = ${symbol.toUpperCase()}
+          AND expiry_dt IS NOT NULL
+          AND expiry_dt < CURRENT_DATE
+        ORDER BY expiry_dt DESC
+      `
+      : await sql`
+        SELECT DISTINCT expiry_dt::text
+        FROM public.eod_usmkts_price
+        WHERE symbol = ${symbol.toUpperCase()}
+          AND expiry_dt IS NOT NULL
+          AND expiry_dt >= CURRENT_DATE
+        ORDER BY expiry_dt ASC
+      `;
 
     return result.map((row: any) => row.expiry_dt);
   } catch (error) {
