@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useRef } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useRef, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Header from '@/components/layout/Header';
 import { authClient } from '@/lib/auth/client';
 
@@ -10,8 +10,18 @@ type Mode = 'login' | 'register' | 'otp';
 const inputClass = "w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white";
 const labelClass = "block text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1";
 
-export default function LoginPage() {
+// Only ever honor a same-origin relative path here — an open `redirect`
+// param would otherwise let a crafted /login?redirect=https://evil.com URL
+// send a freshly-authenticated user off-site.
+function safeRedirectTarget(raw: string | null): string {
+  if (!raw || !raw.startsWith('/') || raw.startsWith('//')) return '/';
+  return raw;
+}
+
+function LoginPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const redirectTarget = safeRedirectTarget(searchParams.get('redirect'));
   const [mode, setMode] = useState<Mode>('login');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -30,7 +40,7 @@ export default function LoginPage() {
     // Single-session enforcement: the just-created session is the only one
     // that stays valid going forward.
     await authClient.revokeOtherSessions();
-    router.push('/');
+    router.push(redirectTarget);
     router.refresh();
   }
 
@@ -50,7 +60,8 @@ export default function LoginPage() {
   // email/password flow above.
   async function handleGoogleSignIn() {
     setError(null);
-    const { error: err } = await authClient.signIn.social({ provider: 'google', callbackURL: '/auth/social-callback' });
+    const callbackURL = `/auth/social-callback?redirect=${encodeURIComponent(redirectTarget)}`;
+    const { error: err } = await authClient.signIn.social({ provider: 'google', callbackURL });
     if (err) setError(err.message ?? 'Could not start Google sign-in.');
   }
 
@@ -222,5 +233,13 @@ export default function LoginPage() {
         </div>
       </div>
     </>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginPageInner />
+    </Suspense>
   );
 }
