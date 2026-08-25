@@ -296,9 +296,7 @@ export default function TVChart({
 
         const timeScale = chartRef.current.timeScale();
         const logicalRange = timeScale.getVisibleLogicalRange();
-
-        // logicalRange.from < 0 means user scrolled left past the first bar (bar index negative)
-        if (!logicalRange || logicalRange.from >= 0) return;
+        if (!logicalRange) return;
 
         const seriesData = candleSeriesRef.current.data();
         if (!seriesData || seriesData.length === 0) return;
@@ -306,8 +304,17 @@ export default function TVChart({
         const firstDataTime = seriesData[0].time as number;
         const lastDataTime = seriesData[seriesData.length - 1].time as number;
 
+        // logicalRange.from < 0 means the user scrolled left past the first
+        // loaded bar (bar index negative); logicalRange.to beyond the last
+        // bar's index means they scrolled right past the last loaded bar —
+        // both trigger loading further data in that direction.
+        let direction: 'past' | 'future' | null = null;
+        if (logicalRange.from < 0) direction = 'past';
+        else if (logicalRange.to > seriesData.length - 1) direction = 'future';
+        if (!direction) return;
+
         loadingMoreRef.current = true;
-        onLoadMore('past', String(firstDataTime), String(lastDataTime));
+        onLoadMore(direction, String(firstDataTime), String(lastDataTime));
         setTimeout(() => {
           loadingMoreRef.current = false;
         }, 3000);
