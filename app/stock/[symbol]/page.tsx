@@ -12,7 +12,7 @@ import OptionContractModal from '@/components/stock/OptionContractModal';
 import { LevelCalculation, ScanAlert } from '@/types/stock';
 import { getLevelColor, getLevelDisplayName, formatCurrency, formatPercentage, isUsMarketHours } from '@/lib/utils';
 import { isIntradayInterval } from '@/lib/alpaca';
-import { format, subDays, addDays } from 'date-fns';
+import { format, subDays } from 'date-fns';
 
 type SelectableInterval = '1min' | '5min' | '15min' | '30min' | '1hour' | 'daily';
 
@@ -58,6 +58,28 @@ const OPT_CHAIN_PRESET_LABELS: Record<OptChainPreset, string> = { '10d': '10D', 
 const OPT_CHAIN_ALL_FROM = '2000-01-01';
 
 type ExpiryMode = 'current' | 'historical';
+
+// Shifts a 'YYYY-MM-DD' date-only string by `days` calendar days, entirely
+// in UTC. `new Date('YYYY-MM-DD')` parses as UTC midnight, but date-fns'
+// format() reads back in the LOCAL timezone — mixing the two silently
+// shifts the result by a day whenever local time trails UTC (any
+// negative-offset timezone). Doing the arithmetic in UTC throughout avoids
+// ever crossing that boundary.
+function shiftDateString(dateStr: string, days: number): string {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+// TVChart's onLoadMore reports its bars' `firstVisibleTime`/`lastVisibleTime`
+// as epoch-second strings (chart time values), used only as a fallback for
+// when `ohlcData` is momentarily empty — the common case is a real
+// 'YYYY-MM-DD' string from an actual loaded bar.
+function dateStringFrom(dateOnly: string | undefined, epochSecondsStr: string): string {
+  if (dateOnly) return dateOnly;
+  const epoch = Number(epochSecondsStr);
+  return Number.isFinite(epoch) ? format(new Date(epoch * 1000), 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd');
+}
 
 // Buckets already-most-recent-first-sorted expiry dates by year, preserving
 // that order — most recent year first, most recent date first within a year.
@@ -320,6 +342,14 @@ export default function StockPage() {
   useEffect(() => {
     if (!symbol || !selectedExpiry || isInitialLoad || ohlcData.length === 0) return;
 
+    // `ohlcData` and `selectedExpiry` don't always land in the same render —
+    // switching expiries can fire this effect once with the OLD ohlcData
+    // (mismatched date range for the new expiry) before the new ohlcData
+    // arrives and fires it again correctly. Without this guard, whichever
+    // response resolves LAST wins, which isn't always the correct one —
+    // the stale request can overwrite good data if it's slower.
+    let cancelled = false;
+
     const fetchHistoricalLevels = async () => {
       try {
         const dates = ohlcData.map(d => d.date).sort();
@@ -327,9 +357,11 @@ export default function StockPage() {
         const to = dates[dates.length - 1];
 
         const response = await fetch(`/api/stocks/${symbol}/levels?expiry=${selectedExpiry}&range=true&from=${from}&to=${to}`);
+        if (cancelled) return;
 
         if (response.ok) {
           const levelsData = await response.json();
+          if (cancelled) return;
 
           if (levelsData.success && levelsData.data && levelsData.data.history) {
             const levelsMap = new Map();
@@ -381,6 +413,7 @@ export default function StockPage() {
     };
 
     fetchHistoricalLevels();
+    return () => { cancelled = true; };
   }, [selectedExpiry, symbol, isInitialLoad, ohlcData]);
 
   // Jump the chart's loaded OHLC window to surround the selected expiry when
@@ -407,9 +440,9 @@ export default function StockPage() {
         // the option contract expires) capped at today, so the window never
         // reaches into dates with no data at all.
         const todayStr = format(new Date(), 'yyyy-MM-dd');
-        const paddedTo = format(addDays(new Date(selectedExpiry), 5), 'yyyy-MM-dd');
+        const paddedTo = shiftDateString(selectedExpiry, 5);
         to = paddedTo < todayStr ? paddedTo : todayStr;
-        from = format(subDays(new Date(selectedExpiry), initialDays), 'yyyy-MM-dd');
+        from = shiftDateString(selectedExpiry, -initialDays);
       } else {
         // Returning to 'current' — restore the same default window the
         // mount effect computes.
@@ -459,7 +492,7 @@ export default function StockPage() {
       // leading up to expiry, not the N days up to today — today's data has
       // nothing to do with a contract that already expired.
       to = expiryMode === 'historical' ? selectedExpiry : format(new Date(), 'yyyy-MM-dd');
-      from = format(subDays(new Date(to), RANGE_PRESET_DAYS[priceHistoryPreset]), 'yyyy-MM-dd');
+      from = shiftDateString(to, -RANGE_PRESET_DAYS[priceHistoryPreset]);
     }
 
     let cancelled = false;
@@ -496,7 +529,7 @@ export default function StockPage() {
 
     // Same expiry-anchoring as the Price Levels History effect above.
     const to = expiryMode === 'historical' ? selectedExpiry : format(new Date(), 'yyyy-MM-dd');
-    const from = optChainPreset === 'all' ? OPT_CHAIN_ALL_FROM : format(subDays(new Date(to), OPT_CHAIN_PRESET_DAYS[optChainPreset]), 'yyyy-MM-dd');
+    const from = optChainPreset === 'all' ? OPT_CHAIN_ALL_FROM : shiftDateString(to, -OPT_CHAIN_PRESET_DAYS[optChainPreset]);
 
     let cancelled = false;
     setOptChainLoading(true);
@@ -559,12 +592,12 @@ export default function StockPage() {
 
       const currentOhlcData = ohlcDataRef.current;
       if (direction === 'past') {
-        const earliestDate = new Date(currentOhlcData[0]?.date || firstVisibleTime);
-        to = format(subDays(earliestDate, 1), 'yyyy-MM-dd');
-        from = format(subDays(earliestDate, chunkDays), 'yyyy-MM-dd');
+        const earliestDateStr = dateStringFrom(currentOhlcData[0]?.date, firstVisibleTime);
+        to = shiftDateString(earliestDateStr, -1);
+        from = shiftDateString(earliestDateStr, -chunkDays);
       } else {
-        const latestDate = new Date(currentOhlcData[currentOhlcData.length - 1]?.date || lastVisibleTime);
-        from = format(new Date(latestDate.getTime() + 86400000), 'yyyy-MM-dd');
+        const latestDateStr = dateStringFrom(currentOhlcData[currentOhlcData.length - 1]?.date, lastVisibleTime);
+        from = shiftDateString(latestDateStr, 1);
         to = format(new Date(), 'yyyy-MM-dd');
       }
 

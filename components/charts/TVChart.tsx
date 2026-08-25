@@ -579,8 +579,18 @@ export default function TVChart({
     candleSeriesRef.current.applyOptions({ visible: showPrice });
     volumeSeriesRef.current.applyOptions({ visible: showPrice });
 
-    // Only fit content on initial load, not when loading more data
-    if (!isLoadingMore && chartRef.current) {
+    // Only fit content on initial load, not when loading more data. The
+    // `isLoadingMore` PROP is unreliable for this: the parent's
+    // setOhlcData(...) and setIsLoadingMore(false) both happen in the same
+    // async continuation, so React batches them into one render — by the
+    // time this effect runs, the prop already reads `false` even for a
+    // just-appended load-more update, defeating this guard entirely (it
+    // was refitting/snapping the viewport on every load-more, silently,
+    // since the day this guard was written). `loadingMoreRef` is a ref set
+    // synchronously the moment a load-more is triggered (see
+    // handleVisibleTimeRangeChange below) and isn't subject to that batching
+    // race, so check it too.
+    if (!isLoadingMore && !loadingMoreRef.current && chartRef.current) {
       chartRef.current.timeScale().fitContent();
     }
   }, [processedBars, volumeByTime, isLoading, isLoadingMore, showPrice]);
