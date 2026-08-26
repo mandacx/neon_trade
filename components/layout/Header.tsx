@@ -7,6 +7,30 @@ import { useEffect, useRef, useState } from 'react';
 import StockSearch from '@/components/ui/StockSearch';
 import { useAuthContext } from '@/components/providers/AuthContextProvider';
 import SignOutButton from '@/components/auth/SignOutButton';
+import {
+  hasFeature, FEATURE_QUADRANT, FEATURE_SCAN_ALERTS_LATEST, FEATURE_SCAN_ALERTS_HISTORY,
+  FEATURE_WATCHLISTS, FEATURE_PERFORMANCE,
+} from '@/lib/features';
+
+// Small "needs upgrade" flag for nav entries — shown before a click, not just
+// after a redirect to /upgrade, so Free users know upfront what's gated.
+function ProBadge() {
+  return (
+    <span className="text-[9px] font-bold uppercase tracking-wide px-1 py-0.5 rounded bg-white/25 leading-none">
+      PRO
+    </span>
+  );
+}
+
+// Same signal, styled for the mobile dropdown's light-background buttons
+// (ProBadge's white/25 tint needs a solid colored button to read against).
+function MobileProBadge() {
+  return (
+    <span className="ml-1.5 text-[9px] font-bold uppercase tracking-wide px-1 py-0.5 rounded bg-amber-100 text-amber-700 leading-none">
+      PRO
+    </span>
+  );
+}
 
 export default function Header() {
   const pathname = usePathname();
@@ -19,6 +43,11 @@ export default function Header() {
 
   const isActive = (path: string) => pathname === path;
   const isScanAlertsPath = pathname?.startsWith('/scan-alerts');
+
+  const needsQuadrant = !hasFeature(authCtx.features, FEATURE_QUADRANT);
+  const needsScanAlerts = !hasFeature(authCtx.features, FEATURE_SCAN_ALERTS_LATEST) || !hasFeature(authCtx.features, FEATURE_SCAN_ALERTS_HISTORY);
+  const needsWatchlists = !hasFeature(authCtx.features, FEATURE_WATCHLISTS);
+  const needsPerformance = !hasFeature(authCtx.features, FEATURE_PERFORMANCE);
 
   useEffect(() => {
     function onClickOutside(e: MouseEvent) {
@@ -59,6 +88,7 @@ export default function Header() {
               }`}
             >
               📊 Quadrant Analysis
+              {needsQuadrant && <ProBadge />}
             </button>
             <div className="relative" ref={scanMenuRef}>
               <button
@@ -68,6 +98,7 @@ export default function Header() {
                 }`}
               >
                 🔔 Scan Alerts
+                {needsScanAlerts && <ProBadge />}
                 <svg className={`w-3 h-3 transition-transform ${scanMenuOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                 </svg>
@@ -108,6 +139,7 @@ export default function Header() {
               }`}
             >
               ⭐ Watchlists
+              {needsWatchlists && <ProBadge />}
             </button>
             <button
               onClick={() => router.push('/performance')}
@@ -116,6 +148,7 @@ export default function Header() {
               }`}
             >
               🏆 Performance
+              {needsPerformance && <ProBadge />}
             </button>
             <button
               onClick={() => router.push('/guide')}
@@ -192,18 +225,21 @@ export default function Header() {
             className="w-full text-left px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50 rounded-lg"
           >
             📊 Quadrant Analysis
+            {needsQuadrant && <MobileProBadge />}
           </button>
           <button
             onClick={() => router.push('/scan-alerts/latest')}
             className="w-full text-left px-3 py-2 text-sm font-semibold text-purple-700 hover:bg-purple-50 rounded-lg"
           >
             🆕 Scan Alerts — Latest
+            {needsScanAlerts && <MobileProBadge />}
           </button>
           <button
             onClick={() => router.push('/scan-alerts/historical')}
             className="w-full text-left px-3 py-2 text-sm font-semibold text-purple-700 hover:bg-purple-50 rounded-lg"
           >
             🕓 Scan Alerts — Historical
+            {needsScanAlerts && <MobileProBadge />}
           </button>
           <button
             onClick={() => router.push('/stock/SPY')}
@@ -216,12 +252,14 @@ export default function Header() {
             className="w-full text-left px-3 py-2 text-sm font-semibold text-amber-700 hover:bg-amber-50 rounded-lg"
           >
             ⭐ Watchlists
+            {needsWatchlists && <MobileProBadge />}
           </button>
           <button
             onClick={() => router.push('/performance')}
             className="w-full text-left px-3 py-2 text-sm font-semibold text-teal-700 hover:bg-teal-50 rounded-lg"
           >
             🏆 Performance
+            {needsPerformance && <MobileProBadge />}
           </button>
           <button
             onClick={() => router.push('/guide')}

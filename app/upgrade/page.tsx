@@ -1,4 +1,6 @@
+import Link from 'next/link';
 import Header from '@/components/layout/Header';
+import TrialStartButton from '@/components/upgrade/TrialStartButton';
 import { sql } from '@/lib/db';
 import { getCurrentUserContext } from '@/lib/appUsers';
 import { ALL_FEATURES } from '@/lib/features';
@@ -26,17 +28,42 @@ export default async function UpgradePage({ searchParams }: { searchParams: Prom
         <div className="container mx-auto px-4 py-10">
           <div className="text-center mb-8">
             <h1 className="text-xl font-bold text-gray-900">Plans</h1>
-            {featureLabel ? (
+            {featureLabel && (
               <p className="text-sm text-gray-500 mt-1">
                 <span className="font-semibold text-gray-700">{featureLabel}</span> isn&apos;t included in your current plan.
               </p>
-            ) : (
-              <p className="text-sm text-gray-500 mt-1">Plan assignment is manual for now — reach out and we&apos;ll switch you over.</p>
             )}
             <p className="text-xs text-gray-400 mt-2 max-w-xl mx-auto">
-              Charts, candles and live quotes are free on every plan — Pro unlocks <strong>live price levels</strong>,
-              scan alerts, quadrant screening, watchlists and performance tracking. On Free, levels run {LEVEL_DELAY_DAYS} days behind.
+              Charts, candles and live quotes are <strong>free on every plan</strong> — Pro additionally unlocks
+              live price levels, scan alerts, quadrant screening, watchlists and performance tracking.
+              On Free, levels run {LEVEL_DELAY_DAYS} days behind instead of live.
             </p>
+          </div>
+
+          <div className="max-w-2xl mx-auto mb-6">
+            {ctx.isTrialing ? (
+              <div className="text-center bg-green-50 border border-green-200 rounded-xl px-5 py-3">
+                <p className="text-sm font-semibold text-green-800">
+                  🎉 You&apos;re on a free trial — Pro access until{' '}
+                  {ctx.planExpiresAt ? new Date(ctx.planExpiresAt).toLocaleDateString() : 'soon'}.
+                </p>
+              </div>
+            ) : !ctx.loggedIn ? (
+              <div className="text-center bg-white border border-gray-200 rounded-xl px-5 py-4">
+                <p className="text-sm text-gray-600 mb-2">Log in to start a free 1-month Pro trial — no card required.</p>
+                <Link href="/login?redirect=%2Fupgrade" className="inline-block px-4 py-1.5 rounded-lg bg-gray-900 hover:bg-gray-800 text-white text-xs font-semibold">
+                  Log in
+                </Link>
+              </div>
+            ) : ctx.planCode === 'FREE' && !ctx.hasUsedTrial ? (
+              <div className="bg-white border border-gray-200 rounded-xl px-5 py-4">
+                <TrialStartButton />
+              </div>
+            ) : ctx.planCode === 'FREE' && ctx.hasUsedTrial ? (
+              <p className="text-center text-xs text-gray-400">
+                Your free trial has ended. Reach out below to upgrade — plan assignment is manual for now.
+              </p>
+            ) : null}
           </div>
 
           <div className="grid sm:grid-cols-2 gap-4 max-w-2xl mx-auto">

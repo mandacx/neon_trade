@@ -78,6 +78,14 @@ async function main() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
   `;
+  // Added after the table already existed in production — CREATE TABLE IF
+  // NOT EXISTS above won't retroactively add this, hence the explicit ALTER.
+  // Set once, the first (and only) time a user self-serves the free trial
+  // (lib/trial.ts) — never cleared, so it doubles as the "already used
+  // their trial" flag regardless of whether that trial has since expired.
+  await sql`
+    ALTER TABLE public.nt_app_user_profiles ADD COLUMN IF NOT EXISTS trial_started_at TIMESTAMPTZ
+  `;
   // Admin status is NOT tracked here — Neon Auth's own neon_auth.user.role
   // ('user' | 'admin') is the single source of truth.
   await sql`

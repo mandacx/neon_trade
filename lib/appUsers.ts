@@ -11,6 +11,10 @@ export interface CurrentUserContext {
   planCode: string;
   features: string[];
   planExpiresAt: string | null;
+  /** True once this user has ever started the self-serve trial (lib/trial.ts) — never clears, even after it expires. */
+  hasUsedTrial: boolean;
+  /** True while a self-serve trial is the reason they're currently on Pro (as opposed to a paid/admin-granted Pro period). */
+  isTrialing: boolean;
   telegramLinked: boolean;
   /** True if this user has a credential (email+password) account linked — false for Google-only signups, who have nothing to change a password on. */
   hasPassword: boolean;
@@ -88,15 +92,16 @@ export async function getCurrentUserContext(): Promise<CurrentUserContext> {
     const { planCode, features } = await freePlanContext();
     return {
       loggedIn: false, userId: null, email: null, name: null, emailVerified: false, isAdmin: false,
-      planCode, features, planExpiresAt: null, telegramLinked: false, hasPassword: false,
+      planCode, features, planExpiresAt: null, hasUsedTrial: false, isTrialing: false,
+      telegramLinked: false, hasPassword: false,
     };
   }
 
   const { user } = data;
 
-  type ProfileRow = { plan_expires_at: string | null; telegram_chat_id: string | null; plan_code: string; features: string[] };
+  type ProfileRow = { plan_expires_at: string | null; trial_started_at: string | null; telegram_chat_id: string | null; plan_code: string; features: string[] };
   const selectProfile = () => sql`
-    SELECT u.plan_expires_at, u.telegram_chat_id, p.code AS plan_code, p.features
+    SELECT u.plan_expires_at, u.trial_started_at, u.telegram_chat_id, p.code AS plan_code, p.features
     FROM public.nt_app_user_profiles u
     JOIN public.nt_plans p ON p.id = u.plan_id
     WHERE u.user_id = ${user.id}
@@ -125,6 +130,8 @@ export async function getCurrentUserContext(): Promise<CurrentUserContext> {
   const { planCode, features: planFeatures } = expired ? await freePlanContext() : { planCode: profile?.plan_code ?? FALLBACK_PLAN_CODE, features: profile?.features ?? [] };
   const features = applyOverrides(planFeatures, overrideRows as Array<{ feature: string; granted: boolean }>);
   const isAdmin = (roleRows[0] as { role: string | null } | undefined)?.role === 'admin';
+  const hasUsedTrial = !!profile?.trial_started_at;
+  const isTrialing = hasUsedTrial && planCode === 'PRO' && !expired;
 
   return {
     loggedIn: true,
@@ -136,6 +143,8 @@ export async function getCurrentUserContext(): Promise<CurrentUserContext> {
     planCode,
     features,
     planExpiresAt: profile?.plan_expires_at ?? null,
+    hasUsedTrial,
+    isTrialing,
     telegramLinked: !!profile?.telegram_chat_id,
     hasPassword,
   };
