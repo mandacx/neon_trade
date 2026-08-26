@@ -821,23 +821,23 @@ export default function StockPage() {
           {/* Expiry Selector — drives both the price level lines and the scan alert markers on the chart */}
           {!isLoading && (expiryDates.length > 0 || historicalExpiryDates.length > 0) && (
             <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="text-xs font-semibold text-gray-500 mr-1">Expiry Date:</span>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm font-bold text-gray-800 mr-1">Expiry Date:</span>
 
                 {historicalExpiryDates.length > 0 && (
-                  <div className="flex gap-0.5 bg-gray-100 p-0.5 rounded-full mr-1.5">
+                  <div className="flex gap-1 bg-gray-100 p-1 rounded-full mr-1.5">
                     <button
                       onClick={() => handleExpiryModeChange('current')}
-                      className={`px-2.5 py-1 rounded-full text-xs font-semibold transition-colors ${
-                        expiryMode === 'current' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500'
+                      className={`px-3.5 py-1.5 rounded-full text-sm font-bold transition-colors ${
+                        expiryMode === 'current' ? 'bg-blue-600 text-white shadow-sm' : 'text-blue-700 hover:bg-blue-50'
                       }`}
                     >
                       Current
                     </button>
                     <button
                       onClick={() => handleExpiryModeChange('historical')}
-                      className={`px-2.5 py-1 rounded-full text-xs font-semibold transition-colors ${
-                        expiryMode === 'historical' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500'
+                      className={`px-3.5 py-1.5 rounded-full text-sm font-bold transition-colors ${
+                        expiryMode === 'historical' ? 'bg-amber-600 text-white shadow-sm' : 'text-amber-700 hover:bg-amber-50'
                       }`}
                     >
                       Historical
@@ -912,16 +912,16 @@ export default function StockPage() {
               </div>
 
               {/* Quick jump to the two data-heavy sections below the chart. */}
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2.5">
                 <button
                   onClick={() => jumpToSection(priceLevelsSectionRef, () => setPriceHistoryCollapsed(false))}
-                  className="px-3 py-1.5 rounded-full text-xs font-medium border border-gray-200 bg-white text-gray-600 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700 transition-colors"
+                  className="px-4 py-2 rounded-full text-sm font-bold border-2 border-green-600 bg-green-50 text-green-700 hover:bg-green-600 hover:text-white transition-colors"
                 >
                   📊 Price Levels
                 </button>
                 <button
                   onClick={() => jumpToSection(optChainSectionRef, () => setOptChainCollapsed(false))}
-                  className="px-3 py-1.5 rounded-full text-xs font-medium border border-gray-200 bg-white text-gray-600 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700 transition-colors"
+                  className="px-4 py-2 rounded-full text-sm font-bold border-2 border-orange-600 bg-orange-50 text-orange-700 hover:bg-orange-600 hover:text-white transition-colors"
                 >
                   📈 Open Interest
                 </button>
