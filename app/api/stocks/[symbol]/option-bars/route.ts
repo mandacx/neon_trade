@@ -30,14 +30,22 @@ export async function GET(
       return NextResponse.json({ success: false, error: 'strike must be numeric' }, { status: 400 });
     }
 
+    // "Today"/"yesterday" must be the US Eastern trading day, not the server's
+    // (UTC on Vercel) local date — otherwise for a few hours every evening
+    // (UTC midnight until the next Eastern midnight) the server's "yesterday"
+    // is still today's Eastern trading session, the cap below fails to
+    // exclude it, and Alpaca 403s with "subscription does not permit
+    // querying recent OPRA data".
+    const todayET = usTradingDayKey(Math.floor(Date.now() / 1000));
+    const yesterdayET = format(subDays(new Date(`${todayET}T12:00:00Z`), 1), 'yyyy-MM-dd');
+
     const interval = (searchParams.get('interval') || 'daily') as ChartInterval;
-    const to = searchParams.get('to') || format(new Date(), 'yyyy-MM-dd');
+    const to = searchParams.get('to') || todayET;
     const from = searchParams.get('from') || format(subDays(new Date(), 90), 'yyyy-MM-dd');
 
     // The current trading day always 403s regardless of range requested —
     // cap `to` at yesterday rather than surfacing that as an error.
-    const yesterday = format(subDays(new Date(), 1), 'yyyy-MM-dd');
-    const effectiveTo = to < yesterday ? to : yesterday;
+    const effectiveTo = to < yesterdayET ? to : yesterdayET;
 
     const occSymbol = buildOccOptionSymbol(symbol, expiry, optType, strike);
     const timeframe = convertIntervalToTimeframe(interval);
@@ -63,14 +71,13 @@ export async function GET(
     // endpoint, the only current-day data this Alpaca plan permits) for
     // daily and intraday views — weekly/monthly stay historical-only since a
     // single day's bar isn't the right shape for a partial week/month candle.
-    const today = format(new Date(), 'yyyy-MM-dd');
-    if ((interval === 'daily' || isIntradayInterval(interval)) && to >= today) {
+    if ((interval === 'daily' || isIntradayInterval(interval)) && to >= todayET) {
       const todayBar = await getOptionTodaySnapshotBar(symbol, expiry, strike, occSymbol);
       const timestamp = todayBar ? Math.floor(new Date(todayBar.t).getTime() / 1000) : 0;
       // Snapshot's dailyBar can be stale (e.g. Friday's bar showing on a
       // weekend view) — only append if it's genuinely today's bar, so we
       // never duplicate a day already covered by barsData above.
-      if (todayBar && usTradingDayKey(timestamp) === today) {
+      if (todayBar && usTradingDayKey(timestamp) === todayET) {
         barsData.push({
           date: usTradingDayKey(timestamp),
           timestamp,
