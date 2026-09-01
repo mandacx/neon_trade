@@ -100,7 +100,18 @@ export default function TVChart({
   const [showPrice, setShowPrice] = useState(true);
   const [showOI, setShowOI] = useState(true);
   const [activeLevelFilter, setActiveLevelFilter] = useState<string | null>(null);
+  const [isEnlarged, setIsEnlarged] = useState(false);
   const loadingMoreRef = useRef(false);
+
+  // Esc closes the enlarged view, same as the app's Modal component.
+  useEffect(() => {
+    if (!isEnlarged) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') setIsEnlarged(false);
+    }
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [isEnlarged]);
 
   // Scan alert markers/tooltip are scoped to whichever expiry is selected for the
   // price levels — one control drives both, so they always describe the same contract.
@@ -530,19 +541,24 @@ export default function TVChart({
 
     chart.subscribeCrosshairMove(handleCrosshairMove);
 
-    // Handle resize
-    const handleResize = () => {
-      if (chartContainerRef.current) {
-        chart.applyOptions({
-          width: chartContainerRef.current.clientWidth,
-        });
+    // Track the container's actual rendered size rather than just the
+    // window's — a ResizeObserver (unlike a window 'resize' listener) also
+    // fires when the container itself changes size without the window
+    // resizing, e.g. a sidebar collapsing/expanding next to the chart, or
+    // the enlarge toggle switching this container between a fixed pixel
+    // height and a flex-filled fullscreen one.
+    const resizeObserver = new ResizeObserver(entries => {
+      const entry = entries[0];
+      if (!entry) return;
+      const { width, height: observedHeight } = entry.contentRect;
+      if (width > 0 && observedHeight > 0) {
+        chart.applyOptions({ width, height: Math.round(observedHeight) });
       }
-    };
-
-    window.addEventListener('resize', handleResize);
+    });
+    resizeObserver.observe(chartContainerRef.current);
 
     return () => {
-      window.removeEventListener('resize', handleResize);
+      resizeObserver.disconnect();
       if (visibleRangeUnsubscribe) {
         visibleRangeUnsubscribe();
       }
@@ -882,7 +898,14 @@ export default function TVChart({
   const displayPrice = livePrice ?? currentPrice;
 
   return (
-    <div className="w-full">
+    <div
+      className={isEnlarged ? 'fixed inset-0 z-[100] bg-black/60 flex p-4' : 'w-full'}
+      onClick={isEnlarged ? () => setIsEnlarged(false) : undefined}
+    >
+    <div
+      className={isEnlarged ? 'w-full bg-white rounded-lg shadow-xl p-4 flex flex-col overflow-hidden' : 'w-full'}
+      onClick={isEnlarged ? e => e.stopPropagation() : undefined}
+    >
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div>
@@ -953,13 +976,22 @@ export default function TVChart({
               </button>
             ))}
           </div>
+
+          <button
+            onClick={() => setIsEnlarged(v => !v)}
+            title={isEnlarged ? 'Shrink chart' : 'Enlarge chart'}
+            aria-label={isEnlarged ? 'Shrink chart' : 'Enlarge chart'}
+            className="flex items-center justify-center w-8 h-8 rounded text-gray-500 bg-gray-100 hover:bg-gray-200 hover:text-gray-700 transition-colors border-l border-gray-300 ml-1 pl-2"
+          >
+            {isEnlarged ? '⤡' : '⤢'}
+          </button>
         </div>
       </div>
 
       <div
         ref={chartContainerRef}
-        className="relative bg-white rounded-lg border border-gray-200 shadow-sm"
-        style={{ height: `${height}px` }}
+        className={`relative bg-white rounded-lg border border-gray-200 shadow-sm ${isEnlarged ? 'flex-1 min-h-0' : ''}`}
+        style={isEnlarged ? undefined : { height: `${height}px` }}
       >
         {/* OHLC Display - Top Left */}
         <div
@@ -1026,6 +1058,7 @@ export default function TVChart({
           )}
         </div>
       )}
+    </div>
     </div>
   );
 }
