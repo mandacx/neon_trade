@@ -45,8 +45,13 @@ mkdir -p "$WORKDIR"
 # account/verification, possibly jwks/organization/member if those features
 # are enabled), so we copy whatever actually exists in `neon_auth` on the
 # source rather than guessing and silently missing one.
+#
+# `jwks` is excluded on purpose: its private keys are encrypted with the auth
+# instance's own per-project secret, so copied rows leave the target serving a
+# public key it cannot sign for — every authenticated /get-session then 500s.
+# See the NEVER_COPY comment in copy-auth-data.mjs for the full symptom list.
 list_tables() {
-  psql "$1" -Atc "SELECT table_name FROM information_schema.tables WHERE table_schema = 'neon_auth' ORDER BY table_name;"
+  psql "$1" -Atc "SELECT table_name FROM information_schema.tables WHERE table_schema = 'neon_auth' AND table_name <> 'jwks' ORDER BY table_name;"
 }
 
 cmd_diff_schema() {

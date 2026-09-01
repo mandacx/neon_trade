@@ -19,10 +19,12 @@
 //     id/secret over without touching the Neon console.
 //
 //   node copy-auth-data.mjs identities
-//     Full-row copy of user, organization, jwks, verification, account,
-//     member, invitation (in FK-safe order). Safe to re-run — deletes
-//     existing target rows for each table first. Run this well before
-//     cutover, and again right before if the source changed since.
+//     Full-row copy of user, organization, verification, account, member,
+//     invitation (in FK-safe order). Safe to re-run — deletes existing
+//     target rows for each table first. Run this well before cutover, and
+//     again right before if the source changed since.
+//
+//     NOTE: `jwks` is deliberately NOT copied — see NEVER_COPY below.
 //
 //   node copy-auth-data.mjs sessions
 //     Full-row copy of the `session` table only. Deliberately separate and
@@ -96,9 +98,29 @@ async function copyTable(table) {
   console.log(`  ${table}: copied ${rows.length} row(s)`);
 }
 
+// Tables that must NEVER be copied across projects, even though they live in
+// `neon_auth` alongside the identity data.
+//
+// `jwks` holds the Better Auth signing keypair, and the private half is
+// stored encrypted with the auth instance's own secret — which Neon scopes
+// per project. Copying these rows leaves the TARGET serving the SOURCE's
+// public key (visible at <NEON_AUTH_BASE_URL>/.well-known/jwks.json) while
+// being unable to decrypt the matching private key, so every request that
+// has to sign a JWT fails. In practice that means `/get-session` returns 200
+// + null for a signed-out visitor but 500 for anyone with a real session, and
+// the app-side proxy surfaces it as
+// "[mintSessionDataCookie] Failed to mint session_data cookie".
+//
+// Leaving the table alone lets the target's own Auth instance keep (or
+// lazily generate) a keypair it can actually sign with. Nothing references
+// jwks rows by FK, and the only thing lost is the ability to verify JWTs
+// issued by the old project — which is exactly what we want at cutover.
+const NEVER_COPY = ['jwks'];
+
 async function cmdIdentities() {
   // Parent tables before tables that reference them via FK.
-  const order = ['user', 'organization', 'jwks', 'verification', 'account', 'member', 'invitation'];
+  const order = ['user', 'organization', 'verification', 'account', 'member', 'invitation']
+    .filter(t => !NEVER_COPY.includes(t));
   console.log('Copying identity tables (user, account, etc.) — target rows will be replaced:');
   for (const table of order) {
     await copyTable(table);
