@@ -2,6 +2,18 @@ import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { calculateLevels, findClosestLevel } from '@/lib/calculations';
 
+// Reads eod_usmkts_price_local_snapshot rather than the live
+// public.eod_usmkts_price here specifically because, post DB-project-split,
+// eod_usmkts_price is a postgres_fdw foreign table pointing at the old
+// project until the ingestion pipeline is repointed. The DISTINCT/
+// window-function/GROUP BY queries below don't push down through FDW, so
+// they pull the whole remote table over the (cross-region) wire and blew
+// through Vercel's function timeout. Every other route filters by an exact
+// symbol first, which does push down, so they're unaffected and keep
+// reading the live table. Once the pipeline writes into this project
+// directly, eod_usmkts_price stops being a foreign table and this file
+// should go back to reading it instead of the snapshot.
+
 const INDEX_SYMBOLS = ['SPY', 'QQQ', 'DIA', 'IWM'];
 const ETF_SYMBOLS = [
   'SPY', 'QQQ', 'IWM', 'DIA', 'GLD', 'SLV', 'TLT', 'GDX',
@@ -82,7 +94,7 @@ async function getSecuritiesNames(symbols: string[]): Promise<Record<string, str
 
 async function getTopByOI(etfMode: boolean, limit: number) {
   try {
-    const latestDateRows = await sql`SELECT MAX(trade_date)::text as max_date FROM public.eod_usmkts_price`;
+    const latestDateRows = await sql`SELECT MAX(trade_date)::text as max_date FROM public.eod_usmkts_price_local_snapshot`;
     const latestDate = latestDateRows[0]?.max_date;
     if (!latestDate) return { items: [], asOfDate: null };
 
@@ -96,7 +108,7 @@ async function getTopByOI(etfMode: boolean, limit: number) {
           SELECT *, ROW_NUMBER() OVER (
             PARTITION BY symbol ORDER BY (COALESCE(call_oi,0)+COALESCE(put_oi,0)) DESC
           ) rn
-          FROM public.eod_usmkts_price
+          FROM public.eod_usmkts_price_local_snapshot
           WHERE trade_date = ${latestDate}
             AND symbol = ANY(${ETF_SYMBOLS})
             AND (COALESCE(call_oi,0)+COALESCE(put_oi,0)) > 0
@@ -112,7 +124,7 @@ async function getTopByOI(etfMode: boolean, limit: number) {
           SELECT *, ROW_NUMBER() OVER (
             PARTITION BY symbol ORDER BY (COALESCE(call_oi,0)+COALESCE(put_oi,0)) DESC
           ) rn
-          FROM public.eod_usmkts_price
+          FROM public.eod_usmkts_price_local_snapshot
           WHERE trade_date = ${latestDate}
             AND symbol != ALL(${ETF_SYMBOLS})
             AND (COALESCE(call_oi,0)+COALESCE(put_oi,0)) > 0
@@ -212,7 +224,7 @@ async function getSectorBreakdown() {
   try {
     // Get latest 2 distinct trade dates
     const dateRows = await sql`
-      SELECT DISTINCT trade_date::text as td FROM public.eod_usmkts_price
+      SELECT DISTINCT trade_date::text as td FROM public.eod_usmkts_price_local_snapshot
       ORDER BY td DESC LIMIT 2
     `;
     if (dateRows.length === 0) return [];
@@ -229,7 +241,7 @@ async function getSectorBreakdown() {
         MAX(COALESCE(comb_int, 0)) as put_call_int,
         MAX(COALESCE(call_int, 0)) as call_int,
         MAX(COALESCE(call_high, 0)) as call_high
-      FROM public.eod_usmkts_price
+      FROM public.eod_usmkts_price_local_snapshot
       WHERE trade_date = ${latestDate}
       GROUP BY symbol
     `;
@@ -237,7 +249,7 @@ async function getSectorBreakdown() {
     // Step 2: get prev close for each symbol
     const prevRows = await sql`
       SELECT symbol, MAX(close) as close
-      FROM public.eod_usmkts_price
+      FROM public.eod_usmkts_price_local_snapshot
       WHERE trade_date = ${prevDate}
       GROUP BY symbol
     `;

@@ -161,11 +161,21 @@ export async function getLatestScanTradeDate(): Promise<string | null> {
   }
 }
 
+// The five functions below all read intra_us_scanner_eod_local_snapshot
+// rather than the live intra_us_scanner_eod: post DB-project-split,
+// intra_us_scanner_eod is a postgres_fdw foreign table pointing at the old
+// project until the ingestion pipeline is repointed, and every query here is
+// an unfiltered-or-weakly-filtered DISTINCT/GROUP BY across the whole table
+// — exactly the pattern that doesn't push down through FDW and instead pulls
+// the whole remote table across the wire (see app/api/home/data/route.ts for
+// the full writeup of the same issue against eod_usmkts_price). Functions
+// elsewhere in this file that filter to a specific symbol set stay on the
+// live table since that filter keeps them fast and benefits from freshness.
 export async function getScanTradeDates(limit: number = 30): Promise<string[]> {
   try {
     const rows = await sql`
       SELECT DISTINCT trade_date::text as d
-      FROM public.intra_us_scanner_eod
+      FROM public.intra_us_scanner_eod_local_snapshot
       ORDER BY d DESC
       LIMIT ${limit}
     `;
@@ -180,13 +190,13 @@ export async function getScanExpiryDates(opts: { futureOnly?: boolean } = {}): P
     const rows = opts.futureOnly
       ? await sql`
           SELECT DISTINCT expiry_dt::text as d
-          FROM public.intra_us_scanner_eod
+          FROM public.intra_us_scanner_eod_local_snapshot
           WHERE expiry_dt >= CURRENT_DATE
           ORDER BY d ASC
         `
       : await sql`
           SELECT DISTINCT expiry_dt::text as d
-          FROM public.intra_us_scanner_eod
+          FROM public.intra_us_scanner_eod_local_snapshot
           ORDER BY d ASC
         `;
     return rows.map((r: any) => r.d);
@@ -199,7 +209,7 @@ export async function getScanExpiryDates(opts: { futureOnly?: boolean } = {}): P
 export async function getScanTradeDatesInMonth(yearMonth: string): Promise<string[]> {
   try {
     const rows = (await sql(
-      `SELECT DISTINCT trade_date::text as d FROM public.intra_us_scanner_eod
+      `SELECT DISTINCT trade_date::text as d FROM public.intra_us_scanner_eod_local_snapshot
        WHERE date_trunc('month', trade_date) = $1::date
        ORDER BY d DESC`,
       [`${yearMonth}-01`]
@@ -214,7 +224,7 @@ export async function getScanTradeDatesInMonth(yearMonth: string): Promise<strin
 export async function getScanExpiryDatesInMonth(yearMonth: string): Promise<string[]> {
   try {
     const rows = (await sql(
-      `SELECT DISTINCT expiry_dt::text as d FROM public.intra_us_scanner_eod
+      `SELECT DISTINCT expiry_dt::text as d FROM public.intra_us_scanner_eod_local_snapshot
        WHERE date_trunc('month', trade_date) = $1::date
        ORDER BY d ASC`,
       [`${yearMonth}-01`]
@@ -230,7 +240,7 @@ export async function getScanAlertMonths(): Promise<{ yearMonth: string; count: 
   try {
     const rows = await sql`
       SELECT to_char(trade_date, 'YYYY-MM') as ym, COUNT(*) as c
-      FROM public.intra_us_scanner_eod
+      FROM public.intra_us_scanner_eod_local_snapshot
       GROUP BY ym
       ORDER BY ym DESC
     `;
