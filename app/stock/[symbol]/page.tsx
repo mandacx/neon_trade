@@ -131,10 +131,11 @@ export default function StockPage() {
   const [chartInterval, setChartInterval] = useState<SelectableInterval>('daily');
   const [livePrice, setLivePrice] = useState<number | undefined>(undefined);
 
-  // Price Levels + Stock Information side panel, next to the chart — the two
-  // cards are shown/hidden together as one stitched-together block rather
-  // than each having its own toggle.
-  const [sidePanelCollapsed, setSidePanelCollapsed] = useState(false);
+  // Chart + Price Levels + Stock Information are one collapsible stack behind
+  // a single toggle — not three things with their own controls. Collapsing
+  // hides the chart along with the detail panel, so the page drops straight to
+  // the Price Levels History table below.
+  const [chartStackCollapsed, setChartStackCollapsed] = useState(false);
 
   // Price Levels History table — deliberately independent of the chart's own
   // date range (which grows unbounded as the user scrolls back): its own
@@ -934,19 +935,22 @@ export default function StockPage() {
             </div>
           )}
 
-          {/* One toggle hides/shows the Price Levels + Stock Information
-              panel as a single stitched-together block, freeing the full
-              width for the chart. */}
+          {/* The one control for the whole chart stack — chart and detail
+              panel collapse and expand together, rather than the panel having
+              its own separate toggle. Lives outside the stack so it survives
+              the collapse. */}
           <div className="mb-2 flex justify-end">
             <button
-              onClick={() => setSidePanelCollapsed(v => !v)}
+              onClick={() => setChartStackCollapsed(v => !v)}
+              aria-expanded={!chartStackCollapsed}
               className="text-xs font-semibold text-gray-500 hover:text-gray-700 flex items-center gap-1"
             >
-              {sidePanelCollapsed ? <>☰ Show details</> : <>✕ Hide details</>}
+              {chartStackCollapsed ? <>☰ Show chart &amp; details</> : <>✕ Hide chart &amp; details</>}
             </button>
           </div>
 
           {/* Main Chart + side panel */}
+          {!chartStackCollapsed && (
           <div className="mb-8 flex flex-col lg:flex-row gap-4 items-stretch">
             <div className="flex-1 min-w-0">
               <TVChart
@@ -969,14 +973,24 @@ export default function StockPage() {
               />
             </div>
 
-            {!sidePanelCollapsed && (
-              <div className="w-full lg:w-72 xl:w-80 shrink-0 flex flex-col gap-4">
-                {/* Level Details Table */}
-                <div className="bg-white rounded-lg shadow-md p-3">
-                  <h3 className="text-sm font-bold mb-2">
+            {/* Details panel — Price Levels and Stock Information as two
+                sections of ONE card, not two floating boxes, so the stack ends
+                flush with the chart instead of trailing dead space below it.
+                As a flex item in this items-stretch row it takes the chart's
+                height for free; the body scrolls if the sections outgrow it. */}
+              <div className="w-full lg:w-72 xl:w-80 shrink-0 bg-white rounded-lg shadow-md flex flex-col overflow-hidden">
+                <div className="px-3 py-2 border-b border-gray-200 shrink-0">
+                  <h3 className="text-sm font-bold">Details</h3>
+                </div>
+
+                {/* min-h-0 so this can actually shrink and scroll inside the
+                    stretched column rather than pushing the card taller. */}
+                <div className="flex-1 min-h-0 overflow-y-auto p-3">
+                  {/* Level Details Table */}
+                  <h4 className="text-sm font-bold mb-2">
                     Price Levels
                     <Link href="/guide" className="ml-2 text-[11px] font-medium text-blue-600 hover:underline">What do these mean?</Link>
-                  </h3>
+                  </h4>
                   {levels.length === 0 ? (
                     <div className="text-center py-4 text-gray-500 text-xs">
                       <p className="mb-1">Level data not available in database</p>
@@ -1022,11 +1036,10 @@ export default function StockPage() {
                     })}
                   </div>
                   )}
-                </div>
 
-                {/* Stock Info */}
-                <div className="bg-white rounded-lg shadow-md p-3">
-                  <h3 className="text-sm font-bold mb-2">Stock Information</h3>
+                  {/* Stock Info — a section of the same card, separated by a
+                      rule rather than a gap between two shadowed boxes. */}
+                  <h4 className="text-sm font-bold mb-2 mt-4 pt-3 border-t border-gray-200">Stock Information</h4>
                   <div className="space-y-1.5">
                     <div className="flex justify-between pb-1.5 border-b border-gray-200">
                       <span className="text-xs text-gray-600">Symbol:</span>
@@ -1077,8 +1090,8 @@ export default function StockPage() {
                   </div>
                 </div>
               </div>
-            )}
           </div>
+          )}
 
           {/* Price Levels History — close price, all 7 raw DB levels, OI, and the UPC/UCPR ratio columns.
               Independently rangeable (10D default, or 7D/30D/90D/Custom) rather than tied to the chart. */}
