@@ -289,15 +289,9 @@ export async function getAllStocksByDate(date: string): Promise<StockData[]> {
  */
 export async function searchStocks(query: string, limit: number = 20): Promise<string[]> {
   try {
-    // eod_usmkts_price_local_snapshot, not the live eod_usmkts_price: this
-    // DISTINCT-without-a-tight-filter query doesn't push down through the
-    // postgres_fdw bridge to the old project (see app/api/home/data/route.ts
-    // for the full explanation) — it pulled the whole remote table and timed
-    // out. Swap back once the ingestion pipeline writes into this project
-    // directly and eod_usmkts_price stops being a foreign table.
     const result = await sql`
       SELECT DISTINCT symbol
-      FROM public.eod_usmkts_price_local_snapshot
+      FROM public.eod_usmkts_price
       WHERE symbol LIKE ${query.toUpperCase() + '%'}
       ORDER BY symbol
       LIMIT ${limit}
@@ -318,7 +312,7 @@ export async function getAvailableDates(limit: number = 30): Promise<string[]> {
     // See searchStocks above — same FDW-pushdown issue, same snapshot fix.
     const result = await sql`
       SELECT DISTINCT trade_date::text
-      FROM public.eod_usmkts_price_local_snapshot
+      FROM public.eod_usmkts_price
       ORDER BY trade_date DESC
       LIMIT ${limit}
     `;
@@ -338,7 +332,7 @@ export async function getAvailableExpiryDates(): Promise<string[]> {
     // See searchStocks above — same FDW-pushdown issue, same snapshot fix.
     const result = await sql`
       SELECT DISTINCT expiry_dt::text
-      FROM public.eod_usmkts_price_local_snapshot
+      FROM public.eod_usmkts_price
       WHERE expiry_dt >= CURRENT_DATE
       ORDER BY expiry_dt ASC
       LIMIT 50

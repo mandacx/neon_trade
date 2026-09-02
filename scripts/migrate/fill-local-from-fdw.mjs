@@ -250,26 +250,36 @@ async function cmdFinalize() {
   }
 
   for (const { name } of selected) {
-    // Foreign table and local copy can't both hold the canonical name, so the
-    // drop and the rename have to be one transaction — a failure between them
-    // would leave the app with no table at all under that name.
+    // All three steps in one transaction. The foreign table and the local copy
+    // can't both hold the canonical name, so a failure between the drop and the
+    // rename would leave the app with no table under that name at all.
+    //
+    // The view is what makes this deployable without downtime: the CURRENTLY
+    // DEPLOYED code still selects from <table>_local_snapshot, and that name
+    // disappears the moment we rename. Leaving a view behind under the old
+    // name keeps those queries working until the reverted code ships, so there
+    // is no window where quadrant/scan-alerts/home 500.
     await sql(`BEGIN`);
     try {
       await sql(`DROP FOREIGN TABLE public."${name}"`);
       await sql(`ALTER TABLE public."${snap(name)}" RENAME TO "${name}"`);
+      await sql(`CREATE VIEW public."${snap(name)}" AS SELECT * FROM public."${name}"`);
       await sql(`COMMIT`);
-      console.log(`  ${name}: bridge dropped, local copy renamed into place`);
+      console.log(`  ${name}: bridge dropped, local copy renamed into place, compat view left at ${snap(name)}`);
     } catch (err) {
       await sql(`ROLLBACK`);
       throw err;
     }
   }
 
-  console.log('\nStill to do by hand:');
-  console.log('  1. Revert the *_local_snapshot reads in lib/db.ts and lib/scanAlerts.ts to the canonical names.');
-  console.log('  2. Drop the now-unused FDW plumbing: DROP SERVER ... CASCADE, and the user mapping.');
-  console.log('  3. Re-check the index list on the renamed tables — index NAMES survive a rename, so they');
-  console.log('     still read *_local_snapshot even though the table no longer does.');
+  console.log('\nStill to do, in this order:');
+  console.log('  1. Revert the *_local_snapshot reads in lib/db.ts, lib/scanAlerts.ts and');
+  console.log('     app/api/home/data/route.ts to the canonical names, then deploy.');
+  console.log('  2. Only AFTER that deploy is live, drop the compatibility views:');
+  selected.forEach(({ name }) => console.log(`       DROP VIEW public."${snap(name)}";`));
+  console.log('  3. Drop the now-unused FDW plumbing: DROP SERVER ... CASCADE, and the user mapping.');
+  console.log('  4. Rename the indexes — index NAMES survive a table rename, so they still say');
+  console.log('     *_local_snapshot even though the table no longer does.');
 }
 
 const handlers = { status: cmdStatus, fill: cmdFill, finalize: cmdFinalize };
