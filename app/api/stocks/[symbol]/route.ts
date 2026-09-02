@@ -3,6 +3,7 @@ import { getLatestStockData, getStockDataAsOf } from '@/lib/db';
 import { processStockData } from '@/lib/calculations';
 import { formatPercentage } from '@/lib/utils';
 import { getCurrentUserContext } from '@/lib/appUsers';
+import { getSecuritiesMeta } from '@/lib/securitiesFilters';
 import { levelGate, LEVEL_POINT_RATE } from '@/lib/levelAccess';
 import { checkRateLimit, rateLimitKey, rateLimitHeaders } from '@/lib/rateLimit';
 
@@ -39,15 +40,36 @@ export async function GET(
       );
     }
 
-    const stockData = gate.meta.levelsWithheldAfter
-      ? await getStockDataAsOf(symbol, gate.meta.levelsWithheldAfter)
-      : await getLatestStockData(symbol);
+    // Company name/sector/market cap for the page header. That lives in
+    // public.securities rather than the levels table, so it's fetched
+    // alongside — in parallel, since neither read depends on the other.
+    const [stockData, secRows] = await Promise.all([
+      gate.meta.levelsWithheldAfter
+        ? getStockDataAsOf(symbol, gate.meta.levelsWithheldAfter)
+        : getLatestStockData(symbol),
+      getSecuritiesMeta([symbol.toUpperCase()]),
+    ]);
+
+    const sec = secRows[symbol.toUpperCase()];
+    // Returned at the top level rather than inside `data` so the header still
+    // gets a name in broker-only mode, where `data` is null.
+    const security = sec
+      ? {
+          name: sec.name ?? null,
+          sector: sec.sector ?? null,
+          industry: sec.industry ?? null,
+          marketCap: sec.market_cap == null ? null : Number(sec.market_cap),
+          marketCapTier: sec.market_cap_tier ?? null,
+          exchange: sec.exchange ?? null,
+        }
+      : null;
 
     if (!stockData) {
       // No database data - return success with null to indicate broker-only mode
       return NextResponse.json({
         success: true,
         data: null,
+        security,
         levelAccess: gate.meta.levelAccess,
         message: 'Stock not found in database, using broker data only'
       });
@@ -81,6 +103,7 @@ export async function GET(
           : null,
         ...gate.meta,
       },
+      security,
     });
   } catch (error) {
     console.error('Error fetching stock details:', error);

@@ -41,6 +41,16 @@ interface TVChartProps {
   isIntraday?: boolean;
   livePrice?: number;
   currentPrice?: number;
+  // Today's move and range, shown under the price. Any field may be null —
+  // Alpaca omits the previous/daily bar for names that haven't printed, and
+  // each row is simply left out rather than rendered as NaN.
+  dayChange?: number | null;
+  dayChangePercent?: number | null;
+  dayHigh?: number | null;
+  dayLow?: number | null;
+  // Company name beside the symbol, plus the industry / market-cap chips.
+  companyName?: string | null;
+  chips?: Array<string | null | undefined>;
   // Rendered in the chart's own top-left toolbar, next to the symbol/price —
   // e.g. an interval selector — so it reads as part of the chart, not the page.
   headerExtra?: ReactNode;
@@ -80,6 +90,12 @@ export default function TVChart({
   currentPrice,
   headerExtra,
   sidePanel,
+  dayChange,
+  dayChangePercent,
+  dayHigh,
+  dayLow,
+  companyName,
+  chips,
   height = 500,
   onLoadMore,
   isLoadingMore = false,
@@ -949,17 +965,51 @@ export default function TVChart({
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div>
-            <h2 className="text-2xl font-bold">{symbol}</h2>
-            {displayPrice !== undefined && (
-              <p className="text-lg text-gray-600 flex items-center gap-2">
-                <span>{formatCurrency(displayPrice)}</span>
-                {livePrice !== undefined && (
-                  <span className="inline-flex items-center gap-1 text-[10px] font-bold text-green-600 uppercase tracking-wide">
-                    <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-                    Live
+            <div className="flex items-baseline gap-2 flex-wrap">
+              <h2 className="text-2xl font-bold">{symbol}</h2>
+              {displayPrice !== undefined && (
+                <span className="text-lg text-gray-600">{formatCurrency(displayPrice)}</span>
+              )}
+              {livePrice !== undefined && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-green-600 uppercase tracking-wide">
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                  Live
+                </span>
+              )}
+              {companyName && <span className="text-xs text-gray-500 truncate">{companyName}</span>}
+            </div>
+
+            {/* Today's move and range. Each half renders only if its data is
+                present, so a name with no previous bar shows the range alone
+                rather than a blank or NaN change. */}
+            {(dayChange != null || dayHigh != null) && (
+              <div className="mt-0.5 flex items-baseline gap-3 flex-wrap text-xs">
+                {dayChange != null && (
+                  <span className={`font-bold ${dayChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    {dayChange >= 0 ? '+' : '−'}{formatCurrency(Math.abs(dayChange))}
+                    {dayChangePercent != null && (
+                      <span className="ml-1">
+                        ({dayChangePercent >= 0 ? '+' : '−'}{Math.abs(dayChangePercent).toFixed(2)}%)
+                      </span>
+                    )}
                   </span>
                 )}
-              </p>
+                {dayHigh != null && dayLow != null && (
+                  <span className="text-gray-500">
+                    Day Range: {formatCurrency(dayLow)} – {formatCurrency(dayHigh)}
+                  </span>
+                )}
+              </div>
+            )}
+
+            {chips && chips.some(Boolean) && (
+              <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+                {chips.filter(Boolean).map(chip => (
+                  <span key={chip as string} className="px-1.5 py-0.5 rounded bg-gray-100 text-[10px] font-medium text-gray-600">
+                    {chip}
+                  </span>
+                ))}
+              </div>
             )}
           </div>
           {headerExtra && (

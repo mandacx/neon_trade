@@ -57,6 +57,39 @@ const OPT_CHAIN_PRESET_LABELS: Record<OptChainPreset, string> = { '10d': '10D', 
 // stand in for "all" without a separate unbounded-query code path.
 const OPT_CHAIN_ALL_FROM = '2000-01-01';
 
+// Shape of /api/stocks/[symbol]/quote. Every field but `price` can be null —
+// Alpaca omits prevDailyBar/dailyBar for names that haven't printed, and the
+// route reports null rather than a NaN change in that case.
+interface LiveQuote {
+  price: number;
+  dayOpen: number | null;
+  dayHigh: number | null;
+  dayLow: number | null;
+  prevClose: number | null;
+  change: number | null;
+  changePercent: number | null;
+}
+
+// public.securities metadata, returned alongside `data` by the details route.
+interface SecurityMeta {
+  name: string | null;
+  sector: string | null;
+  industry: string | null;
+  marketCap: number | null;
+  marketCapTier: string | null;
+  exchange: string | null;
+}
+
+// Compact market cap for the header chip: $31.2B rather than $31,200,000,000.
+function formatMarketCap(value: number | null): string | null {
+  if (!value || value <= 0) return null;
+  const units: [number, string][] = [[1e12, 'T'], [1e9, 'B'], [1e6, 'M']];
+  for (const [size, suffix] of units) {
+    if (value >= size) return `$${(value / size).toFixed(value / size >= 100 ? 0 : 1)}${suffix}`;
+  }
+  return `$${value.toLocaleString()}`;
+}
+
 type ExpiryMode = 'current' | 'historical';
 
 // Shifts a 'YYYY-MM-DD' date-only string by `days` calendar days, entirely
@@ -129,7 +162,18 @@ export default function StockPage() {
   const [expandedYears, setExpandedYears] = useState<Set<string>>(new Set());
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [chartInterval, setChartInterval] = useState<SelectableInterval>('daily');
-  const [livePrice, setLivePrice] = useState<number | undefined>(undefined);
+  // Full snapshot, not just the price — the header shows today's change and
+  // day range, and the levels panel rebases onto the live price (see
+  // displayLevels below).
+  const [quote, setQuote] = useState<LiveQuote | null>(null);
+  const [security, setSecurity] = useState<SecurityMeta | null>(null);
+  const livePrice = quote?.price;
+  // The price everything "current" is measured against. Live data is
+  // deliberately withheld in historical-expiry mode — those levels belong to
+  // an expiry that has already passed, so today's price says nothing about
+  // them. One value so the chart, the levels panel, the header and the
+  // Analysis line can never disagree about which basis is in play.
+  const basisPrice = expiryMode === 'current' ? livePrice : undefined;
 
   // Chart + Price Levels + Stock Information are one collapsible stack behind
   // a single toggle — not three things with their own controls. Collapsing
@@ -263,6 +307,10 @@ export default function StockPage() {
         // Set stock details and levels only if available from database
         if (details.success && details.data) {
           setStockData(details.data);
+        }
+        // Sits outside `data` so it's present in broker-only mode too.
+        if (details.success) {
+          setSecurity(details.security ?? null);
         }
         if (levelsData.success && levelsData.data) {
           setLevels(levelsData.data.calculated || []);
@@ -568,7 +616,7 @@ export default function StockPage() {
         .then(r => r.json())
         .then(res => {
           if (cancelled || !res.success || !res.data) return;
-          setLivePrice(res.data.price);
+          setQuote(res.data);
         })
         .catch(() => {})
         .finally(() => {
@@ -706,13 +754,38 @@ export default function StockPage() {
   }, [symbol]);
 
 
-  // Always derive closest level from the current levels array (avoids stale/mismatched string state)
+  // The API computes each level's value against the DB's EOD close — the
+  // `(CLOSE - LEVEL) / CLOSE` formula the levels product is defined on. Once a
+  // live quote arrives, rebase onto it so the panel, the closest-level badge,
+  // the chart highlight and the Analysis line all describe where the price
+  // actually is *now*, not where it closed. Without this, a stock that has
+  // moved several percent since the close reports the wrong closest level.
+  //
+  // This is the one place calculation happens client-side rather than in an
+  // API route (see CLAUDE.md): the live price is polled by the browser, so
+  // rebasing server-side would mean a round trip per poll.
+  //
+  // Only the *current* levels rebase. historicalLevels stays untouched — each
+  // past bar's percentages are correctly relative to that day's own close.
+  // ...but only in current-expiry mode. Historical levels belong to an expiry
+  // that has already passed, so measuring them against today's price would be
+  // meaningless — the chart already suppresses livePrice there for the same
+  // reason, and this keeps the panel consistent with it.
+  const displayLevels = useMemo(() => {
+    if (!basisPrice || levels.length === 0) return levels;
+    return levels.map((l: any) => {
+      const value = (basisPrice - l.price) / basisPrice;
+      return { ...l, value, distance: Math.abs(basisPrice - l.price), percentage: formatPercentage(value) };
+    });
+  }, [levels, basisPrice]);
+
+  // Always derive closest level from the displayed levels array (avoids stale/mismatched string state)
   const closestLevelName = useMemo(() => {
-    if (levels.length > 0) {
-      return levels.reduce((c, l) => Math.abs(l.value) < Math.abs(c.value) ? l : c).name;
+    if (displayLevels.length > 0) {
+      return displayLevels.reduce((c: any, l: any) => Math.abs(l.value) < Math.abs(c.value) ? l : c).name;
     }
     return stockData?.closestLevel?.name || closestLevel || '';
-  }, [levels, stockData, closestLevel]);
+  }, [displayLevels, stockData, closestLevel]);
 
   const candleData = useMemo(() => ohlcData.map(d => ({
     time: d.timestamp,
@@ -797,14 +870,14 @@ export default function StockPage() {
           Price Levels
           <Link href="/guide" className="ml-2 text-[11px] font-medium text-blue-600 hover:underline">What do these mean?</Link>
         </h4>
-        {levels.length === 0 ? (
+        {displayLevels.length === 0 ? (
           <div className="text-center py-4 text-gray-500 text-xs">
             <p className="mb-1">Level data not available in database</p>
             <p className="text-[11px]">Displaying broker OHLC data only</p>
           </div>
         ) : (
           <div className="space-y-1.5">
-            {levels.map((level: any) => {
+            {displayLevels.map((level: any) => {
             const isClosest = level.name === closestLevelName;
             const color = isClosest ? '#3B82F6' : getLevelColor(level.name);
 
@@ -851,6 +924,21 @@ export default function StockPage() {
             <span className="text-xs text-gray-600">Symbol:</span>
             <span className="text-xs font-semibold">{symbol.toUpperCase()}</span>
           </div>
+          {security?.name && (
+            <div className="flex justify-between gap-2 pb-1.5 border-b border-gray-200">
+              <span className="text-xs text-gray-600 shrink-0">Name:</span>
+              <span className="text-xs font-medium text-right">{security.name}</span>
+            </div>
+          )}
+          {/* Live price sits above the DB close, since it's what the levels
+              below are now measured against. Both are shown — the close is
+              still the EOD reference the levels themselves were derived from. */}
+          {basisPrice !== undefined && (
+            <div className="flex justify-between pb-1.5 border-b border-gray-200">
+              <span className="text-xs text-gray-600">Live Price:</span>
+              <span className="text-xs font-semibold">{formatCurrency(basisPrice)}</span>
+            </div>
+          )}
           {stockData && (
             <>
               <div className="flex justify-between pb-1.5 border-b border-gray-200">
@@ -879,13 +967,17 @@ export default function StockPage() {
           )}
 
           {closestLevelName && (() => {
-            const closestLvl = levels.find(l => l.name === closestLevelName)
+            const closestLvl = displayLevels.find((l: any) => l.name === closestLevelName)
               || stockData?.levels?.find((l: any) => l.name === closestLevelName);
             return closestLvl ? (
               <div className="mt-3 p-2.5 bg-gradient-to-r from-blue-50 to-green-50 rounded-lg">
                 <p className="text-[11px] text-gray-700 mb-1"><strong>Analysis:</strong></p>
                 <p className="text-[11px]">
-                  The current price is closest to the{' '}
+                  {/* Name the basis explicitly — the reader can otherwise not
+                      tell whether the distance is measured from the live price
+                      or the EOD close, and the two disagree intra-day. */}
+                  The {basisPrice !== undefined ? 'live' : 'closing'} price of{' '}
+                  {formatCurrency(basisPrice ?? stockData?.close)} is closest to the{' '}
                   <strong className="text-blue-700">{getLevelDisplayName(closestLevelName)}</strong>{' '}
                   level at {formatCurrency(closestLvl.price)}, with a distance
                   of {formatPercentage(closestLvl.value)}.
@@ -1076,14 +1168,20 @@ export default function StockPage() {
                 candleData={candleData}
                 volumeData={volumeData}
                 oiData={chartOiData}
-                levels={levels}
+                levels={displayLevels}
                 closestLevel={closestLevelName}
                 historicalLevels={historicalLevels}
                 scanAlerts={scanAlerts}
                 selectedExpiry={selectedExpiry}
                 isIntraday={isIntradayInterval(chartInterval)}
-                livePrice={expiryMode === 'current' ? livePrice : undefined}
+                livePrice={basisPrice}
                 currentPrice={stockData?.close}
+                dayChange={basisPrice !== undefined ? quote?.change : undefined}
+                dayChangePercent={basisPrice !== undefined ? quote?.changePercent : undefined}
+                dayHigh={basisPrice !== undefined ? quote?.dayHigh : undefined}
+                dayLow={basisPrice !== undefined ? quote?.dayLow : undefined}
+                companyName={security?.name}
+                chips={[security?.industry ?? security?.sector, formatMarketCap(security?.marketCap ?? null)]}
                 headerExtra={intervalSelector}
                 sidePanel={detailsPanel}
                 height={600}
