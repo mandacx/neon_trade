@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   createChart,
   IChartApi,
@@ -11,6 +11,12 @@ import {
   Time,
   MouseEventParams,
 } from 'lightweight-charts';
+
+// Gap between the crosshair and the tooltip, and the minimum breathing room
+// kept between the tooltip and the container's edges. Same values as TVChart's
+// crosshair tooltip so the two charts feel identical to read.
+const TOOLTIP_GAP = 14;
+const TOOLTIP_EDGE = 8;
 
 export type OptionBarPoint = {
   time: number; // epoch seconds — canonical time axis
@@ -68,7 +74,9 @@ export default function OptionContractChart({
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const underlyingSeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
+  // `x` is already corrected for the left price scale — see handleMove.
   const [tooltip, setTooltip] = useState<{ x: number; y: number; lines: string[] } | null>(null);
+  const tooltipRef = useRef<HTMLDivElement>(null);
 
   // Create chart once.
   useEffect(() => {
@@ -209,26 +217,60 @@ export default function OptionContractChart({
       if (oiPoint) {
         lines.push(`OI ${oiPoint.oi.toLocaleString()} (${oiPoint.oiChg > 0 ? '+' : ''}${oiPoint.oiChg.toLocaleString()})  LTP ${oiPoint.ltp}`);
       }
-      setTooltip({ x: param.point.x, y: param.point.y, lines });
+      // `param.point` is relative to the chart PANE, which starts after the
+      // left price scale, but the tooltip is absolutely positioned against the
+      // whole container — so add the scale's width back or the box sits well
+      // to the left of the crosshair it's describing.
+      setTooltip({ x: param.point.x + chart.priceScale('left').width(), y: param.point.y, lines });
     }
 
     chart.subscribeCrosshairMove(handleMove);
     return () => chart.unsubscribeCrosshairMove(handleMove);
   }, [optionBars, underlyingBars, historyPoints, isIntraday, underlyingSymbol]);
 
+  // Track the crosshair, matching TVChart's tooltip placement: offset to its
+  // right, flipped to the left near the edge, clamped vertically. It used to be
+  // pinned to the top-left corner, which meant it never read as a crosshair tip
+  // at all.
+  //
+  // Done here rather than inline because placement needs the box's rendered
+  // size, and the content is whitespace-nowrap — its width swings with whether
+  // the underlying/OI lines are present, so the old hardcoded 180px guess both
+  // overflowed and left gaps. useLayoutEffect so the corrected position lands
+  // before paint instead of jittering on every mouse move.
+  useLayoutEffect(() => {
+    const el = tooltipRef.current;
+    const container = containerRef.current;
+    if (!tooltip || !el || !container) return;
+
+    // Right of the crosshair by default; flip to its left only when the box
+    // would overflow, so it stays clear of the bar either way.
+    let left = tooltip.x + TOOLTIP_GAP;
+    if (left + el.offsetWidth > container.clientWidth - TOOLTIP_EDGE) {
+      left = tooltip.x - TOOLTIP_GAP - el.offsetWidth;
+    }
+    // Too wide to clear the crosshair on either side — keep it on-screen and
+    // accept the overlap.
+    el.style.left = `${Math.max(TOOLTIP_EDGE, left)}px`;
+
+    const maxTop = Math.max(TOOLTIP_EDGE, container.clientHeight - el.offsetHeight - TOOLTIP_EDGE);
+    el.style.top = `${Math.min(Math.max(TOOLTIP_EDGE, tooltip.y + TOOLTIP_GAP), maxTop)}px`;
+  }, [tooltip]);
+
   return (
     <div className="relative">
       <div ref={containerRef} style={{ height }} />
       {tooltip && (
         <div
-          className="absolute z-10 bg-white/95 border border-gray-200 rounded-md shadow-md px-2.5 py-1.5 text-[11px] text-gray-700 pointer-events-none whitespace-nowrap"
-          style={{
-            left: Math.min(tooltip.x + 12, (containerRef.current?.clientWidth ?? 0) - 180),
-            top: 8,
-          }}
+          ref={tooltipRef}
+          // Same chrome as TVChart's crosshair tooltip.
+          className="absolute z-10 bg-white border border-gray-300 rounded-lg shadow-lg p-3 text-xs text-gray-700 pointer-events-none whitespace-nowrap"
+          // Provisional position; the layout effect above corrects both axes
+          // against the box's measured size before this paints.
+          style={{ left: tooltip.x + TOOLTIP_GAP, top: tooltip.y + TOOLTIP_GAP }}
         >
           {tooltip.lines.map((line, i) => (
-            <div key={i} className={i === 0 ? 'font-semibold text-gray-900' : ''}>{line}</div>
+            <div key={i} className={i === 0 ? 'font-bold text-gray-900 mb-2' : ''}>{line}</div>
           ))}
         </div>
       )}

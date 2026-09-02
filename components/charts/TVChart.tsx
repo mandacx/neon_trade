@@ -419,9 +419,10 @@ export default function TVChart({
         }
       }
 
+      // Shown here but positioned at the end of this handler — placement
+      // measures the tooltip's own size, which isn't known until its content
+      // for THIS bar has been written below.
       tooltipRef.current.style.display = 'block';
-      tooltipRef.current.style.left = ((param.point?.x ?? 0) + 10) + 'px';
-      tooltipRef.current.style.top = ((param.point?.y ?? 0) + 10) + 'px';
 
       // Build tooltip content with closest level highlighted (only if historical data available)
       const levelsWithProximity = hasHistoricalData ? dateLevels.map(level => {
@@ -537,6 +538,38 @@ export default function TVChart({
           ` : ''}
         </div>
       `;
+
+      // Keep the box clear of the crosshair so the bar and the time-axis date
+      // under it stay readable.
+      //
+      // `param.point` is relative to the chart PANE, which starts after the
+      // left price scale, while the tooltip is absolutely positioned against
+      // the whole container — so the scale's width has to be added back or the
+      // box lands ~50px left of the crosshair, sitting right on the candles.
+      const container = chartContainerRef.current;
+      if (container) {
+        const GAP = 14;
+        const EDGE = 8;
+        const tip = tooltipRef.current;
+        const crosshairX = (param.point?.x ?? 0) + chart.priceScale('left').width();
+        const pointerY = param.point?.y ?? 0;
+
+        // Right of the crosshair by default; flip to the left only when the
+        // box would overflow the container, so it stays clear either way.
+        let left = crosshairX + GAP;
+        if (left + tip.offsetWidth > container.clientWidth - EDGE) {
+          left = crosshairX - GAP - tip.offsetWidth;
+        }
+        // Too wide to clear the crosshair on either side (a very narrow
+        // container) — keep it on-screen and accept the overlap.
+        left = Math.max(EDGE, left);
+
+        const maxTop = Math.max(EDGE, container.clientHeight - tip.offsetHeight - EDGE);
+        const top = Math.min(Math.max(EDGE, pointerY + GAP), maxTop);
+
+        tip.style.left = `${left}px`;
+        tip.style.top = `${top}px`;
+      }
     };
 
     chart.subscribeCrosshairMove(handleCrosshairMove);
