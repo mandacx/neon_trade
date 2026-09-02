@@ -44,6 +44,12 @@ interface TVChartProps {
   // Rendered in the chart's own top-left toolbar, next to the symbol/price —
   // e.g. an interval selector — so it reads as part of the chart, not the page.
   headerExtra?: ReactNode;
+  // Rendered as a column beside the chart's bordered frame, INSIDE this
+  // component rather than next to it on the page. The header above and the
+  // level chips below both have content-dependent heights, so a panel placed
+  // as a page-level sibling can't line its top and bottom up with the chart's
+  // own border — sharing the chart's flex row is what makes that exact.
+  sidePanel?: ReactNode;
   height?: number;
   onLoadMore?: (direction: 'past' | 'future', firstVisibleTime: string, lastVisibleTime: string) => void;
   isLoadingMore?: boolean;
@@ -73,6 +79,7 @@ export default function TVChart({
   livePrice,
   currentPrice,
   headerExtra,
+  sidePanel,
   height = 500,
   onLoadMore,
   isLoadingMore = false,
@@ -1021,9 +1028,14 @@ export default function TVChart({
         </div>
       </div>
 
+      {/* Chart frame and side panel share one row, so items-stretch gives the
+          panel exactly the chart border's top and bottom edges. `lg:flex-1`
+          rather than plain `flex-1` because on mobile this row is a column,
+          where flex-1's 0% basis would collapse the chart's fixed height. */}
+      <div className={`flex flex-col lg:flex-row gap-4 items-stretch ${isEnlarged ? 'flex-1 min-h-0' : ''}`}>
       <div
         ref={chartContainerRef}
-        className={`relative bg-white rounded-lg border border-gray-200 shadow-sm ${isEnlarged ? 'flex-1 min-h-0' : ''}`}
+        className={`relative w-full lg:flex-1 lg:min-w-0 bg-white rounded-lg border border-gray-200 shadow-sm ${isEnlarged ? 'min-h-0' : ''}`}
         style={isEnlarged ? undefined : { height: `${height}px` }}
       >
         {/* OHLC Display - Top Left */}
@@ -1049,6 +1061,9 @@ export default function TVChart({
             </div>
           </div>
         )}
+      </div>
+
+        {sidePanel}
       </div>
 
       {levels.length > 0 && (

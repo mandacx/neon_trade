@@ -779,6 +779,125 @@ export default function StockPage() {
       return ((av as number) - (bv as number)) * dir;
     });
 
+  // Price Levels + Stock Information, passed to TVChart as its sidePanel so
+  // the card shares the chart frame's flex row and lines up with its exact
+  // top and bottom borders. Two sections of ONE card rather than two
+  // floating boxes, so the stack ends flush instead of trailing dead space.
+  const detailsPanel = (
+    <div className="w-full lg:w-72 xl:w-80 shrink-0 bg-white rounded-lg shadow-md flex flex-col overflow-hidden">
+      <div className="px-3 py-2 border-b border-gray-200 shrink-0">
+        <h3 className="text-sm font-bold">Details</h3>
+      </div>
+
+      {/* min-h-0 so this can actually shrink and scroll inside the
+          stretched column rather than pushing the card taller. */}
+      <div className="flex-1 min-h-0 overflow-y-auto p-3">
+        {/* Level Details Table */}
+        <h4 className="text-sm font-bold mb-2">
+          Price Levels
+          <Link href="/guide" className="ml-2 text-[11px] font-medium text-blue-600 hover:underline">What do these mean?</Link>
+        </h4>
+        {levels.length === 0 ? (
+          <div className="text-center py-4 text-gray-500 text-xs">
+            <p className="mb-1">Level data not available in database</p>
+            <p className="text-[11px]">Displaying broker OHLC data only</p>
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            {levels.map((level: any) => {
+            const isClosest = level.name === closestLevelName;
+            const color = isClosest ? '#3B82F6' : getLevelColor(level.name);
+
+            return (
+              <div
+                key={level.name}
+                className={`px-2 py-1.5 rounded-md border ${
+                  isClosest
+                    ? 'bg-blue-50 border-blue-500'
+                    : 'bg-gray-50 border-gray-200'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-1">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <div
+                      className="w-2 h-2 rounded-full shrink-0"
+                      style={{ backgroundColor: color }}
+                    />
+                    <span className="text-xs font-semibold truncate">
+                      {getLevelDisplayName(level.name)}
+                    </span>
+                    {isClosest && (
+                      <span className="text-[9px] bg-blue-600 text-white px-1 py-0.5 rounded shrink-0">
+                        Closest
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex flex-col items-end shrink-0">
+                    <span className="font-bold text-xs">{formatCurrency(level.price)}</span>
+                    <span className="text-[10px] font-mono text-gray-500">{level.percentage}</span>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        )}
+
+        {/* Stock Info — a section of the same card, separated by a
+            rule rather than a gap between two shadowed boxes. */}
+        <h4 className="text-sm font-bold mb-2 mt-4 pt-3 border-t border-gray-200">Stock Information</h4>
+        <div className="space-y-1.5">
+          <div className="flex justify-between pb-1.5 border-b border-gray-200">
+            <span className="text-xs text-gray-600">Symbol:</span>
+            <span className="text-xs font-semibold">{symbol.toUpperCase()}</span>
+          </div>
+          {stockData && (
+            <>
+              <div className="flex justify-between pb-1.5 border-b border-gray-200">
+                <span className="text-xs text-gray-600">Close Price:</span>
+                <span className="text-xs font-semibold">
+                  {formatCurrency(stockData?.close)}
+                </span>
+              </div>
+              <div className="flex justify-between pb-1.5 border-b border-gray-200">
+                <span className="text-xs text-gray-600">Trade Date:</span>
+                <span className="text-xs font-medium">{stockData?.tradeDate}</span>
+              </div>
+              <div className="flex justify-between pb-1.5 border-b border-gray-200">
+                <span className="text-xs text-gray-600">Expiry Date:</span>
+                <span className="text-xs font-medium">{selectedExpiry || stockData?.expiryDate || 'N/A'}</span>
+              </div>
+            </>
+          )}
+          {!stockData && ohlcData.length > 0 && (
+            <div className="flex justify-between pb-1.5 border-b border-gray-200">
+              <span className="text-xs text-gray-600">Latest Close:</span>
+              <span className="text-xs font-semibold">
+                {formatCurrency(ohlcData[ohlcData.length - 1]?.close)}
+              </span>
+            </div>
+          )}
+
+          {closestLevelName && (() => {
+            const closestLvl = levels.find(l => l.name === closestLevelName)
+              || stockData?.levels?.find((l: any) => l.name === closestLevelName);
+            return closestLvl ? (
+              <div className="mt-3 p-2.5 bg-gradient-to-r from-blue-50 to-green-50 rounded-lg">
+                <p className="text-[11px] text-gray-700 mb-1"><strong>Analysis:</strong></p>
+                <p className="text-[11px]">
+                  The current price is closest to the{' '}
+                  <strong className="text-blue-700">{getLevelDisplayName(closestLevelName)}</strong>{' '}
+                  level at {formatCurrency(closestLvl.price)}, with a distance
+                  of {formatPercentage(closestLvl.value)}.
+                </p>
+              </div>
+            ) : null;
+          })()}
+        </div>
+      </div>
+    </div>
+  );
+
   const intervalSelector = (
     <div className="flex items-center gap-1">
       {INTERVAL_ORDER.map((iv) => (
@@ -951,8 +1070,7 @@ export default function StockPage() {
 
           {/* Main Chart + side panel */}
           {!chartStackCollapsed && (
-          <div className="mb-8 flex flex-col lg:flex-row gap-4 items-stretch">
-            <div className="flex-1 min-w-0">
+            <div className="mb-8">
               <TVChart
                 symbol={symbol.toUpperCase()}
                 candleData={candleData}
@@ -967,130 +1085,12 @@ export default function StockPage() {
                 livePrice={expiryMode === 'current' ? livePrice : undefined}
                 currentPrice={stockData?.close}
                 headerExtra={intervalSelector}
+                sidePanel={detailsPanel}
                 height={600}
                 onLoadMore={handleLoadMore}
                 isLoadingMore={isLoadingMore}
               />
             </div>
-
-            {/* Details panel — Price Levels and Stock Information as two
-                sections of ONE card, not two floating boxes, so the stack ends
-                flush with the chart instead of trailing dead space below it.
-                As a flex item in this items-stretch row it takes the chart's
-                height for free; the body scrolls if the sections outgrow it. */}
-              <div className="w-full lg:w-72 xl:w-80 shrink-0 bg-white rounded-lg shadow-md flex flex-col overflow-hidden">
-                <div className="px-3 py-2 border-b border-gray-200 shrink-0">
-                  <h3 className="text-sm font-bold">Details</h3>
-                </div>
-
-                {/* min-h-0 so this can actually shrink and scroll inside the
-                    stretched column rather than pushing the card taller. */}
-                <div className="flex-1 min-h-0 overflow-y-auto p-3">
-                  {/* Level Details Table */}
-                  <h4 className="text-sm font-bold mb-2">
-                    Price Levels
-                    <Link href="/guide" className="ml-2 text-[11px] font-medium text-blue-600 hover:underline">What do these mean?</Link>
-                  </h4>
-                  {levels.length === 0 ? (
-                    <div className="text-center py-4 text-gray-500 text-xs">
-                      <p className="mb-1">Level data not available in database</p>
-                      <p className="text-[11px]">Displaying broker OHLC data only</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-1.5">
-                      {levels.map((level: any) => {
-                      const isClosest = level.name === closestLevelName;
-                      const color = isClosest ? '#3B82F6' : getLevelColor(level.name);
-
-                      return (
-                        <div
-                          key={level.name}
-                          className={`px-2 py-1.5 rounded-md border ${
-                            isClosest
-                              ? 'bg-blue-50 border-blue-500'
-                              : 'bg-gray-50 border-gray-200'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between gap-1">
-                            <div className="flex items-center gap-1.5 min-w-0">
-                              <div
-                                className="w-2 h-2 rounded-full shrink-0"
-                                style={{ backgroundColor: color }}
-                              />
-                              <span className="text-xs font-semibold truncate">
-                                {getLevelDisplayName(level.name)}
-                              </span>
-                              {isClosest && (
-                                <span className="text-[9px] bg-blue-600 text-white px-1 py-0.5 rounded shrink-0">
-                                  Closest
-                                </span>
-                              )}
-                            </div>
-                            <div className="flex flex-col items-end shrink-0">
-                              <span className="font-bold text-xs">{formatCurrency(level.price)}</span>
-                              <span className="text-[10px] font-mono text-gray-500">{level.percentage}</span>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  )}
-
-                  {/* Stock Info — a section of the same card, separated by a
-                      rule rather than a gap between two shadowed boxes. */}
-                  <h4 className="text-sm font-bold mb-2 mt-4 pt-3 border-t border-gray-200">Stock Information</h4>
-                  <div className="space-y-1.5">
-                    <div className="flex justify-between pb-1.5 border-b border-gray-200">
-                      <span className="text-xs text-gray-600">Symbol:</span>
-                      <span className="text-xs font-semibold">{symbol.toUpperCase()}</span>
-                    </div>
-                    {stockData && (
-                      <>
-                        <div className="flex justify-between pb-1.5 border-b border-gray-200">
-                          <span className="text-xs text-gray-600">Close Price:</span>
-                          <span className="text-xs font-semibold">
-                            {formatCurrency(stockData?.close)}
-                          </span>
-                        </div>
-                        <div className="flex justify-between pb-1.5 border-b border-gray-200">
-                          <span className="text-xs text-gray-600">Trade Date:</span>
-                          <span className="text-xs font-medium">{stockData?.tradeDate}</span>
-                        </div>
-                        <div className="flex justify-between pb-1.5 border-b border-gray-200">
-                          <span className="text-xs text-gray-600">Expiry Date:</span>
-                          <span className="text-xs font-medium">{selectedExpiry || stockData?.expiryDate || 'N/A'}</span>
-                        </div>
-                      </>
-                    )}
-                    {!stockData && ohlcData.length > 0 && (
-                      <div className="flex justify-between pb-1.5 border-b border-gray-200">
-                        <span className="text-xs text-gray-600">Latest Close:</span>
-                        <span className="text-xs font-semibold">
-                          {formatCurrency(ohlcData[ohlcData.length - 1]?.close)}
-                        </span>
-                      </div>
-                    )}
-
-                    {closestLevelName && (() => {
-                      const closestLvl = levels.find(l => l.name === closestLevelName)
-                        || stockData?.levels?.find((l: any) => l.name === closestLevelName);
-                      return closestLvl ? (
-                        <div className="mt-3 p-2.5 bg-gradient-to-r from-blue-50 to-green-50 rounded-lg">
-                          <p className="text-[11px] text-gray-700 mb-1"><strong>Analysis:</strong></p>
-                          <p className="text-[11px]">
-                            The current price is closest to the{' '}
-                            <strong className="text-blue-700">{getLevelDisplayName(closestLevelName)}</strong>{' '}
-                            level at {formatCurrency(closestLvl.price)}, with a distance
-                            of {formatPercentage(closestLvl.value)}.
-                          </p>
-                        </div>
-                      ) : null;
-                    })()}
-                  </div>
-                </div>
-              </div>
-          </div>
           )}
 
           {/* Price Levels History — close price, all 7 raw DB levels, OI, and the UPC/UCPR ratio columns.
