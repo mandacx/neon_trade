@@ -188,7 +188,8 @@ npm run lint
 - `app/quadrant/page.tsx` - Quadrant dashboard
 
 **Charts:**
-- `components/charts/KLineChart.tsx` - K-line chart
+- `components/charts/TVChart.tsx` - Candlestick chart with level overlays (stock detail page)
+- `components/charts/OptionContractChart.tsx` - Single option contract bars + OI history
 - `components/charts/QuadrantChart.tsx` - Quadrant chart
 
 **Services:**

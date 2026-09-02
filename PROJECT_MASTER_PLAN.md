@@ -668,6 +668,12 @@ Get all stocks with quadrant positions.
 ### Components
 
 #### `components/KLineChart.tsx`
+
+> **As built:** this shipped as `components/charts/TVChart.tsx`, on
+> `lightweight-charts` rather than the `klinecharts` library the name suggests.
+> The sketch below is the original plan, kept for history — the real props are
+> considerably wider (historical levels, OI series, scan-alert markers).
+
 ```typescript
 interface KLineChartProps {
   symbol: string;
@@ -791,7 +797,7 @@ neon_trade/
 │
 ├── components/
 │   ├── charts/
-│   │   ├── KLineChart.tsx        # K-line chart component
+│   │   ├── KLineChart.tsx        # K-line chart component (shipped as TVChart.tsx)
 │   │   ├── QuadrantChart.tsx     # Quadrant chart component
 │   │   └── LevelIndicators.tsx   # Level display component
 │   │
