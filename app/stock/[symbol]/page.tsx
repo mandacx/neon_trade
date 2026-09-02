@@ -1150,10 +1150,19 @@ export default function StockPage() {
                     : `No historical level data available${selectedExpiry ? ` for expiry ${selectedExpiry}` : ''} in this range.`}
                 </div>
               ) : (
-                <div className="overflow-x-auto">
+                // Bounded height + internal scroll, so the panel's own header
+                // (range presets, custom dates) stays on screen while paging
+                // through rows, and the column headers stick to the top of
+                // this box rather than scrolling away with them.
+                <div className="overflow-auto max-h-[65vh]">
                   <table className="w-full text-xs whitespace-nowrap">
-                    <thead>
-                      <tr className="border-b border-gray-200 text-gray-500">
+                    {/* bg-white on the th, not just the thead — a transparent
+                        cell would let rows show through as they scroll under.
+                        The divider is an inset shadow rather than the tr's
+                        border-b: preflight sets border-collapse:collapse, and
+                        collapsed borders don't travel with a sticky cell. */}
+                    <thead className="[&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-white [&_th]:shadow-[inset_0_-1px_0_0_#e5e7eb]">
+                      <tr className="text-gray-500">
                         <th className="text-left py-1.5 pr-3 font-medium">Date</th>
                         <th className="text-right py-1.5 px-2 font-medium">Close</th>
                         {SEVEN_LEVEL_ORDER.map((name) => (
@@ -1269,10 +1278,13 @@ export default function StockPage() {
                     {optChainLoading ? 'Loading…' : `No option chain data available${selectedExpiry ? ` for expiry ${selectedExpiry}` : ''}.`}
                   </div>
                 ) : (
-                  <div className="overflow-x-auto">
+                  // Same bounded scroll box as the Price Levels History table
+                  // above, so the range presets and search stay reachable and
+                  // the sort/filter row sticks while scrolling strikes.
+                  <div className="overflow-auto max-h-[65vh]">
                     <table className="w-full text-xs whitespace-nowrap">
-                      <thead>
-                        <tr className="border-b border-gray-200 text-gray-500 align-bottom">
+                      <thead className="[&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-white [&_th]:shadow-[inset_0_-1px_0_0_#e5e7eb]">
+                        <tr className="text-gray-500 align-bottom">
                           <th className="text-left py-1.5 pr-3 font-medium">Symbol</th>
                           <th className="text-left py-1.5 px-2 font-medium">Expiry</th>
                           <th className="text-left py-1.5 px-2 font-medium">
