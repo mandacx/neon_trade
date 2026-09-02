@@ -139,11 +139,34 @@ export async function getScanAlerts(filters: ScanAlertQueryFilters): Promise<Sca
 }
 
 /** Most recently loaded alerts across all symbols/expiries — for the scrolling ticker. */
+// Lookback window for the ticker's "newest alerts" query. Required, not an
+// optimisation: while intra_us_scanner_eod is a postgres_fdw foreign table
+// (see the block comment below), postgres_fdw pushes WHERE clauses to the
+// remote but never ORDER BY ... LIMIT — so an unfiltered "newest N" drags the
+// whole remote table across the project boundary. Measured against production:
+// 77.3s unfiltered vs 0.6s with this predicate.
+//
+// 4 days comfortably covers the ticker's limit (~2.2k alert rows land per 3
+// trading days) and still reaches back past a weekend plus a Monday holiday —
+// the longest the US market closes in a run. The cutoff is date-granular, so
+// "4 days" means the whole of that fourth day back. If the ingestion pipeline
+// stalls longer than that the ticker renders nothing, which beats captioning
+// week-old alerts as "New Alerts".
+const RECENT_ALERT_LOOKBACK_DAYS = 4;
+
 export async function getRecentScanAlerts(limit: number = 20): Promise<ScanAlert[]> {
   try {
+    // Computed here rather than as `now() - interval` in SQL: now() is STABLE
+    // and postgres_fdw only ships IMMUTABLE expressions, so a now()-based
+    // predicate would stay local and push nothing down — defeating the point.
+    const since = new Date(Date.now() - RECENT_ALERT_LOOKBACK_DAYS * 86_400_000)
+      .toISOString()
+      .slice(0, 10);
     const rows = (await sql(
-      `SELECT ${SCAN_ALERT_SELECT} FROM public.intra_us_scanner_eod ORDER BY load_dt_tm DESC LIMIT $1`,
-      [limit]
+      `SELECT ${SCAN_ALERT_SELECT} FROM public.intra_us_scanner_eod
+       WHERE load_dt_tm >= $1
+       ORDER BY load_dt_tm DESC LIMIT $2`,
+      [since, limit]
     )) as any[];
     return rows.map(processRow).filter((a): a is ScanAlert => a !== null);
   } catch (error) {
