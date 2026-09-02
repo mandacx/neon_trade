@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { format, subDays } from 'date-fns';
+import { format, parseISO, subDays } from 'date-fns';
 import Modal from '@/components/ui/Modal';
 import OptionContractChart, { OptionBarPoint, UnderlyingPoint, OiHistoryPoint } from '@/components/charts/OptionContractChart';
 import { isIntradayInterval } from '@/lib/alpaca';
@@ -33,9 +33,12 @@ interface OptionContractModalProps {
 
 export default function OptionContractModal({ symbol, expiry, strike, optType, onClose }: OptionContractModalProps) {
   const [interval, setInterval_] = useState<ModalInterval>('daily');
-  // Default to "All" so every historical OI/LTP data point for this contract
-  // marks on the chart immediately, per the request to mark them "from beginning".
-  const [rangePreset, setRangePreset] = useState<RangePreset>('all');
+  // 30 days by default rather than "All". "All" starts at ALL_FROM, and
+  // getOptionBars pages the Alpaca options endpoint up to 20 times to cover
+  // whatever span it's given — so opening this modal used to fire a burst of
+  // upstream requests to draw a chart nobody had asked to see in full yet.
+  // "All" is still one click away for anyone who wants it.
+  const [rangePreset, setRangePreset] = useState<RangePreset>('30d');
 
   const [optionBars, setOptionBars] = useState<OptionBarPoint[]>([]);
   const [underlyingBars, setUnderlyingBars] = useState<UnderlyingPoint[]>([]);
@@ -45,6 +48,13 @@ export default function OptionContractModal({ symbol, expiry, strike, optType, o
   const [historyLoading, setHistoryLoading] = useState(false);
 
   const today = format(new Date(), 'yyyy-MM-dd');
+
+  // A contract stops trading at expiry, so for an already-expired one the last
+  // N days *from today* is a window in which nothing exists — an empty chart,
+  // paid for with the same upstream fetches. Anchor the range to the earlier of
+  // today and expiry, so an expired contract shows its final N days of real
+  // data and a live one shows the most recent N.
+  const windowEnd = expiry < today ? expiry : today;
 
   // Full OI/LTP history for this exact strike+type — independent of the
   // chart's own interval/range controls, so "from the beginning" always holds
@@ -71,14 +81,18 @@ export default function OptionContractModal({ symbol, expiry, strike, optType, o
   // two series line up on the same time axis for direct comparison.
   useEffect(() => {
     let cancelled = false;
-    const from = rangePreset === 'all' ? ALL_FROM : format(subDays(new Date(), RANGE_PRESET_DAYS[rangePreset]), 'yyyy-MM-dd');
+    // parseISO (not new Date) so 'yyyy-MM-dd' is read as local midnight —
+    // new Date() would treat it as UTC and shift the day back in US timezones.
+    const from = rangePreset === 'all'
+      ? ALL_FROM
+      : format(subDays(parseISO(windowEnd), RANGE_PRESET_DAYS[rangePreset]), 'yyyy-MM-dd');
 
     setBarsLoading(true);
     setBarsError(null);
 
     Promise.all([
-      fetch(`/api/stocks/${symbol}/option-bars?expiry=${expiry}&strike=${strike}&optType=${optType}&interval=${interval}&from=${from}&to=${today}`).then(res => res.json()),
-      fetch(`/api/stocks/${symbol}/ohlc?interval=${interval}&from=${from}&to=${today}`).then(res => res.json()),
+      fetch(`/api/stocks/${symbol}/option-bars?expiry=${expiry}&strike=${strike}&optType=${optType}&interval=${interval}&from=${from}&to=${windowEnd}`).then(res => res.json()),
+      fetch(`/api/stocks/${symbol}/ohlc?interval=${interval}&from=${from}&to=${windowEnd}`).then(res => res.json()),
     ])
       .then(([optionJson, underlyingJson]) => {
         if (cancelled) return;
@@ -105,7 +119,7 @@ export default function OptionContractModal({ symbol, expiry, strike, optType, o
       .finally(() => { if (!cancelled) setBarsLoading(false); });
 
     return () => { cancelled = true; };
-  }, [symbol, expiry, strike, optType, interval, rangePreset, today]);
+  }, [symbol, expiry, strike, optType, interval, rangePreset, windowEnd]);
 
   const occLabel = `${symbol.toUpperCase()} ${expiry} ${strike} ${optType === 'call' ? 'Call' : 'Put'}`;
 
