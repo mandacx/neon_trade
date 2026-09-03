@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAllStocksLatest, getAllStocksByDate, getAllStocksByDateAndExpiry, getAvailableDates, getAvailableExpiryDates } from '@/lib/db';
-import { calculateLevels, findClosestLevel } from '@/lib/calculations';
+import { calculateLevels, findClosestLevel, rebaseLevels } from '@/lib/calculations';
 import { deriveFilterOptions, getSecuritiesFilterOptions, getSecuritiesMeta, applySecuritiesFilters, attachSecuritiesMeta } from '@/lib/securitiesFilters';
+import { getSnapshotsMulti } from '@/lib/alpaca';
 import { format } from 'date-fns';
 import { requireFeatureApi } from '@/lib/routeGuards';
 import { levelGate } from '@/lib/levelAccess';
@@ -57,17 +58,34 @@ export async function GET(request: NextRequest) {
       stocksData = await getAllStocksLatest();
     }
 
+    // Positions are only rebased onto a live LTP when looking at the latest
+    // trade date — a historical date's levels stay measured against that
+    // day's own close, same rule the stock detail page follows.
+    const [latestDate] = date ? await getAvailableDates(1) : [];
+    const isLatestDate = !date || date === latestDate;
+    const liveBySymbol: Record<string, number> = {};
+    if (isLatestDate && stocksData.length > 0) {
+      const snapshots = await getSnapshotsMulti(stocksData.map(d => d.SYMBOL));
+      for (const [symbol, snap] of Object.entries(snapshots)) {
+        const price = snap.dailyBar?.c ?? snap.latestTrade?.p;
+        if (price) liveBySymbol[symbol] = price;
+      }
+    }
+
     // Process each stock to calculate levels
     const processedStocks = stocksData.map(data => {
       const levels = calculateLevels(data);
-      const closest = findClosestLevel(levels);
+      const livePrice = liveBySymbol[data.SYMBOL];
+      const effectiveLevels = livePrice ? rebaseLevels(levels, livePrice) : levels;
+      const closest = findClosestLevel(effectiveLevels);
 
       return {
         symbol: data.SYMBOL,
         close: data.CLOSE,
+        livePrice: livePrice ?? null,
         tradeDate: data.TRADE_DATE,
         expiryDate: data.EXPIRY_DT,
-        levels: levels.map(l => ({
+        levels: effectiveLevels.map(l => ({
           name: l.name,
           value: l.value,
           price: l.price,

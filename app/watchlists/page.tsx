@@ -6,6 +6,8 @@ import Header from '@/components/layout/Header';
 import AddSymbolInput from '@/components/watchlists/AddSymbolInput';
 import AlertsWidget from '@/components/watchlists/AlertsWidget';
 import { formatCurrency, getLevelColor, getLevelDisplayName } from '@/lib/utils';
+import { rebaseLevels, findClosestLevel } from '@/lib/calculations';
+import type { LevelCalculation } from '@/types/stock';
 
 interface WatchlistSummary { id: string; name: string; isSystem: boolean; symbolCount: number }
 interface QuoteRow {
@@ -23,12 +25,29 @@ interface LevelRow {
   symbol: string;
   expiryDate: string;
   tradeDate: string;
+  levels: { name: LevelCalculation['name']; price: number }[];
   closestLevel: 'put_low' | 'put_int' | 'put_call_int' | 'call_int' | 'call_high' | null;
   closestPrice: number | null;
   distance: number | null;
   distancePercent: number | null;
   levelAccess: 'latest' | 'delayed';
   requiredFeature: string | null;
+}
+
+// The levels API always measures against the EOD close. Once a live LTP is
+// available for the symbol (from the quotes route), rebase onto it so the
+// "nearest level" reflects where the price actually is now — same rationale
+// as the stock detail page's live rebase.
+function rebaseToLtp(level: LevelRow | undefined, livePrice: number | null | undefined): LevelRow | undefined {
+  if (!level || livePrice == null || level.levels.length === 0) return level;
+  const closest = findClosestLevel(rebaseLevels(level.levels, livePrice));
+  return {
+    ...level,
+    closestLevel: closest.name as LevelRow['closestLevel'],
+    closestPrice: closest.price,
+    distance: closest.distance,
+    distancePercent: closest.value * 100,
+  };
 }
 
 type DirectionFilter = 'all' | 'up' | 'down';
@@ -186,7 +205,10 @@ export default function WatchlistsPage() {
   const thin = viewMode === 'thin';
   const cellPad = thin ? 'px-3 py-1' : 'px-4 py-2.5';
   const canEdit = !!selected && !selected.isSystem;
-  const levelBySymbol = new Map((levelRows ?? []).map(l => [l.symbol, l]));
+  const lastPriceBySymbol = new Map((rows ?? []).map(r => [r.symbol, r.lastPrice]));
+  const levelBySymbol = new Map(
+    (levelRows ?? []).map(l => [l.symbol, rebaseToLtp(l, lastPriceBySymbol.get(l.symbol))])
+  );
 
   const visibleRows = (rows ?? []).filter(r => {
     const q = search.trim().toUpperCase();

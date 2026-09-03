@@ -813,6 +813,13 @@ export default function TVChart({
   // triggered level, placed at that day's first loaded bar (works at any
   // interval). Grouped so multiple same-day alerts (e.g. different expiries)
   // render as one marker with a count badge instead of stacking illegibly.
+  //
+  // The last loaded bar also gets its own marker: the closest level's name
+  // and % distance, rebased onto the live price (same `levels`/`closestLevel`
+  // the price-line overlay above uses). Gated on `livePrice` being defined —
+  // that's only true in current/unexpired mode (see page.tsx's `basisPrice`)
+  // — so a historical/expired view or a bar with no live price never gets a
+  // stale or misleading label.
   useEffect(() => {
     const byDate = new Map<string, ScanAlert[]>();
     visibleScanAlerts.forEach(a => {
@@ -844,15 +851,28 @@ export default function TVChart({
         };
       });
     const markers: SeriesMarker<Time>[] = rawMarkers
-      .filter((m): m is SeriesMarker<Time> => m !== null)
-      .sort((a, b) => (a.time as number) - (b.time as number));
+      .filter((m): m is SeriesMarker<Time> => m !== null);
+
+    const lastBar = processedBars[processedBars.length - 1];
+    const closestLevelData = closestLevel ? levels.find(l => l.name === closestLevel) : undefined;
+    if (livePrice !== undefined && lastBar && closestLevelData) {
+      markers.push({
+        time: lastBar.time as Time,
+        position: 'belowBar',
+        shape: 'square',
+        color: getLevelColor(closestLevelData.name),
+        text: `${getLevelDisplayName(closestLevelData.name)} ${closestLevelData.value >= 0 ? '+' : ''}${formatPercentage(closestLevelData.value)}`,
+      });
+    }
+
+    markers.sort((a, b) => (a.time as number) - (b.time as number));
 
     try {
       candleSeriesRef.current.setMarkers(markers);
     } catch (err) {
       console.error('Error setting scan alert markers:', err);
     }
-  }, [visibleScanAlerts, isLoading, processedBars]);
+  }, [visibleScanAlerts, isLoading, processedBars, levels, closestLevel, livePrice]);
 
   // Live price — nudges the most recent bar's OHLC in place rather than trying
   // to roll over into a new bar client-side (which would need to duplicate the

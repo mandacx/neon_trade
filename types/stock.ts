@@ -54,6 +54,7 @@ export interface QuadrantStock {
   symbol: string;
   name?: string | null;
   close: number;
+  livePrice?: number | null;
   tradeDate: string;
   expiryDate?: string;
   levels: LevelCalculation[];

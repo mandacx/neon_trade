@@ -283,6 +283,7 @@ function QuadrantPageInner() {
                       <tr>
                         <th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Symbol</th>
                         <th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Name</th>
+                        <th className="px-4 py-2 text-right text-[10px] font-semibold text-gray-500 uppercase">LTP</th>
                         <th className="px-4 py-2 text-right text-[10px] font-semibold text-gray-500 uppercase">Close</th>
                         <th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Closest Level</th>
                         <th className="px-4 py-2 text-right text-[10px] font-semibold text-gray-500 uppercase">Distance</th>
@@ -302,7 +303,10 @@ function QuadrantPageInner() {
                           <td className="px-4 py-2 text-xs text-gray-600 max-w-[160px] truncate" title={(stock as any).name || ''}>
                             {(stock as any).name || '—'}
                           </td>
-                          <td className="px-4 py-2 text-xs text-right font-mono">${stock.close.toFixed(2)}</td>
+                          <td className="px-4 py-2 text-xs text-right font-mono">
+                            {stock.livePrice != null ? `$${stock.livePrice.toFixed(2)}` : '—'}
+                          </td>
+                          <td className="px-4 py-2 text-xs text-right font-mono text-gray-500">${stock.close.toFixed(2)}</td>
                           <td className="px-4 py-2 text-xs">
                             <span className="px-2 py-0.5 rounded text-[10px] font-semibold text-white"
                               style={{ backgroundColor: LEVEL_COLORS[stock.closestLevel] || '#6b7280' }}>

@@ -33,12 +33,17 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   const rows = stockRows.map(data => {
     const withheld = gate.withheld(data.TRADE_DATE);
-    const closest = withheld ? null : findClosestLevel(calculateLevels(data));
+    const levels = withheld ? [] : calculateLevels(data);
+    const closest = withheld ? null : findClosestLevel(levels);
     return {
       symbol: data.SYMBOL,
       expiryDate: data.EXPIRY_DT,
       tradeDate: data.TRADE_DATE,
       close: data.CLOSE,
+      // Raw name/price pairs for every level — lets the client rebase onto a
+      // live LTP (see rebaseLevels in lib/calculations.ts) instead of only
+      // ever showing the level closest to this EOD close.
+      levels: levels.map(l => ({ name: l.name, price: l.price })),
       closestLevel: closest?.name ?? null,
       closestPrice: closest?.price ?? null,
       distance: closest?.distance ?? null,

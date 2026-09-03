@@ -44,6 +44,22 @@ export function calculateLevels(data: StockData): LevelCalculation[] {
 }
 
 /**
+ * Recompute levels' value/distance against a different reference price (e.g.
+ * a live LTP instead of the EOD close each level's `value` was originally
+ * computed against), keeping each level's own name/price. Mirrors the
+ * `(CLOSE - LEVEL_PRICE) / CLOSE` formula in calculateLevels, just with the
+ * reference price swapped out.
+ */
+export function rebaseLevels(levels: { name: LevelCalculation['name']; price: number }[], price: number): LevelCalculation[] {
+  return levels.map(l => ({
+    name: l.name,
+    price: l.price,
+    value: (price - l.price) / price,
+    distance: Math.abs(price - l.price),
+  }));
+}
+
+/**
  * Find the level closest to 0 (closest to current price)
  */
 export function findClosestLevel(levels: LevelCalculation[]): LevelCalculation {
