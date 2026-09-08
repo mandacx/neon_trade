@@ -189,7 +189,7 @@ export default function WatchlistsPage() {
   const [proximityThreshold, setProximityThreshold] = useState(5);
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
-  const [viewMode, setViewMode] = useState<ViewMode>('broad');
+  const [viewMode, setViewMode] = useState<ViewMode>('thin');
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [visibleCols, setVisibleCols] = useState<Set<ColumnKey>>(new Set(OPTIONAL_COLUMNS.map(c => c.key)));
   const [customizeOpen, setCustomizeOpen] = useState(false);
