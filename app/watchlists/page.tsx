@@ -55,7 +55,7 @@ type ViewMode = 'thin' | 'broad';
 type LevelKey = 'put_low' | 'put_int' | 'put_call_int' | 'call_int' | 'call_high';
 const LEVEL_FILTER_OPTIONS: LevelKey[] = ['call_high', 'call_int', 'put_call_int', 'put_int', 'put_low'];
 
-type SortKey = 'symbol' | 'lastPrice' | 'change' | 'open' | 'dayLow' | 'dayHigh' | 'volume' | 'level';
+type SortKey = 'symbol' | 'lastPrice' | 'change' | 'changePercent' | 'open' | 'dayLow' | 'dayHigh' | 'volume' | 'level';
 
 function fmtExpiry(dateStr: string): string {
   try {
@@ -84,7 +84,7 @@ function fmtVolume(v: number | null): string {
   return new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(v);
 }
 
-function ChangeCell({ change, changePercent }: { change: number | null; changePercent: number | null }) {
+function ChangeCell({ change }: { change: number | null }) {
   if (change == null) return <span className="text-xs text-gray-300">—</span>;
   const positive = change > 0;
   const negative = change < 0;
@@ -92,9 +92,18 @@ function ChangeCell({ change, changePercent }: { change: number | null; changePe
   return (
     <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-semibold tabular-nums whitespace-nowrap ${tone}`}>
       {positive && '▲'}{negative && '▼'} {positive ? '+' : ''}{formatCurrency(change)}
-      {changePercent != null && (
-        <span className="opacity-70">({positive ? '+' : ''}{changePercent.toFixed(2)}%)</span>
-      )}
+    </span>
+  );
+}
+
+function ChangePercentCell({ changePercent }: { changePercent: number | null }) {
+  if (changePercent == null) return <span className="text-xs text-gray-300">—</span>;
+  const positive = changePercent > 0;
+  const negative = changePercent < 0;
+  const tone = positive ? 'bg-green-50 text-green-700' : negative ? 'bg-red-50 text-red-700' : 'bg-gray-100 text-gray-500';
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-semibold tabular-nums whitespace-nowrap ${tone}`}>
+      {positive ? '+' : ''}{changePercent.toFixed(2)}%
     </span>
   );
 }
@@ -228,6 +237,7 @@ export default function WatchlistsPage() {
       case 'symbol': return r.symbol;
       case 'lastPrice': return r.lastPrice;
       case 'change': return r.change;
+      case 'changePercent': return r.changePercent;
       case 'open': return r.open;
       case 'dayLow': return r.dayLow;
       case 'dayHigh': return r.dayHigh;
@@ -384,7 +394,7 @@ export default function WatchlistsPage() {
     await Promise.all([loadRows(selected.id), loadLevels(selected.id, selectedExpiry), refreshLists(true)]);
   }
 
-  const colSpan = 3 + visibleCols.size + (canEdit ? 1 : 0);
+  const colSpan = 4 + visibleCols.size + (canEdit ? 1 : 0);
 
   if (listsLoading) {
     return (
@@ -608,6 +618,7 @@ export default function WatchlistsPage() {
                   <th className={cellPad}><SortHeader label="Symbol" active={sortKey === 'symbol'} dir={sortDir} onClick={() => toggleSort('symbol')} /></th>
                   <th className={`${cellPad} text-right`}><SortHeader label="Last Price" align="right" active={sortKey === 'lastPrice'} dir={sortDir} onClick={() => toggleSort('lastPrice')} /></th>
                   <th className={`${cellPad} text-right`}><SortHeader label="Change" align="right" active={sortKey === 'change'} dir={sortDir} onClick={() => toggleSort('change')} /></th>
+                  <th className={`${cellPad} text-right`}><SortHeader label="Change %" align="right" active={sortKey === 'changePercent'} dir={sortDir} onClick={() => toggleSort('changePercent')} /></th>
                   {visibleCols.has('open') && <th className={`${cellPad} text-right`}><SortHeader label="Open" align="right" active={sortKey === 'open'} dir={sortDir} onClick={() => toggleSort('open')} /></th>}
                   {visibleCols.has('dayLow') && <th className={`${cellPad} text-right`}><SortHeader label="Day Low" align="right" active={sortKey === 'dayLow'} dir={sortDir} onClick={() => toggleSort('dayLow')} /></th>}
                   {visibleCols.has('dayHigh') && <th className={`${cellPad} text-right`}><SortHeader label="Day High" align="right" active={sortKey === 'dayHigh'} dir={sortDir} onClick={() => toggleSort('dayHigh')} /></th>}
@@ -647,7 +658,12 @@ export default function WatchlistsPage() {
                     </td>
                     <td className={`${cellPad} text-right`}>
                       <Link href={`/stock/${encodeURIComponent(r.symbol)}`} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="inline-block hover:underline">
-                        <ChangeCell change={r.change} changePercent={r.changePercent} />
+                        <ChangeCell change={r.change} />
+                      </Link>
+                    </td>
+                    <td className={`${cellPad} text-right`}>
+                      <Link href={`/stock/${encodeURIComponent(r.symbol)}`} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="inline-block hover:underline">
+                        <ChangePercentCell changePercent={r.changePercent} />
                       </Link>
                     </td>
                     {visibleCols.has('open') && <td className={`${cellPad} text-right text-gray-600 tabular-nums`}>{fmtPrice(r.open)}</td>}
