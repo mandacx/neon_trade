@@ -14,16 +14,14 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Search in our database first
-    const dbResults = await searchStocks(query, 20);
-
-    // Also try Tradier for additional symbols
-    let tradierResults: Array<{ symbol: string; description: string }> = [];
-    try {
-      tradierResults = await searchSymbols(query);
-    } catch (error) {
-      console.warn('Tradier search failed, using DB results only:', error);
-    }
+    // Search our DB and Tradier in parallel — Tradier only supplements with
+    // symbols missing from the DB, so a slow/cold Tradier call (see
+    // lib/tradier.ts's client timeout) shouldn't hold up the DB results.
+    // searchSymbols already catches its own errors and resolves to [].
+    const [dbResults, tradierResults] = await Promise.all([
+      searchStocks(query, 20),
+      searchSymbols(query),
+    ]);
 
     // Combine and deduplicate results
     const combined = [

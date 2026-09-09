@@ -10,6 +10,7 @@ if (!TRADIER_API_KEY) {
 // Create axios instance with default config
 const tradierClient: AxiosInstance = axios.create({
   baseURL: TRADIER_API_URL,
+  timeout: 2000,
   headers: {
     'Authorization': `Bearer ${TRADIER_API_KEY}`,
     'Accept': 'application/json',
