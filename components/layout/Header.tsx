@@ -64,7 +64,7 @@ export default function Header() {
 
   return (
     <header className="bg-white shadow-sm border-b border-gray-200">
-      <div className="w-full max-w-[1920px] mx-auto px-4">
+      <div className="container mx-auto px-4">
         <div className="flex items-center h-14 gap-4">
           {/* Logo — links home */}
           <Link href="/" className="flex items-center shrink-0">

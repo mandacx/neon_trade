@@ -177,7 +177,7 @@ function ScanAlertsHistoricalInner() {
     <>
       <Header />
       <div className="min-h-screen bg-gray-50">
-        <div className="w-full max-w-[1920px] mx-auto px-4 py-4 space-y-3">
+        <div className="container mx-auto px-4 py-4 space-y-3">
 
           {/* Collapsible Filters */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
