@@ -215,6 +215,11 @@ export default function Header() {
           </button>
         </div>
 
+        {/* Search — always visible on mobile, no need to open the menu */}
+        <div className="md:hidden pb-3">
+          <StockSearch compact />
+        </div>
+
         {/* Mobile dropdown */}
         <div id="mobile-menu" className="hidden md:hidden border-t border-gray-100 py-3 space-y-1">
           <Link href="/" className="block px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 rounded-lg">
@@ -267,9 +272,6 @@ export default function Header() {
           >
             📘 Guide
           </button>
-          <div className="px-3 pt-1">
-            <StockSearch compact />
-          </div>
           <div className="px-3 pt-2 border-t border-gray-100 mt-2">
             {authCtx.loggedIn ? (
               <div className="space-y-1">
