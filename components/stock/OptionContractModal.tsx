@@ -134,7 +134,7 @@ export default function OptionContractModal({ symbol, expiry, strike, optType, o
         </span>
       }
       onClose={onClose}
-      widthClassName="max-w-5xl"
+      widthClassName="max-w-6xl"
     >
       <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
         <div className="flex items-center gap-3">

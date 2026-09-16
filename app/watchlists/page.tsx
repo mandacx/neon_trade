@@ -411,7 +411,7 @@ export default function WatchlistsPage() {
     <>
       <Header />
       <div className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100">
-        <div className="container mx-auto px-4 py-6">
+        <div className="w-full max-w-[1920px] mx-auto px-4 py-6">
           <div className="mb-5">
             <h1 className="text-xl font-bold text-gray-900">Watchlists</h1>
             <p className="text-xs text-gray-400 mt-0.5">Live prices for your own lists, plus curated sector and index lists.</p>

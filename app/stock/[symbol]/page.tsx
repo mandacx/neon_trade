@@ -1030,7 +1030,7 @@ export default function StockPage() {
     <>
       <Header />
       <div className="min-h-screen bg-gray-50">
-        <div className="container mx-auto px-4 py-8">
+        <div className="w-full max-w-[1920px] mx-auto px-4 py-8">
           <div className="mb-6">
             <ScanAlertsTicker />
           </div>
