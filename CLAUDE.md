@@ -59,3 +59,7 @@ Column naming is inconsistent between the DB (`snake_case`) and the `StockData` 
 - All calculation happens server-side in API routes; chart components (`components/charts/*`) are `'use client'` and just render pre-computed data.
 - API routes return `{ success: boolean, data?, error?, message? }` (see `types/api.ts` `ApiResponse<T>`), and query failures are generally caught and degrade to empty arrays/`null` rather than throwing, so the frontend can render partial dashboards when one data source (e.g. Alpaca) is down.
 - Symbols are always upper-cased before querying (`symbol.toUpperCase()`) since the DB stores them uppercase.
+
+## Known follow-ups
+
+- **[#4](https://github.com/mandacx/neon_trade/issues/4) — per-request latency from `getCurrentUserContext()`.** Every API route that gates on plan/features (including `/api/stocks/[symbol]/levels`, hit on every expiry click on the stock page) calls `getCurrentUserContext()` (`lib/appUsers.ts`) first, which does a Neon Auth session check plus 4 more DB queries (profile+plan join, feature overrides, role, `auth.listAccounts()`), then a separate `checkRateLimit()` DB round trip — 5+ sequential round trips before the actual data query runs, on every call. Worth investigating: per-request memoization, dropping the `listAccounts()` call outside `/profile`, or parallelizing the rate-limit check with the context fetch. Needs care around plan-change/session-invalidation correctness — treat as a dedicated, reviewed change.
