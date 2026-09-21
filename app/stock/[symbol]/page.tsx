@@ -154,6 +154,10 @@ export default function StockPage() {
   const [historicalLevels, setHistoricalLevels] = useState<Map<string, LevelHistoryEntry>>(new Map());
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  // True while the levels/OI panel is refetching for a newly-selected expiry —
+  // distinct from `isLoading` (first paint) so the expiry buttons can show a
+  // spinner instead of blanking the whole page on every click.
+  const [levelsRefreshing, setLevelsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expiryDates, setExpiryDates] = useState<string[]>([]);
   const [selectedExpiry, setSelectedExpiry] = useState<string>('');
@@ -403,6 +407,7 @@ export default function StockPage() {
     // response resolves LAST wins, which isn't always the correct one —
     // the stale request can overwrite good data if it's slower.
     let cancelled = false;
+    setLevelsRefreshing(true);
 
     const fetchHistoricalLevels = async () => {
       try {
@@ -463,6 +468,8 @@ export default function StockPage() {
         }
       } catch (err) {
         console.error('Error fetching historical levels:', err);
+      } finally {
+        if (!cancelled) setLevelsRefreshing(false);
       }
     };
 
@@ -866,9 +873,15 @@ export default function StockPage() {
           stretched column rather than pushing the card taller. */}
       <div className="flex-1 min-h-0 overflow-y-auto p-3">
         {/* Level Details Table */}
-        <h4 className="text-sm font-bold mb-2">
+        <h4 className="text-sm font-bold mb-2 flex items-center gap-1.5">
           Price Levels
           <Link href="/guide" className="ml-2 text-[11px] font-medium text-blue-600 hover:underline">What do these mean?</Link>
+          {levelsRefreshing && (
+            <span className="ml-auto flex items-center gap-1 text-[10px] font-medium text-blue-600">
+              <span className="inline-block animate-spin h-2.5 w-2.5 border-2 border-blue-600 border-t-transparent rounded-full" />
+              Updating…
+            </span>
+          )}
         </h4>
         {displayLevels.length === 0 ? (
           <div className="text-center py-4 text-gray-500 text-xs">
@@ -876,7 +889,7 @@ export default function StockPage() {
             <p className="text-[11px]">Displaying broker OHLC data only</p>
           </div>
         ) : (
-          <div className="space-y-1.5">
+          <div className={`space-y-1.5 transition-opacity ${levelsRefreshing ? 'opacity-50' : ''}`}>
             {displayLevels.map((level: any) => {
             const isClosest = level.name === closestLevelName;
             const color = isClosest ? '#3B82F6' : getLevelColor(level.name);
@@ -1040,6 +1053,12 @@ export default function StockPage() {
             <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-sm font-bold text-gray-800 mr-1">Expiry Date:</span>
+                {levelsRefreshing && (
+                  <span className="flex items-center gap-1 text-[11px] font-medium text-blue-600 mr-1">
+                    <span className="inline-block animate-spin h-2.5 w-2.5 border-2 border-blue-600 border-t-transparent rounded-full" />
+                    Refreshing levels…
+                  </span>
+                )}
 
                 {historicalExpiryDates.length > 0 && (
                   <div className="flex gap-1 bg-gray-100 p-1 rounded-full mr-1.5">
@@ -1077,6 +1096,9 @@ export default function StockPage() {
                         }`}
                       >
                         {date}
+                        {isActive && levelsRefreshing && (
+                          <span className="inline-block ml-1.5 animate-spin h-2.5 w-2.5 border-2 border-white border-t-transparent rounded-full align-middle" />
+                        )}
                         {alertCount > 0 && (
                           <span className={`ml-1.5 ${isActive ? 'opacity-90' : 'text-purple-600'}`}>
                             🔔{alertCount}
@@ -1114,6 +1136,9 @@ export default function StockPage() {
                               }`}
                             >
                               {date}
+                              {isActive && levelsRefreshing && (
+                                <span className="inline-block ml-1.5 animate-spin h-2.5 w-2.5 border-2 border-white border-t-transparent rounded-full align-middle" />
+                              )}
                               {alertCount > 0 && (
                                 <span className={`ml-1.5 ${isActive ? 'opacity-90' : 'text-purple-600'}`}>
                                   🔔{alertCount}
