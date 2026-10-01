@@ -108,6 +108,19 @@ function shiftDateString(dateStr: string, days: number): string {
 // as epoch-second strings (chart time values), used only as a fallback for
 // when `ohlcData` is momentarily empty — the common case is a real
 // 'YYYY-MM-DD' string from an actual loaded bar.
+// Merges a freshly loaded chunk into existing series data: de-duplicates on the
+// key (later chunk wins) and returns ascending order, so overlapping or
+// out-of-order loads can never leave duplicate or misordered bars on the chart.
+function mergeSorted<T>(a: T[], b: T[], key: (item: T) => string | number): T[] {
+  const byKey = new Map<string | number, T>();
+  a.forEach(item => byKey.set(key(item), item));
+  b.forEach(item => byKey.set(key(item), item));
+  return Array.from(byKey.values()).sort((x, y) => {
+    const kx = key(x), ky = key(y);
+    return kx < ky ? -1 : kx > ky ? 1 : 0;
+  });
+}
+
 function dateStringFrom(dateOnly: string | undefined, epochSecondsStr: string): string {
   if (dateOnly) return dateOnly;
   const epoch = Number(epochSecondsStr);
@@ -252,6 +265,14 @@ export default function StockPage() {
   const isLoadingMoreRef = useRef(false);
   const selectedExpiryRef = useRef('');
   const chartIntervalRef = useRef<SelectableInterval>('daily');
+  // Bumped every time the loaded OHLC window is replaced wholesale (initial
+  // load, interval switch, expiry jump). A scroll-back handleLoadMore that
+  // started against an older window compares against this and discards its
+  // result — otherwise its chunk gets prepended to the new window and leaves a
+  // hole of missing bars between the two.
+  const windowEpochRef = useRef(0);
+  // True while the expiry-jump effect is replacing the OHLC window.
+  const [windowLoading, setWindowLoading] = useState(false);
   useEffect(() => { ohlcDataRef.current = ohlcData; }, [ohlcData]);
   useEffect(() => { isLoadingMoreRef.current = isLoadingMore; }, [isLoadingMore]);
   useEffect(() => { selectedExpiryRef.current = selectedExpiry; }, [selectedExpiry]);
@@ -261,9 +282,9 @@ export default function StockPage() {
     if (!symbol) return;
 
     const fetchData = async () => {
+      windowEpochRef.current++;
       setIsLoading(true);
       setError(null);
-
       try {
         const { initialDays } = INTERVAL_CONFIG[chartInterval];
         const to = format(new Date(), 'yyyy-MM-dd');
@@ -492,6 +513,8 @@ export default function StockPage() {
     if (expiryMode === 'current' && prevMode === 'current') return;
 
     let cancelled = false;
+    windowEpochRef.current++;
+    setWindowLoading(true);
 
     const jumpToWindow = async () => {
       const { initialDays } = INTERVAL_CONFIG[chartInterval];
@@ -530,6 +553,8 @@ export default function StockPage() {
         }
       } catch (err) {
         console.error('Error jumping chart window to expiry:', err);
+      } finally {
+        if (!cancelled) setWindowLoading(false);
       }
     };
 
@@ -644,6 +669,9 @@ export default function StockPage() {
   ) => {
     if (isLoadingMoreRef.current || !symbol) return;
 
+    const epoch = windowEpochRef.current;
+    const isStale = () => epoch !== windowEpochRef.current;
+
     try {
       setIsLoadingMore(true);
 
@@ -680,6 +708,10 @@ export default function StockPage() {
 
       const result = await ohlcResponse.json();
 
+      // The window was replaced (expiry/interval switch) while this chunk was
+      // in flight — it belongs to the old window, so drop it.
+      if (isStale()) return;
+
       // Always mark range as loaded to prevent re-fetching empty ranges
       loadedRangesRef.current.push({ from, to });
 
@@ -687,20 +719,15 @@ export default function StockPage() {
         const newData = result.data.data;
 
         // Merge new data with existing data
-        setOhlcData(prevData => {
-          if (direction === 'past') {
-            // Prepend older data
-            return [...newData, ...prevData];
-          } else {
-            // Append newer data
-            return [...prevData, ...newData];
-          }
-        });
+        setOhlcData(prevData =>
+          mergeSorted(prevData, newData, (b: any) => b.timestamp ?? b.date)
+        );
 
         const scanAlertsResponse = await fetch(`/api/stocks/${symbol}/scan-alerts?from=${from}&to=${to}`);
+        if (isStale()) return;
         if (scanAlertsResponse.ok) {
           const scanAlertsResult = await scanAlertsResponse.json();
-          if (scanAlertsResult.success && scanAlertsResult.data.alerts.length > 0) {
+          if (!isStale() && scanAlertsResult.success && scanAlertsResult.data.alerts.length > 0) {
             const newAlerts: ScanAlert[] = scanAlertsResult.data.alerts;
             setScanAlerts(prevAlerts => {
               const seen = new Set(prevAlerts.map(a => `${a.symbol}|${a.expiryDate}|${a.loadDateTime}`));
@@ -710,15 +737,16 @@ export default function StockPage() {
           }
         }
 
-        if (selectedExpiryRef.current) {
+        const expiryAtStart = selectedExpiryRef.current;
+        if (expiryAtStart && !isStale()) {
           const levelsResponse = await fetch(
-            `/api/stocks/${symbol}/levels?expiry=${selectedExpiryRef.current}&range=true&from=${from}&to=${to}`
+            `/api/stocks/${symbol}/levels?expiry=${expiryAtStart}&range=true&from=${from}&to=${to}`
           );
 
           if (levelsResponse.ok) {
             const levelsResult = await levelsResponse.json();
 
-            if (levelsResult.success && levelsResult.data?.history) {
+            if (!isStale() && selectedExpiryRef.current === expiryAtStart && levelsResult.success && levelsResult.data?.history) {
               const historyData = levelsResult.data.history;
 
               setHistoricalLevels(prevMap => {
@@ -745,10 +773,7 @@ export default function StockPage() {
                   oiDiff: Number(item.oi.oiDiff) || 0,
                 }));
 
-              setOiData(prevData => direction === 'past'
-                ? [...newOiData, ...prevData]
-                : [...prevData, ...newOiData]
-              );
+              setOiData(prevData => mergeSorted(prevData, newOiData, (o: any) => o.time));
             }
           }
         }
@@ -1187,7 +1212,7 @@ export default function StockPage() {
 
           {/* Main Chart + side panel */}
           {!chartStackCollapsed && (
-            <div className="mb-8">
+            <div className="relative mb-8">
               <TVChart
                 symbol={symbol.toUpperCase()}
                 candleData={candleData}
@@ -1213,6 +1238,18 @@ export default function StockPage() {
                 onLoadMore={handleLoadMore}
                 isLoadingMore={isLoadingMore}
               />
+              {(windowLoading || levelsRefreshing) && (
+                <div
+                  role="status"
+                  aria-live="polite"
+                  className="absolute inset-0 z-20 flex items-center justify-center rounded-lg bg-white/80 backdrop-blur-[1px]"
+                >
+                  <div className="flex items-center gap-2 text-sm font-medium text-blue-600">
+                    <span className="inline-block animate-spin h-5 w-5 border-2 border-blue-600 border-t-transparent rounded-full" />
+                    Loading {selectedExpiry} chart…
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
