@@ -1,3 +1,4 @@
+import { cache } from 'react';
 import { sql } from '@/lib/db';
 import { auth } from '@/lib/auth/server';
 
@@ -16,8 +17,6 @@ export interface CurrentUserContext {
   /** True while a self-serve trial is the reason they're currently on Pro (as opposed to a paid/admin-granted Pro period). */
   isTrialing: boolean;
   telegramLinked: boolean;
-  /** True if this user has a credential (email+password) account linked — false for Google-only signups, who have nothing to change a password on. */
-  hasPassword: boolean;
 }
 
 const FALLBACK_PLAN_CODE = 'FREE';
@@ -86,18 +85,38 @@ function applyOverrides(planFeatures: string[], overrides: Array<{ feature: stri
  * for ~5 minutes, so a name change may not be reflected here immediately —
  * accepted as a minor, cosmetic, bounded staleness.
  */
-export async function getCurrentUserContext(): Promise<CurrentUserContext> {
+export const getCurrentUserContext = cache(async (): Promise<CurrentUserContext> => {
+  return getUserContextFor(await getSessionUser());
+});
+
+type SessionData = NonNullable<Awaited<ReturnType<typeof auth.getSession>>['data']>;
+export type SessionUser = SessionData['user'];
+
+/**
+ * Just the Neon Auth identity, without the plan/feature DB queries. Lets a
+ * Route Handler start work that only needs the user id (the rate-limit
+ * counter) in parallel with getUserContextFor().
+ *
+ * Both this and getCurrentUserContext are wrapped in React cache(), which
+ * dedupes within ONE server render (root layout + section layout + page all
+ * ask) and is a no-op in Route Handlers. It never spans requests, so a plan
+ * change, override or sign-out is seen on the very next request.
+ */
+export const getSessionUser = cache(async (): Promise<SessionUser | null> => {
   const { data } = await withCookieWriteFallback(() => auth.getSession(), { data: null, error: null });
-  if (!data?.user) {
+  return data?.user ?? null;
+});
+
+/** getCurrentUserContext() for an already-resolved session user. */
+export async function getUserContextFor(user: SessionUser | null): Promise<CurrentUserContext> {
+  if (!user) {
     const { planCode, features } = await freePlanContext();
     return {
       loggedIn: false, userId: null, email: null, name: null, emailVerified: false, isAdmin: false,
       planCode, features, planExpiresAt: null, hasUsedTrial: false, isTrialing: false,
-      telegramLinked: false, hasPassword: false,
+      telegramLinked: false,
     };
   }
-
-  const { user } = data;
 
   type ProfileRow = { plan_expires_at: string | null; trial_started_at: string | null; telegram_chat_id: string | null; plan_code: string; features: string[] };
   const selectProfile = () => sql`
@@ -107,13 +126,11 @@ export async function getCurrentUserContext(): Promise<CurrentUserContext> {
     WHERE u.user_id = ${user.id}
   ` as unknown as Promise<ProfileRow[]>;
 
-  const [profileRows, overrideRows, roleRows, accountsResult] = await Promise.all([
+  const [profileRows, overrideRows, roleRows] = await Promise.all([
     selectProfile(),
     sql`SELECT feature, granted FROM public.nt_user_feature_overrides WHERE user_id = ${user.id}`,
     sql`SELECT role FROM neon_auth."user" WHERE id = ${user.id}`,
-    withCookieWriteFallback(() => auth.listAccounts(), { data: [], error: null }),
   ]);
-  const hasPassword = (accountsResult.data ?? []).some(a => a.providerId === 'credential');
 
   let profile = profileRows[0];
   if (!profile) {
@@ -146,6 +163,17 @@ export async function getCurrentUserContext(): Promise<CurrentUserContext> {
     hasUsedTrial,
     isTrialing,
     telegramLinked: !!profile?.telegram_chat_id,
-    hasPassword,
   };
+}
+
+/**
+ * True if the signed-in user has a credential (email+password) account
+ * linked — false for Google-only signups, who have nothing to change a
+ * password on. A separate call to Neon Auth, so it lives outside
+ * getCurrentUserContext (which runs on every request) and only /profile pays
+ * for it.
+ */
+export async function getHasPassword(): Promise<boolean> {
+  const { data } = await withCookieWriteFallback(() => auth.listAccounts(), { data: [], error: null });
+  return (data ?? []).some(a => a.providerId === 'credential');
 }

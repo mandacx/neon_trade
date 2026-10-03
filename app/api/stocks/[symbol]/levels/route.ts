@@ -3,7 +3,7 @@ import { getLatestStockData, getHistoricalStockData, getStockDataByExpiry, getSt
 import { calculateLevels, findClosestLevel } from '@/lib/calculations';
 import { formatPercentage } from '@/lib/utils';
 import { format, subDays } from 'date-fns';
-import { getCurrentUserContext } from '@/lib/appUsers';
+import { getSessionUser, getUserContextFor } from '@/lib/appUsers';
 import { levelGate, LEVEL_RANGE_RATE, LEVEL_POINT_RATE, DELAYED_RANGE_DAYS } from '@/lib/levelAccess';
 import { checkRateLimit, rateLimitKey, rateLimitHeaders } from '@/lib/rateLimit';
 
@@ -28,20 +28,20 @@ export async function GET(
     // Levels are the paid product. Unentitled viewers still get the response —
     // the chart needs date/close/oi for every row — but level fields are
     // blanked for the recent window. See lib/levelAccess.ts.
-    const ctx = await getCurrentUserContext();
-    const gate = levelGate(ctx.features);
-
+    //
     // Volume control. The range branch is the bulk-scrape vector (one wide call
     // per symbol returns that symbol's whole history), so it gets the tight
     // budget; single-row lookups are looser since a normal page visit makes
-    // several. Keyed by session user when signed in, else client IP.
+    // several. Keyed by session user when signed in, else client IP — which
+    // only needs the session, so the counter write runs alongside the
+    // plan/feature queries instead of after them.
     const rl = range ? LEVEL_RANGE_RATE : LEVEL_POINT_RATE;
-    const limit = await checkRateLimit(
-      rl.name,
-      rateLimitKey(request.headers, ctx.userId),
-      rl.limit,
-      rl.windowSeconds
-    );
+    const user = await getSessionUser();
+    const [ctx, limit] = await Promise.all([
+      getUserContextFor(user),
+      checkRateLimit(rl.name, rateLimitKey(request.headers, user?.id ?? null), rl.limit, rl.windowSeconds),
+    ]);
+    const gate = levelGate(ctx.features);
     if (!limit.allowed) {
       return NextResponse.json(
         {
