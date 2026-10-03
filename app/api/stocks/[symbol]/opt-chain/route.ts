@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
+import { catalogLastSeen } from '@/lib/marketCatalog';
 
 // Per-strike option-chain OI snapshot(s) from public.us_opt_chg_rpt — a
 // different, finer granularity than eod_usmkts_price's aggregate call/put OI
@@ -62,12 +63,16 @@ export async function GET(
     }
 
     // No range given — single most recent snapshot (back-compat default).
-    const latestRows = await sql`
-      SELECT MAX(load_dt)::text as d
-      FROM public.us_opt_chg_rpt
-      WHERE symbol_und = ${upperSymbol} AND expiry_dt = ${expiry}::date
-    `;
-    const loadDate = (latestRows[0] as { d: string | null } | undefined)?.d ?? null;
+    // Latest load day for this contract month comes from the daily catalog
+    // (lib/marketCatalog.ts); the live MAX is the fallback before it's built.
+    const loadDate = await catalogLastSeen('opt_chg', upperSymbol, expiry, async () => {
+      const latestRows = await sql`
+        SELECT MAX(load_dt)::text as d
+        FROM public.us_opt_chg_rpt
+        WHERE symbol_und = ${upperSymbol} AND expiry_dt = ${expiry}::date
+      `;
+      return (latestRows[0] as { d: string | null } | undefined)?.d ?? null;
+    });
 
     if (!loadDate) {
       return NextResponse.json({ success: true, data: { symbol: upperSymbol, expiryDate: expiry, from: null, to: null, rows: [] } });

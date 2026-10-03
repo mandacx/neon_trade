@@ -1,4 +1,5 @@
 import { neon } from '@neondatabase/serverless';
+import { catalogTradeDates, catalogExpiries } from '@/lib/marketCatalog';
 import { StockData } from '@/types/stock';
 
 if (!process.env.DATABASE_URL) {
@@ -232,9 +233,12 @@ export async function getAllStocksLatest(): Promise<StockData[]> {
         COALESCE(s.put_oi, 0) as "PUT_OI",
         COALESCE((s.put_oi - s.call_oi), 0) as "OI_DIFF"
       FROM public.eod_usmkts_price s
-      WHERE s.trade_date = (
-        SELECT MAX(trade_date) 
-        FROM public.eod_usmkts_price
+      -- Catalog first (one tiny-table read); the live MAX is only evaluated
+      -- when the catalog has no eod rows yet, since COALESCE stops at the
+      -- first non-null.
+      WHERE s.trade_date = COALESCE(
+        (SELECT MAX(trade_date) FROM public.nt_market_dates WHERE source = 'eod'),
+        (SELECT MAX(trade_date) FROM public.eod_usmkts_price)
       )
       ORDER BY s.symbol
     `;
@@ -309,28 +313,7 @@ export async function searchStocks(query: string, limit: number = 20): Promise<s
  */
 export async function getAvailableDates(limit: number = 30): Promise<string[]> {
   try {
-    // Loose index scan: Postgres has no skip scan for DISTINCT, so a plain
-    // SELECT DISTINCT reads all ~5M rows. Each recursive step instead seeks
-    // idx_eod_usmkts_price_trade_date (scripts/add-date-indexes.mjs) for the
-    // next-older date — `limit` index probes total.
-    const result = await sql`
-      WITH RECURSIVE dates AS (
-        (SELECT trade_date FROM public.eod_usmkts_price ORDER BY trade_date DESC LIMIT 1)
-        UNION ALL
-        SELECT (
-          SELECT p.trade_date FROM public.eod_usmkts_price p
-          WHERE p.trade_date < d.trade_date
-          ORDER BY p.trade_date DESC LIMIT 1
-        )
-        FROM dates d
-        WHERE d.trade_date IS NOT NULL
-      )
-      SELECT trade_date::text FROM dates
-      WHERE trade_date IS NOT NULL
-      LIMIT ${limit}
-    `;
-
-    return result.map((row: any) => row.trade_date);
+    return await catalogTradeDates('eod', limit, () => liveAvailableDates(limit));
   } catch (error) {
     console.error('Error fetching available dates:', error);
     throw error;
@@ -338,35 +321,64 @@ export async function getAvailableDates(limit: number = 30): Promise<string[]> {
 }
 
 /**
+ * Live fallback for getAvailableDates. Loose index scan: Postgres has no skip
+ * scan for DISTINCT, so a plain SELECT DISTINCT reads all ~5M rows. Each
+ * recursive step instead seeks idx_eod_usmkts_price_trade_date
+ * (scripts/add-date-indexes.mjs) for the next-older date — `limit` index
+ * probes total.
+ */
+async function liveAvailableDates(limit: number): Promise<string[]> {
+  const result = await sql`
+    WITH RECURSIVE dates AS (
+      (SELECT trade_date FROM public.eod_usmkts_price ORDER BY trade_date DESC LIMIT 1)
+      UNION ALL
+      SELECT (
+        SELECT p.trade_date FROM public.eod_usmkts_price p
+        WHERE p.trade_date < d.trade_date
+        ORDER BY p.trade_date DESC LIMIT 1
+      )
+      FROM dates d
+      WHERE d.trade_date IS NOT NULL
+    )
+    SELECT trade_date::text FROM dates
+    WHERE trade_date IS NOT NULL
+    LIMIT ${limit}
+  `;
+  return result.map((row: any) => row.trade_date);
+}
+
+/**
  * Get available expiry dates (future dates from today)
  */
 export async function getAvailableExpiryDates(): Promise<string[]> {
   try {
-    // Same loose index scan as getAvailableDates, ascending on
-    // idx_eod_usmkts_price_expiry_dt.
-    const result = await sql`
-      WITH RECURSIVE expiries AS (
-        (SELECT expiry_dt FROM public.eod_usmkts_price
-         WHERE expiry_dt >= CURRENT_DATE ORDER BY expiry_dt ASC LIMIT 1)
-        UNION ALL
-        SELECT (
-          SELECT p.expiry_dt FROM public.eod_usmkts_price p
-          WHERE p.expiry_dt > e.expiry_dt
-          ORDER BY p.expiry_dt ASC LIMIT 1
-        )
-        FROM expiries e
-        WHERE e.expiry_dt IS NOT NULL
-      )
-      SELECT expiry_dt::text FROM expiries
-      WHERE expiry_dt IS NOT NULL
-      LIMIT 50
-    `;
-
-    return result.map((row: any) => row.expiry_dt);
+    return await catalogExpiries('eod', { when: 'upcoming', limit: 50 }, liveAvailableExpiryDates);
   } catch (error) {
     console.error('Error fetching expiry dates:', error);
     throw error;
   }
+}
+
+/** Live fallback for getAvailableExpiryDates — same loose index scan as liveAvailableDates, ascending on idx_eod_usmkts_price_expiry_dt. */
+async function liveAvailableExpiryDates(): Promise<string[]> {
+  const result = await sql`
+    WITH RECURSIVE expiries AS (
+      (SELECT expiry_dt FROM public.eod_usmkts_price
+       WHERE expiry_dt >= CURRENT_DATE ORDER BY expiry_dt ASC LIMIT 1)
+      UNION ALL
+      SELECT (
+        SELECT p.expiry_dt FROM public.eod_usmkts_price p
+        WHERE p.expiry_dt > e.expiry_dt
+        ORDER BY p.expiry_dt ASC LIMIT 1
+      )
+      FROM expiries e
+      WHERE e.expiry_dt IS NOT NULL
+    )
+    SELECT expiry_dt::text FROM expiries
+    WHERE expiry_dt IS NOT NULL
+    LIMIT 50
+  `;
+  return result.map((row: any) => row.expiry_dt);
 }
 
 /**
@@ -416,29 +428,38 @@ export async function getAllStocksByDateAndExpiry(tradeDate: string, expiryDate:
  */
 export async function getExpiryDates(symbol: string, opts?: { historical?: boolean }): Promise<string[]> {
   try {
-    const result = opts?.historical
-      ? await sql`
-        SELECT DISTINCT expiry_dt::text
-        FROM public.eod_usmkts_price
-        WHERE symbol = ${symbol.toUpperCase()}
-          AND expiry_dt IS NOT NULL
-          AND expiry_dt < CURRENT_DATE
-        ORDER BY expiry_dt DESC
-      `
-      : await sql`
-        SELECT DISTINCT expiry_dt::text
-        FROM public.eod_usmkts_price
-        WHERE symbol = ${symbol.toUpperCase()}
-          AND expiry_dt IS NOT NULL
-          AND expiry_dt >= CURRENT_DATE
-        ORDER BY expiry_dt ASC
-      `;
-
-    return result.map((row: any) => row.expiry_dt);
+    return await catalogExpiries(
+      'eod',
+      { symbols: [symbol], when: opts?.historical ? 'expired' : 'upcoming' },
+      () => liveExpiryDates(symbol, opts)
+    );
   } catch (error) {
     console.error('Error fetching expiry dates:', error);
     throw error;
   }
+}
+
+/** Live fallback for getExpiryDates — already cheap, the primary key leads with (symbol, expiry_dt). */
+async function liveExpiryDates(symbol: string, opts?: { historical?: boolean }): Promise<string[]> {
+  const result = opts?.historical
+    ? await sql`
+      SELECT DISTINCT expiry_dt::text
+      FROM public.eod_usmkts_price
+      WHERE symbol = ${symbol.toUpperCase()}
+        AND expiry_dt IS NOT NULL
+        AND expiry_dt < CURRENT_DATE
+      ORDER BY expiry_dt DESC
+    `
+    : await sql`
+      SELECT DISTINCT expiry_dt::text
+      FROM public.eod_usmkts_price
+      WHERE symbol = ${symbol.toUpperCase()}
+        AND expiry_dt IS NOT NULL
+        AND expiry_dt >= CURRENT_DATE
+      ORDER BY expiry_dt ASC
+    `;
+
+  return result.map((row: any) => row.expiry_dt);
 }
 
 /**

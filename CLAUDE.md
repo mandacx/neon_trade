@@ -45,6 +45,8 @@ value = (CLOSE - LEVEL_PRICE) / CLOSE
 
 The level with `value` closest to 0 is the `closestLevel` — i.e., the price is nearest that level. This single calculation (`calculateLevels` + `findClosestLevel`) is reused across the stock detail page, quadrant page, and home dashboard sector breakdown — it's the one piece of business logic worth understanding before touching any of those.
 
+**Date/expiry lookups go through the catalog, not the big tables.** `eod_usmkts_price` (~5M rows) and `us_opt_chg_rpt` (~8.6M rows) are too large to `DISTINCT`/`MAX` per request. `nt_market_dates` (one row per source + trade date) and `nt_market_expiries` (one row per source + symbol + expiry, with first/last seen dates) summarize them; read them via `lib/marketCatalog.ts`, which falls back to the live table if the catalog is empty. The external daily load script maintains them with `scripts/sql/market-catalog-daily.sql`; `scripts/bootstrap-market-catalog.mjs` creates/rebuilds them. `intra_us_scanner_eod` is intentionally not catalogued (it updates every 15 min intraday) — its date queries rely on the indexes in `scripts/add-date-indexes.mjs`.
+
 Column naming is inconsistent between the DB (`snake_case`) and the `StockData` TypeScript type (`types/stock.ts`, mixed `SCREAMING_CASE`/`camelCase`/`snake_case` fields like `PUT_INT`, `call_low`, `put_HIGH`) — `lib/db.ts` does the aliasing in SQL (`COALESCE(put_int, 0) as "PUT_INT"`) and also sanitizes all numeric fields (NaN/null → 0) via `sanitizeStockData`. Any new query against `eod_usmkts_price` should follow this same COALESCE + alias + sanitize pattern rather than reading raw columns.
 
 ### Route structure
