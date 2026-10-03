@@ -309,11 +309,24 @@ export async function searchStocks(query: string, limit: number = 20): Promise<s
  */
 export async function getAvailableDates(limit: number = 30): Promise<string[]> {
   try {
-    // See searchStocks above — same FDW-pushdown issue, same snapshot fix.
+    // Loose index scan: Postgres has no skip scan for DISTINCT, so a plain
+    // SELECT DISTINCT reads all ~5M rows. Each recursive step instead seeks
+    // idx_eod_usmkts_price_trade_date (scripts/add-date-indexes.mjs) for the
+    // next-older date — `limit` index probes total.
     const result = await sql`
-      SELECT DISTINCT trade_date::text
-      FROM public.eod_usmkts_price
-      ORDER BY trade_date DESC
+      WITH RECURSIVE dates AS (
+        (SELECT trade_date FROM public.eod_usmkts_price ORDER BY trade_date DESC LIMIT 1)
+        UNION ALL
+        SELECT (
+          SELECT p.trade_date FROM public.eod_usmkts_price p
+          WHERE p.trade_date < d.trade_date
+          ORDER BY p.trade_date DESC LIMIT 1
+        )
+        FROM dates d
+        WHERE d.trade_date IS NOT NULL
+      )
+      SELECT trade_date::text FROM dates
+      WHERE trade_date IS NOT NULL
       LIMIT ${limit}
     `;
 
@@ -329,12 +342,23 @@ export async function getAvailableDates(limit: number = 30): Promise<string[]> {
  */
 export async function getAvailableExpiryDates(): Promise<string[]> {
   try {
-    // See searchStocks above — same FDW-pushdown issue, same snapshot fix.
+    // Same loose index scan as getAvailableDates, ascending on
+    // idx_eod_usmkts_price_expiry_dt.
     const result = await sql`
-      SELECT DISTINCT expiry_dt::text
-      FROM public.eod_usmkts_price
-      WHERE expiry_dt >= CURRENT_DATE
-      ORDER BY expiry_dt ASC
+      WITH RECURSIVE expiries AS (
+        (SELECT expiry_dt FROM public.eod_usmkts_price
+         WHERE expiry_dt >= CURRENT_DATE ORDER BY expiry_dt ASC LIMIT 1)
+        UNION ALL
+        SELECT (
+          SELECT p.expiry_dt FROM public.eod_usmkts_price p
+          WHERE p.expiry_dt > e.expiry_dt
+          ORDER BY p.expiry_dt ASC LIMIT 1
+        )
+        FROM expiries e
+        WHERE e.expiry_dt IS NOT NULL
+      )
+      SELECT expiry_dt::text FROM expiries
+      WHERE expiry_dt IS NOT NULL
       LIMIT 50
     `;
 

@@ -15,14 +15,24 @@ export async function GET(
       );
     }
 
-    const historical = request.nextUrl.searchParams.get('historical') === 'true';
-    const expiryDates = await getExpiryDates(symbol, { historical });
+    // `all=true` returns the unexpired list plus the expired one
+    // (`historicalExpiryDates`) in one response — the stock page needs both
+    // on first load and would otherwise pay for two function invocations.
+    const searchParams = request.nextUrl.searchParams;
+    const all = searchParams.get('all') === 'true';
+    const historical = searchParams.get('historical') === 'true';
+
+    const [expiryDates, historicalExpiryDates] = await Promise.all([
+      getExpiryDates(symbol, { historical: historical && !all }),
+      all ? getExpiryDates(symbol, { historical: true }) : Promise.resolve(undefined),
+    ]);
 
     return NextResponse.json({
       success: true,
       data: {
         symbol: symbol.toUpperCase(),
         expiryDates,
+        ...(historicalExpiryDates ? { historicalExpiryDates } : {}),
       },
     });
   } catch (error) {

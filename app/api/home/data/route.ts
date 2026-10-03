@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { sql } from '@/lib/db';
+import { sql, getAvailableDates } from '@/lib/db';
 import { calculateLevels, findClosestLevel } from '@/lib/calculations';
 
 // The DISTINCT / window-function / GROUP BY queries below scan a large slice
@@ -90,10 +90,8 @@ async function getSecuritiesNames(symbols: string[]): Promise<Record<string, str
   } catch { return {}; }
 }
 
-async function getTopByOI(etfMode: boolean, limit: number) {
+async function getTopByOI(latestDate: string | null, etfMode: boolean, limit: number) {
   try {
-    const latestDateRows = await sql`SELECT MAX(trade_date)::text as max_date FROM public.eod_usmkts_price`;
-    const latestDate = latestDateRows[0]?.max_date;
     if (!latestDate) return { items: [], asOfDate: null };
 
     // Subquery to pick best expiry per symbol (highest total OI), then sort
@@ -174,9 +172,10 @@ async function getTopMovers() {
     console.log(`getTopMovers: fetching bars for ${symbols.length} symbols`);
 
     // Use bars endpoint (works on free IEX tier) — 5 days to ensure 2 trading days
-    const barsMap = await alpacaBars(symbols, 7);
-
-    const nameMap = await getSecuritiesNames(symbols);
+    const [barsMap, nameMap] = await Promise.all([
+      alpacaBars(symbols, 7),
+      getSecuritiesNames(symbols),
+    ]);
 
     const enriched: any[] = [];
     for (const sym of symbols) {
@@ -218,19 +217,16 @@ async function getTopMovers() {
   }
 }
 
-async function getSectorBreakdown() {
+async function getSectorBreakdown(latestDate: string | null, prevDate: string | null) {
   try {
-    // Get latest 2 distinct trade dates
-    const dateRows = await sql`
-      SELECT DISTINCT trade_date::text as td FROM public.eod_usmkts_price
-      ORDER BY td DESC LIMIT 2
-    `;
-    if (dateRows.length === 0) return [];
-    const latestDate = dateRows[0].td as string;
-    const prevDate = (dateRows[1]?.td ?? latestDate) as string;
+    if (!latestDate) return [];
 
-    // Step 1: get deduplicated price rows for latest date
-    const priceRows = await sql`
+    // Latest-date price rows, previous closes and sectors are independent
+    // reads, so they go out together. Sectors are fetched for the whole
+    // (small) securities table rather than filtered by the price rows'
+    // symbols, which would force a second round trip.
+    const [priceRows, prevRows, secRows] = await Promise.all([
+      sql`
       SELECT
         symbol,
         MAX(close) as close,
@@ -242,28 +238,20 @@ async function getSectorBreakdown() {
       FROM public.eod_usmkts_price
       WHERE trade_date = ${latestDate}
       GROUP BY symbol
-    `;
-
-    // Step 2: get prev close for each symbol
-    const prevRows = await sql`
+    `,
+      sql`
       SELECT symbol, MAX(close) as close
       FROM public.eod_usmkts_price
-      WHERE trade_date = ${prevDate}
+      WHERE trade_date = ${prevDate ?? latestDate}
       GROUP BY symbol
-    `;
+    `,
+      sql`SELECT symbol, sector FROM public.securities WHERE sector IS NOT NULL`,
+    ]);
     const prevMap: Record<string, number> = {};
     prevRows.forEach((r: any) => { prevMap[r.symbol] = Number(r.close); });
 
-    // Step 3: get sector for each symbol from securities
-    const symbols = priceRows.map((r: any) => r.symbol);
-    let sectorMapRaw: Record<string, string> = {};
-    if (symbols.length > 0) {
-      const secRows = await sql`
-        SELECT symbol, sector FROM public.securities
-        WHERE symbol = ANY(${symbols}) AND sector IS NOT NULL
-      `;
-      secRows.forEach((r: any) => { if (r.sector) sectorMapRaw[r.symbol] = r.sector; });
-    }
+    const sectorMapRaw: Record<string, string> = {};
+    secRows.forEach((r: any) => { if (r.sector) sectorMapRaw[r.symbol] = r.sector; });
 
     console.log(`getSectorBreakdown: ${priceRows.length} price rows, ${Object.keys(sectorMapRaw).length} with sector, latestDate=${latestDate}`);
 
@@ -313,14 +301,36 @@ async function getSectorBreakdown() {
   }
 }
 
+// Same for every visitor (no session reads) and the DB side only changes
+// once per trading day, so let Vercel's CDN serve it: fresh for 5 min, then
+// stale-while-revalidate so a visitor never waits on the rebuild.
+const CACHE_HEADERS = { 'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600' };
+
+async function getLatestTwoDates(): Promise<[string | null, string | null]> {
+  try {
+    const [latest = null, prev = null] = await getAvailableDates(2);
+    return [latest, prev];
+  } catch {
+    return [null, null];
+  }
+}
+
 export async function GET() {
   try {
+    // Resolved once and shared — this used to be recomputed by each of the
+    // three DB sections, each a scan of eod_usmkts_price. Movers is Alpaca +
+    // securities only, so it doesn't wait on it.
+    const datesPromise = getLatestTwoDates();
     const [topStocksResult, topETFsResult, sectorBreakdown, topMovers] = await Promise.all([
-      getTopByOI(false, 12),
-      getTopByOI(true, 10),
-      getSectorBreakdown(),
+      datesPromise.then(([latest]) => getTopByOI(latest, false, 12)),
+      datesPromise.then(([latest]) => getTopByOI(latest, true, 10)),
+      datesPromise.then(([latest, prev]) => getSectorBreakdown(latest, prev)),
       getTopMovers(),
     ]);
+
+    // Don't pin a degraded response (a section that failed and fell back to
+    // empty) in the CDN for five minutes.
+    const complete = topStocksResult.items.length > 0 && sectorBreakdown.length > 0 && topMovers !== null;
 
     return NextResponse.json({
       success: true,
@@ -332,7 +342,7 @@ export async function GET() {
         sectorBreakdown,
         topMovers,
       },
-    });
+    }, complete ? { headers: CACHE_HEADERS } : undefined);
   } catch (error) {
     console.error('home data error', error);
     return NextResponse.json(

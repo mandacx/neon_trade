@@ -388,14 +388,32 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
         // Track initial loaded range
         loadedRangesRef.current = [{ from, to }];
 
-        // Fetch stock details, levels, expiry dates (current + historical), and scan alerts
-        const [detailsRes, ohlcRes, levelsRes, expiryRes, historicalExpiryRes, scanAlertsRes] = await Promise.all([
+        // The levels-history request only needs the expiry (and the window we
+        // already know), so it is chained off the expiry-dates response and
+        // runs alongside OHLC instead of waiting for it. The window is the
+        // requested from/to rather than the OHLC bars' own first/last date —
+        // a superset, so every bar still finds its levels row.
+        const expiryPromise = fetch(`/api/stocks/${symbol}/expiry-dates?all=true`)
+          .then(res => (res.ok ? res.json() : null))
+          .catch(() => null);
+        const histLevelsPromise = expiryPromise.then(expiryData => {
+          const dates: string[] = expiryData?.success ? expiryData.data.expiryDates : [];
+          if (dates.length === 0) return null;
+          const expiryToUse = selectedExpiryRef.current || dates[0];
+          return fetch(`/api/stocks/${symbol}/levels?expiry=${expiryToUse}&range=true&from=${from}&to=${to}`)
+            .then(res => (res.ok ? res.json() : null))
+            .catch(histErr => {
+              console.error('Error fetching initial historical levels:', histErr);
+              return null;
+            });
+        });
+
+        const [detailsRes, ohlcRes, scanAlertsRes, expiryData, histLevelsData] = await Promise.all([
           fetch(`/api/stocks/${symbol}`),
           fetch(`/api/stocks/${symbol}/ohlc?from=${from}&to=${to}&interval=${chartInterval}`),
-          fetch(`/api/stocks/${symbol}/levels`),
-          fetch(`/api/stocks/${symbol}/expiry-dates`),
-          fetch(`/api/stocks/${symbol}/expiry-dates?historical=true`),
           fetch(`/api/stocks/${symbol}/scan-alerts?from=${from}&to=${to}`),
+          expiryPromise,
+          histLevelsPromise,
         ]);
 
         // Check OHLC response (required)
@@ -409,12 +427,9 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
           throw new Error(ohlc.error || 'Failed to fetch OHLC data');
         }
 
-        // Details and levels are optional (may not exist in DB)
+        // Details is optional (symbol may not exist in DB)
         const details = detailsRes.ok ? await detailsRes.json() : { success: true, data: null };
-        const levelsData = levelsRes.ok ? await levelsRes.json() : { success: true, data: null };
-        const expiryData = expiryRes.ok ? await expiryRes.json() : { success: true, data: { expiryDates: [] } };
-        const historicalExpiryData = historicalExpiryRes.ok ? await historicalExpiryRes.json() : { success: true, data: { expiryDates: [] } };
-        if (historicalExpiryData.success) setHistoricalExpiryDates(historicalExpiryData.data.expiryDates || []);
+        if (expiryData?.success) setHistoricalExpiryDates(expiryData.data.historicalExpiryDates || []);
 
         // Set OHLC data (always required)
         setOhlcData(ohlc.data.data || []);
@@ -424,79 +439,61 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
           if (scanAlertsData.success) setScanAlerts(scanAlertsData.data.alerts || []);
         }
 
-        // Set stock details and levels only if available from database
+        // Set stock details only if available from database. Its latest-row
+        // levels are the fallback for symbols with no unexpired expiry; the
+        // per-expiry history below overrides them when present.
         if (details.success && details.data) {
           setStockData(details.data);
+          setLevels(details.data.levels || []);
+          setClosestLevel(details.data.closestLevel?.name ?? '');
         }
         // Sits outside `data` so it's present in broker-only mode too.
         if (details.success) {
           setSecurity(details.security ?? null);
         }
-        if (levelsData.success && levelsData.data) {
-          setLevels(levelsData.data.calculated || []);
-          setClosestLevel(levelsData.data.closestLevel);
-        }
 
         // Set expiry dates if available. Keep the user's existing selection across
         // interval switches — only default to the nearest expiry on true first load.
-        if (expiryData.success && expiryData.data.expiryDates.length > 0) {
-          const firstExpiry = expiryData.data.expiryDates[0];
-          const expiryToUse = selectedExpiryRef.current || firstExpiry;
+        if (expiryData?.success && expiryData.data.expiryDates.length > 0) {
           setExpiryDates(expiryData.data.expiryDates);
-          setSelectedExpiry(expiryToUse);
+          setSelectedExpiry(selectedExpiryRef.current || expiryData.data.expiryDates[0]);
 
-          const dates = (ohlc.data.data || []).map((d: any) => d.date).sort();
-          if (dates.length > 0) {
-            const levelsFrom = dates[0];
-            const levelsTo = dates[dates.length - 1];
+          if (histLevelsData?.success && histLevelsData.data && histLevelsData.data.history) {
+            const levelsMap = new Map();
+            let latestDate = '';
+            let latestLevels: any = null;
 
-            try {
-              const histResponse = await fetch(`/api/stocks/${symbol}/levels?expiry=${expiryToUse}&range=true&from=${levelsFrom}&to=${levelsTo}`);
-
-              if (histResponse.ok) {
-                const histLevelsData = await histResponse.json();
-
-                if (histLevelsData.success && histLevelsData.data && histLevelsData.data.history) {
-                  const levelsMap = new Map();
-                  let latestDate = '';
-                  let latestLevels: any = null;
-
-                  histLevelsData.data.history.forEach((item: any) => {
-                    levelsMap.set(item.date, {
-                      levels: item.calculated,
-                      closestLevel: item.closestLevel,
-                      close: item.close,
-                      sevenLevels: item.sevenLevels || [],
-                      oi: item.oi,
-                      ratios: item.ratios,
-                    });
-                    if (!latestDate || item.date > latestDate) {
-                      latestDate = item.date;
-                      latestLevels = item;
-                    }
-                  });
-
-                  setHistoricalLevels(levelsMap);
-
-                  const oiDataFromLevels = histLevelsData.data.history
-                    .filter((item: any) => item.oi != null)
-                    .map((item: any) => ({
-                      time: item.date || item.tradeDate || item.TRADE_DATE,
-                      callOi: Number(item.oi.callOi) || 0,
-                      putOi: Number(item.oi.putOi) || 0,
-                      oiDiff: Number(item.oi.oiDiff) || 0,
-                    }));
-
-                  setOiData(oiDataFromLevels);
-
-                  if (latestLevels) {
-                    setLevels(latestLevels.calculated || []);
-                    setClosestLevel(latestLevels.closestLevel);
-                  }
-                }
+            histLevelsData.data.history.forEach((item: any) => {
+              levelsMap.set(item.date, {
+                levels: item.calculated,
+                closestLevel: item.closestLevel,
+                close: item.close,
+                sevenLevels: item.sevenLevels || [],
+                oi: item.oi,
+                ratios: item.ratios,
+              });
+              if (!latestDate || item.date > latestDate) {
+                latestDate = item.date;
+                latestLevels = item;
               }
-            } catch (histErr) {
-              console.error('Error fetching initial historical levels:', histErr);
+            });
+
+            setHistoricalLevels(levelsMap);
+
+            const oiDataFromLevels = histLevelsData.data.history
+              .filter((item: any) => item.oi != null)
+              .map((item: any) => ({
+                time: item.date || item.tradeDate || item.TRADE_DATE,
+                callOi: Number(item.oi.callOi) || 0,
+                putOi: Number(item.oi.putOi) || 0,
+                oiDiff: Number(item.oi.oiDiff) || 0,
+              }));
+
+            setOiData(oiDataFromLevels);
+
+            if (latestLevels) {
+              setLevels(latestLevels.calculated || []);
+              setClosestLevel(latestLevels.closestLevel);
             }
           }
         }
