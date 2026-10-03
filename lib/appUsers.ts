@@ -118,35 +118,61 @@ export async function getUserContextFor(user: SessionUser | null): Promise<Curre
     };
   }
 
-  type ProfileRow = { plan_expires_at: string | null; trial_started_at: string | null; telegram_chat_id: string | null; plan_code: string; features: string[] };
-  const selectProfile = () => sql`
-    SELECT u.plan_expires_at, u.trial_started_at, u.telegram_chat_id, p.code AS plan_code, p.features
-    FROM public.nt_app_user_profiles u
-    JOIN public.nt_plans p ON p.id = u.plan_id
-    WHERE u.user_id = ${user.id}
-  ` as unknown as Promise<ProfileRow[]>;
+  type ContextRow = {
+    has_profile: boolean;
+    plan_expires_at: string | null;
+    trial_started_at: string | null;
+    telegram_chat_id: string | null;
+    plan_code: string | null;
+    features: string[] | null;
+    free_features: string[] | null;
+    overrides: Array<{ feature: string; granted: boolean }>;
+    role: string | null;
+  };
+  // Everything the context needs in one round trip: the profile+plan join,
+  // feature overrides and admin role, plus the FREE plan's features so an
+  // expired plan doesn't need a second query. Anchored on a one-row VALUES
+  // so overrides/role still come back when the profile row doesn't exist
+  // yet. has_profile mirrors the old inner join: a profile whose plan row is
+  // missing counts as no profile.
+  const selectContext = async (): Promise<ContextRow> => {
+    const rows = await sql`
+      SELECT
+        (u.user_id IS NOT NULL AND p.id IS NOT NULL) AS has_profile,
+        u.plan_expires_at, u.trial_started_at, u.telegram_chat_id,
+        p.code AS plan_code, p.features,
+        (SELECT f.features FROM public.nt_plans f WHERE f.code = ${FALLBACK_PLAN_CODE}) AS free_features,
+        COALESCE((
+          SELECT json_agg(json_build_object('feature', o.feature, 'granted', o.granted))
+          FROM public.nt_user_feature_overrides o WHERE o.user_id = me.id
+        ), '[]'::json) AS overrides,
+        -- neon_auth ids are uuid; the nt_ tables store them as text.
+        (SELECT a.role FROM neon_auth."user" a WHERE a.id = me.id::uuid) AS role
+      FROM (VALUES (${user.id}::text)) AS me(id)
+      LEFT JOIN public.nt_app_user_profiles u ON u.user_id = me.id
+      LEFT JOIN public.nt_plans p ON p.id = u.plan_id
+    `;
+    return rows[0] as ContextRow;
+  };
 
-  const [profileRows, overrideRows, roleRows] = await Promise.all([
-    selectProfile(),
-    sql`SELECT feature, granted FROM public.nt_user_feature_overrides WHERE user_id = ${user.id}`,
-    sql`SELECT role FROM neon_auth."user" WHERE id = ${user.id}`,
-  ]);
-
-  let profile = profileRows[0];
-  if (!profile) {
+  let row = await selectContext();
+  if (!row.has_profile) {
     // First time we've seen this authenticated user — bootstrap onto Free.
     await sql`
       INSERT INTO public.nt_app_user_profiles (user_id, plan_id)
       SELECT ${user.id}, id FROM public.nt_plans WHERE code = ${FALLBACK_PLAN_CODE}
       ON CONFLICT (user_id) DO NOTHING
     `;
-    profile = (await selectProfile())[0];
+    row = await selectContext();
   }
+  const profile = row.has_profile ? row : undefined;
 
   const expired = profile?.plan_expires_at ? new Date(profile.plan_expires_at).getTime() < Date.now() : false;
-  const { planCode, features: planFeatures } = expired ? await freePlanContext() : { planCode: profile?.plan_code ?? FALLBACK_PLAN_CODE, features: profile?.features ?? [] };
-  const features = applyOverrides(planFeatures, overrideRows as Array<{ feature: string; granted: boolean }>);
-  const isAdmin = (roleRows[0] as { role: string | null } | undefined)?.role === 'admin';
+  const { planCode, features: planFeatures } = expired
+    ? { planCode: FALLBACK_PLAN_CODE, features: row.free_features ?? [] }
+    : { planCode: profile?.plan_code ?? FALLBACK_PLAN_CODE, features: profile?.features ?? [] };
+  const features = applyOverrides(planFeatures, row.overrides);
+  const isAdmin = row.role === 'admin';
   const hasUsedTrial = !!profile?.trial_started_at;
   const isTrialing = hasUsedTrial && planCode === 'PRO' && !expired;
 
