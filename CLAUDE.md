@@ -49,10 +49,21 @@ Column naming is inconsistent between the DB (`snake_case`) and the `StockData` 
 
 ### Route structure
 
-- `app/page.tsx` — home dashboard (top OI stocks/ETFs, sector breakdown, top movers, market indices), backed by `app/api/home/data/route.ts` which fans out to Neon (`securities`, `eod_usmkts_price`) and Alpaca (index quotes, mover bars) in parallel.
-- `app/stock/[symbol]/page.tsx` — single-stock K-line chart with level overlays; expiry-date dropdown changes which levels are shown. Backed by `app/api/stocks/[symbol]/*` routes (details, `ohlc` from Alpaca, `levels` with historical range support, `expiry-dates`, `oi`).
+- `app/page.tsx` — home dashboard (top OI stocks/ETFs, sector breakdown, top movers — the market indices moved out of this page into the shared Header's `IndicesStrip`), backed by `app/api/home/data/route.ts` which fans out to Neon (`securities`, `eod_usmkts_price`) and Alpaca (index quotes, mover bars) in parallel.
+- `app/stock/[symbol]/page.tsx` — thin wrapper around `components/stock/StockAnalysis.tsx`, which holds the whole stock page (single-stock K-line chart with level overlays; the selected expiry changes which levels are shown). See "Stock chart layout" below. Backed by `app/api/stocks/[symbol]/*` routes (details, `ohlc` from Alpaca, `levels` with historical range support, `expiry-dates`, `oi`).
+- `app/watchlists/page.tsx` — full watchlists management (create/rename/delete lists, quotes table with level/direction/proximity filters, alerts widget). `app/watchlists/view/page.tsx` ("Watchlist W Chart" in the nav) is a split view of the same data: embedded stock chart on the left, compact watchlist table on the right. Both read/write the same watchlists via `app/api/watchlists/*`, so lists created on one show up on the other; shared types/cells/helpers live in `components/watchlists/watchlistShared.tsx`. Both sit under `app/watchlists/layout.tsx`, which gates on the Watchlists feature.
 - `app/quadrant/page.tsx` — scatter/ladder visualization of all stocks positioned by proximity to their closest level, with sector/industry/market-cap/index filters. Backed by `app/api/quadrant/data/route.ts`, which also derives available filter options from the securities present for the selected date (so filter dropdowns never offer an empty result set).
 - `app/diagnostics/page.tsx` + `app/api/{health,test-alpaca,test-db,test-tradier,debug/[symbol]}` — connectivity/debug endpoints for each external dependency, useful for verifying env vars are wired correctly after a deploy.
+
+### Stock chart layout
+
+`StockAnalysis` (`{ symbol, embedded? }`) renders, top to bottom: the symbol/quote block on the left with the Analysis box and expiry selector stacked on the right (passed to `TVChart` as `headerBelow` / `topAside`), then the chart, then level chips (which show each level's % distance), then — only when not `embedded` — the Price Levels History and Option Chain tables. There is no side panel any more.
+
+- **Chart overlays** (inside `components/charts/TVChart.tsx`): the interval selector (`headerExtra`) is a collapsible overlay at the chart's top-left; Price/OI toggles, period buttons and the enlarge/collapse buttons (`toolbarEnd`) are an overlay at the top-right, inset past the price scale. The hover OHLC readout sits below the interval overlay.
+- **Expiry selector**: dates are grouped by month under tinted month labels, scrolled with ◀ ▶ buttons (`HScrollRow`, no native scrollbar). Historical mode lists years on one row with one year open at a time. Date pills are colour-coded by type via `expiryKind()`: weekly (white), monthly = 3rd Friday (sky), quarterly = 3rd Friday of Mar/Jun/Sep/Dec (violet); a key is shown in the card header. The selected date is always solid blue.
+- **Collapse**: one icon button collapses the whole block to a slim bar (quote, section jumps, expiry selector).
+- **`embedded` mode** drops the site Header, alerts ticker, jump buttons and both history tables (and their fetches). Callers must pass `key={symbol}` so a symbol change remounts with fresh per-symbol state (selected expiry etc.). `/watchlists/view` uses it with a fixed chart height; its watchlist panel is absolutely positioned inside its grid cell so the chart column alone sets the row height and the table scrolls inside.
+- **Market indices**: `components/layout/IndicesStrip.tsx`, rendered by `components/layout/Header.tsx` so it appears on every page, polls `/api/market/indices` (30s in US market hours, 5min otherwise) and caches the last response at module level between navigations.
 
 ### Frontend/data conventions
 
