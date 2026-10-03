@@ -51,15 +51,17 @@ interface TVChartProps {
   // Company name beside the symbol, plus the industry / market-cap chips.
   companyName?: string | null;
   chips?: Array<string | null | undefined>;
-  // Rendered in the chart's own top-left toolbar, next to the symbol/price —
-  // e.g. an interval selector — so it reads as part of the chart, not the page.
+  // Rendered in a collapsible overlay at the chart's top-left — e.g. an
+  // interval selector — so it reads as part of the chart, not the page.
   headerExtra?: ReactNode;
-  // Rendered as a column beside the chart's bordered frame, INSIDE this
-  // component rather than next to it on the page. The header above and the
-  // level chips below both have content-dependent heights, so a panel placed
-  // as a page-level sibling can't line its top and bottom up with the chart's
-  // own border — sharing the chart's flex row is what makes that exact.
-  sidePanel?: ReactNode;
+  // Rendered in the top row, right of the symbol/price block.
+  topAside?: ReactNode;
+  // Rendered under the chips in the symbol block — expiry/trade dates, the
+  // closest-level analysis and the section jump buttons.
+  headerBelow?: ReactNode;
+  // Rendered at the very end of the chart toolbar, after the enlarge button —
+  // the page's collapse control for the whole block.
+  toolbarEnd?: ReactNode;
   height?: number;
   onLoadMore?: (direction: 'past' | 'future', firstVisibleTime: string, lastVisibleTime: string) => void;
   isLoadingMore?: boolean;
@@ -89,7 +91,9 @@ export default function TVChart({
   livePrice,
   currentPrice,
   headerExtra,
-  sidePanel,
+  topAside,
+  headerBelow,
+  toolbarEnd,
   dayChange,
   dayChangePercent,
   dayHigh,
@@ -100,6 +104,7 @@ export default function TVChart({
   onLoadMore,
   isLoadingMore = false,
 }: TVChartProps) {
+  const [intervalsOpen, setIntervalsOpen] = useState(true);
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
   const ohlcDisplayRef = useRef<HTMLDivElement>(null);
@@ -982,8 +987,10 @@ export default function TVChart({
       className={isEnlarged ? 'w-full bg-white rounded-lg shadow-xl p-4 flex flex-col overflow-hidden' : 'w-full'}
       onClick={isEnlarged ? e => e.stopPropagation() : undefined}
     >
-      <div className="mb-4 flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      {/* Symbol / price / day range on the left, topAside filling the right.
+          The interval selector (top-left) and Price/OI, periods and size
+          controls (top-right) live in overlays on the chart itself. */}
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
           <div>
             <div className="flex items-baseline gap-2 flex-wrap">
               <h2 className="text-2xl font-bold">{symbol}</h2>
@@ -1031,87 +1038,101 @@ export default function TVChart({
                 ))}
               </div>
             )}
+            {headerBelow}
           </div>
-          {headerExtra && (
-            <div className="flex items-center border-l border-gray-300 pl-3">
-              {headerExtra}
-            </div>
-          )}
-          {isLoadingMore && (
-            <div className="flex items-center gap-2 text-sm text-blue-600">
-              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600" />
-              <span>Loading more data...</span>
-            </div>
-          )}
-        </div>
-
-        <div className="flex items-center gap-3">
-          {/* Visibility Toggles */}
-          <div className="flex items-center gap-2 border-r border-gray-300 pr-3">
-            <button
-              onClick={() => setShowPrice(!showPrice)}
-              className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
-                showPrice
-                  ? 'bg-green-600 text-white'
-                  : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-              }`}
-            >
-              Price
-            </button>
-            <button
-              onClick={() => setShowOI(!showOI)}
-              className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
-                showOI
-                  ? 'bg-orange-600 text-white'
-                  : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-              }`}
-            >
-              OI
-            </button>
-          </div>
-
-          {/* Time Period Selector */}
-          <div className="flex items-center gap-1">
-            {['1D', '1W', '1M', '3M', '6M', '1Y', 'YTD', 'ALL'].map((period) => (
-              <button
-                key={period}
-                onClick={() => handlePeriodChange(period)}
-                className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
-                  selectedPeriod === period
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                {period}
-              </button>
-            ))}
-          </div>
-
-          <button
-            onClick={() => setIsEnlarged(v => !v)}
-            title={isEnlarged ? 'Shrink chart' : 'Enlarge chart'}
-            aria-label={isEnlarged ? 'Shrink chart' : 'Enlarge chart'}
-            className="flex items-center justify-center w-8 h-8 rounded text-gray-500 bg-gray-100 hover:bg-gray-200 hover:text-gray-700 transition-colors border-l border-gray-300 ml-1 pl-2"
-          >
-            {isEnlarged ? '⤡' : '⤢'}
-          </button>
-        </div>
+        {topAside && <div className="min-w-0 flex-1 flex justify-end">{topAside}</div>}
       </div>
 
-      {/* Chart frame and side panel share one row, so items-stretch gives the
-          panel exactly the chart border's top and bottom edges. `lg:flex-1`
-          rather than plain `flex-1` because on mobile this row is a column,
-          where flex-1's 0% basis would collapse the chart's fixed height. */}
+      {/* `lg:flex-1` rather than plain `flex-1` because on mobile this row is a
+          column, where flex-1's 0% basis would collapse the chart's fixed height. */}
       <div className={`flex flex-col lg:flex-row gap-4 items-stretch ${isEnlarged ? 'flex-1 min-h-0' : ''}`}>
       <div
         ref={chartContainerRef}
         className={`relative w-full lg:flex-1 lg:min-w-0 bg-white rounded-lg border border-gray-200 shadow-sm ${isEnlarged ? 'min-h-0' : ''}`}
         style={isEnlarged ? undefined : { height: `${height}px` }}
       >
-        {/* OHLC Display - Top Left */}
+        {/* Chart controls — top right, inset past the price scale so they
+            don't cover its labels. */}
+        <div className="absolute top-2 right-20 z-20 flex items-center gap-2 bg-white/90 backdrop-blur-sm border border-gray-200 rounded-md shadow-sm px-1.5 py-1">
+            {/* Visibility Toggles */}
+            <div className="flex items-center gap-2 border-r border-gray-300 pr-2">
+              <button
+                onClick={() => setShowPrice(!showPrice)}
+                className={`px-2 py-1 text-[11px] font-medium rounded transition-colors ${
+                  showPrice
+                    ? 'bg-green-600 text-white'
+                    : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                }`}
+              >
+                Price
+              </button>
+              <button
+                onClick={() => setShowOI(!showOI)}
+                className={`px-2 py-1 text-[11px] font-medium rounded transition-colors ${
+                  showOI
+                    ? 'bg-orange-600 text-white'
+                    : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                }`}
+              >
+                OI
+              </button>
+            </div>
+
+            {/* Time Period Selector */}
+            <div className="flex items-center gap-1">
+              {['1D', '1W', '1M', '3M', '6M', '1Y', 'YTD', 'ALL'].map((period) => (
+                <button
+                  key={period}
+                  onClick={() => handlePeriodChange(period)}
+                  className={`px-2 py-1 text-[11px] font-medium rounded transition-colors ${
+                    selectedPeriod === period
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  {period}
+                </button>
+              ))}
+            </div>
+
+            <button
+              onClick={() => setIsEnlarged(v => !v)}
+              title={isEnlarged ? 'Shrink chart' : 'Enlarge chart'}
+              aria-label={isEnlarged ? 'Shrink chart' : 'Enlarge chart'}
+              className="flex items-center justify-center w-7 h-7 rounded text-gray-500 bg-gray-100 hover:bg-gray-200 hover:text-gray-700 transition-colors"
+            >
+              {isEnlarged ? '⤡' : '⤢'}
+            </button>
+            {toolbarEnd}
+        </div>
+
+        {/* Interval selector — top left, collapsible down to a single button. */}
+        {(headerExtra || isLoadingMore) && (
+          <div className="absolute top-2 left-2 z-20 flex items-center gap-1.5 bg-white/90 backdrop-blur-sm border border-gray-200 rounded-md shadow-sm px-1.5 py-1">
+            <button
+              type="button"
+              onClick={() => setIntervalsOpen(v => !v)}
+              aria-expanded={intervalsOpen}
+              aria-label={intervalsOpen ? 'Collapse timeframes' : 'Expand timeframes'}
+              title={intervalsOpen ? 'Collapse timeframes' : 'Show timeframes'}
+              className="flex items-center justify-center w-7 h-7 rounded text-gray-500 bg-gray-100 hover:bg-gray-200 hover:text-gray-700 transition-colors text-xs"
+            >
+              {intervalsOpen ? '◂' : '⏱'}
+            </button>
+            {intervalsOpen && headerExtra}
+            {isLoadingMore && (
+              <div className="flex items-center gap-1.5 text-[11px] text-blue-600">
+                <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-blue-600" />
+                <span>Loading…</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* OHLC Display - below the interval selector */}
         <div
           ref={ohlcDisplayRef}
-          className="absolute top-2 left-2 bg-white/95 backdrop-blur-sm px-3 py-2 rounded shadow-md z-10 pointer-events-none border border-gray-200"
+          className="absolute top-12 left-2 bg-white/95 backdrop-blur-sm px-3 py-2 rounded shadow-md z-10 pointer-events-none border border-gray-200"
         >
           <div className="text-xs text-gray-500">{symbol}</div>
         </div>
@@ -1133,11 +1154,10 @@ export default function TVChart({
         )}
       </div>
 
-        {sidePanel}
       </div>
 
       {levels.length > 0 && (
-        <div className="mt-3 flex flex-wrap items-center gap-2">
+        <div className="mt-4 flex flex-wrap items-center gap-2">
           {['call_high', 'call_int', 'put_call_int', 'put_int', 'put_low'].map(name => {
             const level = levels.find(l => l.name === name);
             if (!level) return null;
@@ -1160,6 +1180,11 @@ export default function TVChart({
                 <span className={isFiltered ? 'text-gray-400' : 'opacity-80'}>
                   {formatCurrency(typeof level.price === 'string' ? parseFloat(level.price) : level.price)}
                 </span>
+                {Number.isFinite(level.value) && (
+                  <span className={`font-mono text-[11px] ${isFiltered ? 'text-gray-400' : 'opacity-80'}`}>
+                    ({formatPercentage(level.value)})
+                  </span>
+                )}
                 {name === closestLevel && !isFiltered && (
                   <span className="ml-0.5 text-[10px] opacity-75">★</span>
                 )}

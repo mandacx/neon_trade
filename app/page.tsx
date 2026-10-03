@@ -173,11 +173,6 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [moverTab, setMoverTab] = useState('gainers');
 
-  // Indices — separate poll
-  const [indices, setIndices] = useState<any[]>([]);
-  const [indicesLoading, setIndicesLoading] = useState(true);
-  const indicesIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
   // Sort state
   const [stockSort, setStockSort] = useState<{ key: OISortKey; dir: SortDir }>({ key: 'totalOi', dir: 'desc' });
   const [etfSort, setEtfSort] = useState<{ key: OISortKey; dir: SortDir }>({ key: 'totalOi', dir: 'desc' });
@@ -201,20 +196,6 @@ export default function Home() {
       .finally(() => setLoading(false));
   }, []);
 
-  // Indices — fetch + poll every 30s
-  useEffect(() => {
-    function fetchIndices() {
-      fetch('/api/market/indices')
-        .then(r => r.json())
-        .then(res => { if (res.success) setIndices(res.data); })
-        .catch(() => {})
-        .finally(() => setIndicesLoading(false));
-    }
-    fetchIndices();
-    indicesIntervalRef.current = setInterval(fetchIndices, 30_000);
-    return () => { if (indicesIntervalRef.current) clearInterval(indicesIntervalRef.current); };
-  }, []);
-
   const topStocks: any[] = data?.topStocks || [];
   const topETFs: any[] = data?.topETFs || [];
   const sectors: any[] = data?.sectorBreakdown || [];
@@ -229,43 +210,10 @@ export default function Home() {
     <>
       <Header />
       <div className="min-h-screen bg-gray-50">
-        <div className="container mx-auto px-4 py-5 space-y-5">
+        <div className="container mx-auto px-4 pt-3 pb-5 space-y-3">
 
           {/* Scan Alerts Ticker */}
           <ScanAlertsTicker />
-
-          {/* Index Tiles */}
-          <section>
-            <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Market Indices</h2>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-              {indicesLoading
-                ? Array(6).fill(0).map((_, i) => <div key={i} className="bg-white rounded-xl border border-gray-200 p-4 animate-pulse h-24" />)
-                : indices.map((idx: any) => {
-                    const up = idx.changePercent != null && idx.changePercent >= 0;
-                    const color = idx.changePercent == null ? 'text-gray-500' : up ? 'text-green-600' : 'text-red-600';
-                    const bg = idx.changePercent == null ? 'bg-white border-gray-200' : up ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200';
-                    return (
-                      <button key={idx.symbol} onClick={() => router.push(`/stock/${idx.symbol}`)}
-                        className={`${bg} border rounded-xl p-3 text-left hover:shadow-md transition-all`}>
-                        <div className="flex justify-between items-start mb-0.5">
-                          <span className="font-bold text-gray-800 text-sm">{idx.symbol}</span>
-                          <span className={`text-[10px] font-semibold ${color}`}>{pct(idx.changePercent)}</span>
-                        </div>
-                        <div className="text-xs text-gray-400 mb-1">{idx.label}</div>
-                        <div className="text-xl font-bold text-gray-900">
-                          {idx.price != null ? `$${idx.price.toFixed(2)}` : '—'}
-                        </div>
-                        <div className="flex justify-between mt-1">
-                          <span className={`text-xs ${color}`}>
-                            {idx.change != null ? `${idx.change >= 0 ? '+' : ''}$${idx.change.toFixed(2)}` : ''}
-                          </span>
-                          {idx.volume && <span className="text-[10px] text-gray-400">Vol {fmt(idx.volume)}</span>}
-                        </div>
-                      </button>
-                    );
-                  })}
-            </div>
-          </section>
 
           {/* OI Tables + Top Movers */}
           <div className="grid lg:grid-cols-3 gap-5">

@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from 'react';
 import StockSearch from '@/components/ui/StockSearch';
 import { useAuthContext } from '@/components/providers/AuthContextProvider';
 import SignOutButton from '@/components/auth/SignOutButton';
+import IndicesStrip from '@/components/layout/IndicesStrip';
 import {
   hasFeature, FEATURE_QUADRANT, FEATURE_SCAN_ALERTS_LATEST, FEATURE_SCAN_ALERTS_HISTORY,
   FEATURE_WATCHLISTS, FEATURE_PERFORMANCE,
@@ -37,8 +38,10 @@ export default function Header() {
   const router = useRouter();
   const [scanMenuOpen, setScanMenuOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [watchMenuOpen, setWatchMenuOpen] = useState(false);
   const scanMenuRef = useRef<HTMLDivElement>(null);
   const accountMenuRef = useRef<HTMLDivElement>(null);
+  const watchMenuRef = useRef<HTMLDivElement>(null);
   const authCtx = useAuthContext();
 
   const isActive = (path: string) => pathname === path;
@@ -56,6 +59,9 @@ export default function Header() {
       }
       if (accountMenuRef.current && !accountMenuRef.current.contains(e.target as Node)) {
         setAccountMenuOpen(false);
+      }
+      if (watchMenuRef.current && !watchMenuRef.current.contains(e.target as Node)) {
+        setWatchMenuOpen(false);
       }
     }
     document.addEventListener('mousedown', onClickOutside);
@@ -132,15 +138,40 @@ export default function Header() {
             >
               📈 Stock Analysis
             </button>
-            <button
-              onClick={() => router.push('/watchlists')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                pathname?.startsWith('/watchlists') ? 'bg-amber-700 text-white' : 'bg-amber-600 text-white hover:bg-amber-700'
-              }`}
-            >
-              ⭐ Watchlists
-              {needsWatchlists && <ProBadge />}
-            </button>
+            <div className="relative" ref={watchMenuRef}>
+              <button
+                onClick={() => setWatchMenuOpen(v => !v)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                  pathname?.startsWith('/watchlists') ? 'bg-amber-700 text-white' : 'bg-amber-600 text-white hover:bg-amber-700'
+                }`}
+              >
+                ⭐ Watchlists
+                {needsWatchlists && <ProBadge />}
+                <svg className={`w-3 h-3 transition-transform ${watchMenuOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              {watchMenuOpen && (
+                <div className="absolute right-0 mt-1 w-44 bg-white rounded-lg shadow-lg border border-gray-200 overflow-hidden z-30">
+                  <button
+                    onClick={() => { setWatchMenuOpen(false); router.push('/watchlists'); }}
+                    className={`w-full text-left px-3 py-2 text-xs font-medium hover:bg-amber-50 ${
+                      isActive('/watchlists') ? 'text-amber-700 bg-amber-50' : 'text-gray-700'
+                    }`}
+                  >
+                    📋 My Watchlists
+                  </button>
+                  <button
+                    onClick={() => { setWatchMenuOpen(false); router.push('/watchlists/view'); }}
+                    className={`w-full text-left px-3 py-2 text-xs font-medium hover:bg-amber-50 border-t border-gray-100 ${
+                      isActive('/watchlists/view') ? 'text-amber-700 bg-amber-50' : 'text-gray-700'
+                    }`}
+                  >
+                    🪟 Watchlist W Chart
+                  </button>
+                </div>
+              )}
+            </div>
             <button
               onClick={() => router.push('/performance')}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
@@ -260,6 +291,13 @@ export default function Header() {
             {needsWatchlists && <MobileProBadge />}
           </button>
           <button
+            onClick={() => router.push('/watchlists/view')}
+            className="w-full text-left px-3 py-2 text-sm font-semibold text-amber-700 hover:bg-amber-50 rounded-lg"
+          >
+            🪟 Watchlist W Chart
+            {needsWatchlists && <MobileProBadge />}
+          </button>
+          <button
             onClick={() => router.push('/performance')}
             className="w-full text-left px-3 py-2 text-sm font-semibold text-teal-700 hover:bg-teal-50 rounded-lg"
           >
@@ -296,6 +334,7 @@ export default function Header() {
           </div>
         </div>
       </div>
+      <IndicesStrip />
     </header>
   );
 }
