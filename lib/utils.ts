@@ -11,6 +11,14 @@ export function cn(...inputs: ClassValue[]) {
 /**
  * Format a number as currency
  */
+// Escapes text for interpolation into an innerHTML template string. Anything
+// that did not originate in this codebase (URL params, DB fields) must pass
+// through this before being placed in markup.
+export function escapeHtml(value: string): string {
+  const entities: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+  return value.replace(/[&<>"']/g, c => entities[c]);
+}
+
 export function formatCurrency(value: number, decimals: number = 2): string {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',

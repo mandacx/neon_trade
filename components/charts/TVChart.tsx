@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, ReactNode } from 'react';
 import { createChart, IChartApi, ISeriesApi, IPriceLine, CandlestickData, HistogramData, MouseEventParams, SeriesMarker, Time } from 'lightweight-charts';
 import { LevelCalculation, ScanAlert } from '@/types/stock';
-import { getLevelColor, getLevelDisplayName, formatCurrency, formatPercentage, SCAN_CODE_TO_LEVEL } from '@/lib/utils';
+import { getLevelColor, getLevelDisplayName, formatCurrency, formatPercentage, escapeHtml, SCAN_CODE_TO_LEVEL } from '@/lib/utils';
 
 interface TVChartProps {
   symbol: string;
@@ -370,7 +370,7 @@ export default function TVChart({
           tooltipRef.current.style.display = 'none';
         }
         if (ohlcDisplayRef.current) {
-          ohlcDisplayRef.current.innerHTML = `<div class="text-xs text-gray-500">${symbol}</div>`;
+          ohlcDisplayRef.current.innerHTML = `<div class="text-xs text-gray-500">${escapeHtml(symbol)}</div>`;
         }
         return;
       }
@@ -416,7 +416,7 @@ export default function TVChart({
 
         ohlcDisplayRef.current.innerHTML = `
           <div class="text-xs space-y-1">
-            <div class="font-semibold text-gray-700">${symbol} <span class="${priceColor} text-[11px]">${change >= 0 ? '+' : ''}${change.toFixed(2)} (${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}%)</span></div>
+            <div class="font-semibold text-gray-700">${escapeHtml(symbol)} <span class="${priceColor} text-[11px]">${change >= 0 ? '+' : ''}${change.toFixed(2)} (${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}%)</span></div>
             <div class="flex gap-3 text-[10px]">
               <span class="text-gray-600">O <span class="font-semibold text-gray-900">${formatCurrency(open)}</span></span>
               <span class="text-gray-600">H <span class="font-semibold text-green-600">${formatCurrency(high)}</span></span>
@@ -486,8 +486,8 @@ export default function TVChart({
             const color = getLevelColor(level);
             return `
               <div class="flex justify-between gap-4 items-center py-0.5">
-                <span class="px-1.5 py-0.5 rounded text-white text-[10px] font-semibold" style="background-color:${color}">${a.scanCode}</span>
-                <span class="text-gray-500 text-[10px]">exp ${a.expiryDate}</span>
+                <span class="px-1.5 py-0.5 rounded text-white text-[10px] font-semibold" style="background-color:${color}">${escapeHtml(String(a.scanCode))}</span>
+                <span class="text-gray-500 text-[10px]">exp ${escapeHtml(String(a.expiryDate))}</span>
               </div>
             `;
           }).join('')}
