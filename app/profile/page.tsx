@@ -4,7 +4,7 @@ import Header from '@/components/layout/Header';
 import SignOutButton from '@/components/auth/SignOutButton';
 import AccountEditor from '@/components/profile/AccountEditor';
 import TelegramCard from '@/components/profile/TelegramCard';
-import { getCurrentUserContext } from '@/lib/appUsers';
+import { getCurrentUserContext, getHasPassword } from '@/lib/appUsers';
 import { ALL_FEATURES, FEATURE_TELEGRAM_ALERTS, hasFeature } from '@/lib/features';
 
 // getCurrentUserContext() reads cookies, so this page can't be statically rendered.
@@ -13,6 +13,7 @@ export const dynamic = 'force-dynamic';
 export default async function ProfilePage() {
   const ctx = await getCurrentUserContext();
   if (!ctx.loggedIn) redirect('/login');
+  const hasPassword = await getHasPassword();
 
   const canTelegram = hasFeature(ctx.features, FEATURE_TELEGRAM_ALERTS);
 
@@ -28,7 +29,7 @@ export default async function ProfilePage() {
 
           <div className="grid md:grid-cols-2 gap-5">
             <div className="space-y-5">
-              <AccountEditor name={ctx.name ?? ''} email={ctx.email ?? ''} emailVerified={ctx.emailVerified} hasPassword={ctx.hasPassword} />
+              <AccountEditor name={ctx.name ?? ''} email={ctx.email ?? ''} emailVerified={ctx.emailVerified} hasPassword={hasPassword} />
 
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
                 <div className="flex items-start gap-3">

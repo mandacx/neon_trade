@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getLatestStockData, getStockDataAsOf } from '@/lib/db';
 import { processStockData } from '@/lib/calculations';
 import { formatPercentage } from '@/lib/utils';
-import { getCurrentUserContext } from '@/lib/appUsers';
+import { getSessionUser, getUserContextFor } from '@/lib/appUsers';
 import { getSecuritiesMeta } from '@/lib/securitiesFilters';
 import { levelGate, LEVEL_POINT_RATE } from '@/lib/levelAccess';
 import { checkRateLimit, rateLimitKey, rateLimitHeaders } from '@/lib/rateLimit';
@@ -24,15 +24,20 @@ export async function GET(
     // Levels are the paid product — unentitled viewers get the newest row
     // outside the withheld window instead of the latest one, so the panel is
     // stale rather than empty. See lib/levelAccess.ts.
-    const ctx = await getCurrentUserContext();
+    // The rate-limit key only needs the session user id, so the counter
+    // write runs alongside the plan/feature queries instead of after them.
+    const user = await getSessionUser();
+    const [ctx, limit] = await Promise.all([
+      getUserContextFor(user),
+      checkRateLimit(
+        LEVEL_POINT_RATE.name,
+        rateLimitKey(request.headers, user?.id ?? null),
+        LEVEL_POINT_RATE.limit,
+        LEVEL_POINT_RATE.windowSeconds
+      ),
+    ]);
     const gate = levelGate(ctx.features);
 
-    const limit = await checkRateLimit(
-      LEVEL_POINT_RATE.name,
-      rateLimitKey(request.headers, ctx.userId),
-      LEVEL_POINT_RATE.limit,
-      LEVEL_POINT_RATE.windowSeconds
-    );
     if (!limit.allowed) {
       return NextResponse.json(
         { success: false, error: 'Rate limit exceeded', message: `Too many requests — retry in ${limit.resetSeconds}s` },
