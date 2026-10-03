@@ -1,0 +1,12 @@
+{
+  "name": "neon-trade-railway",
+  "private": true,
+  "description": "Railway infrastructure-as-code for the neon-trade-crons project (.railway/railway.ts). Kept separate from the Next.js app's dependencies.",
+  "scripts": {
+    "plan": "railway config plan",
+    "apply": "railway config apply"
+  },
+  "devDependencies": {
+    "railway": "^3.12.0"
+  }
+}
