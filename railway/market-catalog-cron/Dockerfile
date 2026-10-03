@@ -1,4 +1,4 @@
 FROM alpine:3.20
 RUN apk add --no-cache curl
-# TODO: replace with the actual deployed Vercel domain before deploying this Railway cron.
-CMD ["sh", "-c", "curl -sf -H \"Authorization: Bearer $CRON_SECRET\" https://YOUR-NEON-TRADE-DOMAIN.vercel.app/api/cron/market-catalog"]
+# Deployed as the market-catalog-cron service in the neon-trade-crons Railway project.
+CMD ["sh", "-c", "curl -sf -H \"Authorization: Bearer $CRON_SECRET\" https://us.niftytrendz.com/api/cron/market-catalog"]
