@@ -46,7 +46,7 @@ const FORCE_RESEED = process.argv.includes('--force-reseed');
 const FREE_FEATURES = ['stock_analysis'];
 const PRO_FEATURES = [
   'stock_analysis', 'levels', 'scan_alerts_latest', 'scan_alerts_history',
-  'quadrant', 'watchlists', 'performance', 'telegram_alerts',
+  'quadrant', 'watchlists', 'performance', 'telegram_alerts', 'earnings',
 ];
 
 async function main() {

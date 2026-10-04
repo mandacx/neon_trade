@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireFeatureApi } from '@/lib/routeGuards';
-import { FEATURE_WATCHLISTS, FEATURE_LEVELS, hasFeature } from '@/lib/features';
+import { FEATURE_WATCHLISTS, FEATURE_LEVELS, FEATURE_EARNINGS, hasFeature } from '@/lib/features';
 import { getWatchlistSymbols } from '@/lib/watchlists';
 import { getAlertsForSymbolsByExpiry, redactTickerAlerts } from '@/lib/scanAlerts';
+import { getEarningsEvents } from '@/lib/earnings';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,7 +27,13 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   }
 
   const expiry = request.nextUrl.searchParams.get('expiry');
-  const alerts = await getAlertsForSymbolsByExpiry(symbols, expiry ? { expiryDate: expiry } : { expiryCount: 3 });
+  const earningsEnabled = hasFeature(ctx.features, FEATURE_EARNINGS);
+  // Earnings events (next 14 days + last 7) ride along for the widget's
+  // Earnings section — a separate Pro feature from the level alerts.
+  const [alerts, earningsEvents] = await Promise.all([
+    getAlertsForSymbolsByExpiry(symbols, expiry ? { expiryDate: expiry } : { expiryCount: 3 }),
+    earningsEnabled ? getEarningsEvents(symbols, { aheadDays: 14, backDays: 7 }) : Promise.resolve([]),
+  ]);
   const latest = [...alerts].sort((a, b) => (a.loadDateTime < b.loadDateTime ? 1 : -1)).slice(0, WIDGET_LIMIT);
 
   const levelsVisible = hasFeature(ctx.features, FEATURE_LEVELS);
@@ -36,6 +43,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     data: {
       alerts: levelsVisible ? latest : redactTickerAlerts(latest),
       levelsRedacted: !levelsVisible,
+      earningsEvents,
+      earningsEnabled,
     },
   });
 }

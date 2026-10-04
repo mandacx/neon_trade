@@ -6,6 +6,8 @@ import { getSessionUser, getUserContextFor } from '@/lib/appUsers';
 import { getSecuritiesMeta } from '@/lib/securitiesFilters';
 import { levelGate, LEVEL_POINT_RATE } from '@/lib/levelAccess';
 import { checkRateLimit, rateLimitKey, rateLimitHeaders } from '@/lib/rateLimit';
+import { FEATURE_EARNINGS, hasFeature } from '@/lib/features';
+import { getEarningsSummary } from '@/lib/earnings';
 
 export async function GET(
   request: NextRequest,
@@ -48,12 +50,19 @@ export async function GET(
     // Company name/sector/market cap for the page header. That lives in
     // public.securities rather than the levels table, so it's fetched
     // alongside — in parallel, since neither read depends on the other.
-    const [stockData, secRows] = await Promise.all([
+    // Earnings (next/last report) are a separate Pro feature: entitled
+    // viewers get the summary, everyone else an `earningsLocked` flag so the
+    // header can show an upgrade link instead.
+    const earningsEnabled = hasFeature(ctx.features, FEATURE_EARNINGS);
+    const [stockData, secRows, earningsMap] = await Promise.all([
       gate.meta.levelsWithheldAfter
         ? getStockDataAsOf(symbol, gate.meta.levelsWithheldAfter)
         : getLatestStockData(symbol),
       getSecuritiesMeta([symbol.toUpperCase()]),
+      earningsEnabled ? getEarningsSummary([symbol]) : Promise.resolve(null),
     ]);
+    const earnings = earningsMap?.get(symbol.toUpperCase()) ?? null;
+    const earningsFields = { earnings, earningsLocked: !earningsEnabled };
 
     const sec = secRows[symbol.toUpperCase()];
     // Returned at the top level rather than inside `data` so the header still
@@ -75,6 +84,7 @@ export async function GET(
         success: true,
         data: null,
         security,
+        ...earningsFields,
         levelAccess: gate.meta.levelAccess,
         message: 'Stock not found in database, using broker data only'
       });
@@ -109,6 +119,7 @@ export async function GET(
         ...gate.meta,
       },
       security,
+      ...earningsFields,
     });
   } catch (error) {
     console.error('Error fetching stock details:', error);

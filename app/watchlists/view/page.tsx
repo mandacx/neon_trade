@@ -8,13 +8,15 @@ import { getLevelDisplayName, isUsMarketHours } from '@/lib/utils';
 import {
   type WatchlistSummary, type QuoteRow, type LevelRow, type LevelKey, LEVEL_FILTER_OPTIONS,
   rebaseToLtp, fmtExpiry, fmtPrice, ChangeCell, ChangePercentCell, ChangeDot, LevelCell,
+  type EarningsFilter, EARNINGS_FILTER_OPTIONS, earningsMatches, nextEarningsSortValue, NextEarningsCell,
 } from '@/components/watchlists/watchlistShared';
 
-type SortKey = 'symbol' | 'lastPrice' | 'change' | 'changePercent' | 'level';
+type SortKey = 'symbol' | 'lastPrice' | 'change' | 'changePercent' | 'level' | 'earnings';
 
-// Starting widths (px) sized so all five columns fit the 460px panel with no
+// Starting widths (px) sized so all six columns fit the 460px panel with no
 // horizontal scrollbar; the user can drag any header edge to rebalance them.
-const DEFAULT_COL_WIDTHS: Record<SortKey, number> = { symbol: 66, lastPrice: 78, change: 82, changePercent: 70, level: 140 };
+// (The earnings column only shows for viewers with the earnings feature.)
+const DEFAULT_COL_WIDTHS: Record<SortKey, number> = { symbol: 62, lastPrice: 68, change: 70, changePercent: 62, level: 120, earnings: 54 };
 const REMOVE_COL_WIDTH = 28;
 const MIN_COL_WIDTH = 44;
 const COL_WIDTHS_STORAGE_KEY = 'watchlistWChart.colWidths';
@@ -71,6 +73,8 @@ export default function WatchlistViewPage() {
   const [selectedExpiry, setSelectedExpiry] = useState('');
   const [search, setSearch] = useState('');
   const [levelFilter, setLevelFilter] = useState<LevelKey | ''>('');
+  const [earningsEnabled, setEarningsEnabled] = useState(false);
+  const [earningsFilter, setEarningsFilter] = useState<EarningsFilter>('');
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [symbol, setSymbol] = useState<string | null>(null);
@@ -95,6 +99,7 @@ export default function WatchlistViewPage() {
     const filtered = (rows ?? []).filter(r => {
       if (q && !r.symbol.includes(q) && !r.name.toUpperCase().includes(q)) return false;
       if (levelFilter && levelBySymbol.get(r.symbol)?.closestLevel !== levelFilter) return false;
+      if (earningsEnabled && !earningsMatches(r.earnings, earningsFilter, selectedExpiry || null)) return false;
       return true;
     });
     if (!sortKey) return filtered;
@@ -109,6 +114,7 @@ export default function WatchlistViewPage() {
           const pct = levelBySymbol.get(r.symbol)?.distancePercent;
           return pct == null ? null : Math.abs(pct);
         }
+        case 'earnings': return nextEarningsSortValue(r.earnings);
       }
     };
     return [...filtered].sort((a, b) => {
@@ -119,7 +125,7 @@ export default function WatchlistViewPage() {
       const cmp = typeof av === 'string' ? av.localeCompare(bv as string) : (av as number) - (bv as number);
       return sortDir === 'asc' ? cmp : -cmp;
     });
-  }, [rows, search, levelFilter, levelBySymbol, sortKey, sortDir]);
+  }, [rows, search, levelFilter, levelBySymbol, sortKey, sortDir, earningsEnabled, earningsFilter, selectedExpiry]);
 
   // Read saved widths after mount (not in the initial state) so server and
   // client render the same markup.
@@ -209,7 +215,10 @@ export default function WatchlistViewPage() {
     try {
       const res = await fetch(`/api/watchlists/${id}/quotes`);
       const json = await res.json();
-      if (json.success) setRows(json.data.rows);
+      if (json.success) {
+        setRows(json.data.rows);
+        setEarningsEnabled(!!json.data.earningsEnabled);
+      }
       else if (!silent) setRows([]);
     } catch {
       if (!silent) setRows([]);
@@ -359,9 +368,10 @@ export default function WatchlistViewPage() {
     );
   }
 
-  const colSpan = 5 + (canEdit ? 1 : 0);
+
   const th = 'px-2 py-1.5';
-  const COLUMN_ORDER: SortKey[] = ['symbol', 'lastPrice', 'change', 'changePercent', 'level'];
+  const COLUMN_ORDER: SortKey[] = ['symbol', 'lastPrice', 'change', 'changePercent', 'level', ...(earningsEnabled ? ['earnings' as const] : [])];
+  const colSpan = COLUMN_ORDER.length + (canEdit ? 1 : 0);
   const tableWidth = COLUMN_ORDER.reduce((sum, k) => sum + colWidths[k], 0) + (canEdit ? REMOVE_COL_WIDTH : 0);
 
   return (
@@ -440,7 +450,7 @@ export default function WatchlistViewPage() {
                 </button>
               </form>
 
-              <div className="grid grid-cols-3 gap-2">
+              <div className={`grid ${earningsEnabled ? 'grid-cols-4' : 'grid-cols-3'} gap-2`}>
                 {monthlyExpiries !== null && monthlyExpiries.length > 0 ? (
                   <div>
                     <label className={labelClass}>Expiry</label>
@@ -460,6 +470,18 @@ export default function WatchlistViewPage() {
                     {LEVEL_FILTER_OPTIONS.map(l => <option key={l} value={l}>{getLevelDisplayName(l)}</option>)}
                   </select>
                 </div>
+                {earningsEnabled && (
+                  <div>
+                    <label className={labelClass}>Earnings</label>
+                    <select value={earningsFilter} onChange={e => setEarningsFilter(e.target.value as EarningsFilter)} className={controlClass}>
+                      {EARNINGS_FILTER_OPTIONS.filter(o => o.value !== 'beforeExpiry' || selectedExpiry).map(o => (
+                        <option key={o.value} value={o.value}>
+                          {o.value === 'beforeExpiry' ? `Before ${fmtExpiry(selectedExpiry)} expiry` : o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
               {error && <p className="text-[11px] text-red-600 mt-2">{error}</p>}
             </div>
@@ -478,6 +500,7 @@ export default function WatchlistViewPage() {
                     <th className={`${th} text-right relative`}><SortHeader label="Change" align="right" active={sortKey === 'change'} dir={sortDir} onClick={() => toggleSort('change')} />{resizeHandle('change')}</th>
                     <th className={`${th} text-right relative`}><SortHeader label="Chg %" align="right" active={sortKey === 'changePercent'} dir={sortDir} onClick={() => toggleSort('changePercent')} />{resizeHandle('changePercent')}</th>
                     <th className={`${th} text-right relative`}><SortHeader label="Nearest Level" align="right" active={sortKey === 'level'} dir={sortDir} onClick={() => toggleSort('level')} />{resizeHandle('level')}</th>
+                    {earningsEnabled && <th className={`${th} text-right relative`}><SortHeader label="Earn" align="right" active={sortKey === 'earnings'} dir={sortDir} onClick={() => toggleSort('earnings')} />{resizeHandle('earnings')}</th>}
                     {canEdit && <th className={th}></th>}
                   </tr>
                 </thead>
@@ -502,6 +525,7 @@ export default function WatchlistViewPage() {
                         <td className={`${th} text-right overflow-hidden`}><ChangeCell change={r.change} /></td>
                         <td className={`${th} text-right overflow-hidden`}><ChangePercentCell changePercent={r.changePercent} /></td>
                         <td className={`${th} overflow-hidden`}><LevelCell level={levelBySymbol.get(r.symbol)} compact /></td>
+                        {earningsEnabled && <td className={`${th} text-right overflow-hidden`}><NextEarningsCell earnings={r.earnings} compact /></td>}
                         {canEdit && (
                           <td className={`${th} text-right`}>
                             <button

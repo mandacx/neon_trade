@@ -8,6 +8,8 @@ import ErrorDisplay from '@/components/ui/ErrorDisplay';
 import Header from '@/components/layout/Header';
 import ScanAlertsTicker from '@/components/ui/ScanAlertsTicker';
 import OptionContractModal from '@/components/stock/OptionContractModal';
+import { EarningsHeaderLines, EarningsExpiryChip, EarningsHistoryTable } from '@/components/stock/EarningsPanel';
+import type { EarningsResult, EarningsSummary } from '@/types/earnings';
 import { LevelCalculation, ScanAlert } from '@/types/stock';
 import { getLevelColor, getLevelDisplayName, formatCurrency, formatPercentage, isUsMarketHours } from '@/lib/utils';
 import { isIntradayInterval } from '@/lib/alpaca';
@@ -281,6 +283,13 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
   // displayLevels below).
   const [quote, setQuote] = useState<LiveQuote | null>(null);
   const [security, setSecurity] = useState<SecurityMeta | null>(null);
+  // Earnings (Pro feature `earnings`): summary comes with the details call;
+  // `earningsLocked` stays null until that call answers, so the history
+  // fetch below only fires for entitled viewers.
+  const [earnings, setEarnings] = useState<EarningsSummary | null>(null);
+  const [earningsLocked, setEarningsLocked] = useState<boolean | null>(null);
+  const [earningsHistory, setEarningsHistory] = useState<EarningsResult[] | null>(null);
+  const earningsSectionRef = useRef<HTMLDivElement>(null);
   const livePrice = quote?.price;
   // The price everything "current" is measured against. Live data is
   // deliberately withheld in historical-expiry mode — those levels belong to
@@ -368,6 +377,18 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
   const windowEpochRef = useRef(0);
   // True while the expiry-jump effect is replacing the OHLC window.
   const [windowLoading, setWindowLoading] = useState(false);
+  // Reported quarters for the chart markers and the Earnings History table —
+  // only once the details call has said the viewer has the earnings feature.
+  useEffect(() => {
+    if (earningsLocked !== false) return;
+    let cancelled = false;
+    fetch(`/api/stocks/${symbol}/earnings?limit=12`)
+      .then(res => (res.ok ? res.json() : null))
+      .then(json => { if (!cancelled) setEarningsHistory(json?.success ? json.data.history : []); })
+      .catch(() => { if (!cancelled) setEarningsHistory([]); });
+    return () => { cancelled = true; };
+  }, [symbol, earningsLocked]);
+
   useEffect(() => { ohlcDataRef.current = ohlcData; }, [ohlcData]);
   useEffect(() => { isLoadingMoreRef.current = isLoadingMore; }, [isLoadingMore]);
   useEffect(() => { selectedExpiryRef.current = selectedExpiry; }, [selectedExpiry]);
@@ -450,6 +471,8 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
         // Sits outside `data` so it's present in broker-only mode too.
         if (details.success) {
           setSecurity(details.security ?? null);
+          setEarnings(details.earnings ?? null);
+          setEarningsLocked(!!details.earningsLocked);
         }
 
         // Set expiry dates if available. Keep the user's existing selection across
@@ -993,6 +1016,14 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
       >
         📈 Open Interest
       </button>
+      {earningsLocked === false && (
+        <button
+          onClick={() => jumpToSection(earningsSectionRef, () => {})}
+          className="px-3 py-1.5 rounded-full text-xs font-bold border-2 border-amber-600 bg-amber-50 text-amber-700 hover:bg-amber-600 hover:text-white transition-colors"
+        >
+          📣 Earnings
+        </button>
+      )}
     </div>
   );
 
@@ -1000,11 +1031,13 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
   function renderExpiryButton(date: string) {
     const isActive = date === selectedExpiry;
     const alertCount = scanAlerts.filter(a => a.expiryDate === date).length;
+    // Expiries on/after the next report carry the earnings event inside them.
+    const spansEarnings = !!earnings?.next && date >= earnings.next.date;
     return (
       <button
         key={date}
         onClick={() => setSelectedExpiry(date)}
-        title={date}
+        title={spansEarnings ? `${date} — after earnings on ${earnings!.next!.date}` : date}
         aria-pressed={isActive}
         className={`px-2 py-0.5 rounded-sm text-xs font-medium border transition-all ${
           isActive
@@ -1013,6 +1046,9 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
         }`}
       >
         {parseInt(date.slice(8, 10), 10)}
+        {spansEarnings && (
+          <span className={`inline-block ml-0.5 w-1.5 h-1.5 rounded-full align-top ${isActive ? 'bg-amber-300' : 'bg-amber-500'}`} aria-label="after earnings" />
+        )}
         {isActive && levelsRefreshing && (
           <span className="inline-block ml-1.5 animate-spin h-2.5 w-2.5 border-2 border-white border-t-transparent rounded-full align-middle" />
         )}
@@ -1060,6 +1096,11 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
               {EXPIRY_KIND_STYLES[k].label}
             </span>
           ))}
+          {earnings?.next && (
+            <span className="flex items-center gap-1 px-1.5 py-px text-[10px] font-medium text-gray-600" title={`Next earnings ${earnings.next.date}`}>
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500" /> After earnings
+            </span>
+          )}
         </div>
         {historicalExpiryDates.length > 0 && (
           <div className="flex gap-1 bg-gray-100 p-0.5 rounded-full">
@@ -1166,10 +1207,16 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
     <div className="mt-2 space-y-2 max-w-md">
       {(selectedExpiry || stockData?.tradeDate) && (
         <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-600">
-          {selectedExpiry && <span>Expiry: <strong className="text-gray-800">{selectedExpiry}</strong></span>}
+          {selectedExpiry && (
+            <span className="inline-flex flex-wrap items-center gap-1.5">
+              <span>Expiry: <strong className="text-gray-800">{selectedExpiry}</strong></span>
+              <EarningsExpiryChip earnings={earnings} expiry={selectedExpiry} />
+            </span>
+          )}
           {stockData?.tradeDate && <span>Trade date: <strong className="text-gray-800">{stockData.tradeDate}</strong></span>}
         </div>
       )}
+      <EarningsHeaderLines earnings={earnings} locked={earningsLocked} />
       {!embedded && jumpButtons}
     </div>
   );
@@ -1257,6 +1304,7 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
                 closestLevel={closestLevelName}
                 historicalLevels={historicalLevels}
                 scanAlerts={scanAlerts}
+                earningsEvents={earningsHistory ?? undefined}
                 selectedExpiry={selectedExpiry}
                 isIntraday={isIntradayInterval(chartInterval)}
                 livePrice={basisPrice}
@@ -1576,6 +1624,12 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
               </>
             )}
           </div>
+
+          {earningsLocked === false && (
+            <div ref={earningsSectionRef}>
+              <EarningsHistoryTable history={earningsHistory} loading={earningsHistory === null} />
+            </div>
+          )}
           </>)}
         </div>
       </div>

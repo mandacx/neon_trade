@@ -9,19 +9,25 @@ import { getLevelDisplayName } from '@/lib/utils';
 import {
   type WatchlistSummary, type QuoteRow, type LevelRow, type LevelKey, LEVEL_FILTER_OPTIONS,
   rebaseToLtp, fmtExpiry, fmtPrice, fmtVolume, ChangeCell, ChangePercentCell, ChangeDot, LevelCell,
+  type EarningsFilter, EARNINGS_FILTER_OPTIONS, earningsMatches, nextEarningsSortValue, lastResultSortValue,
+  NextEarningsCell, LastResultBadge,
 } from '@/components/watchlists/watchlistShared';
 
 type DirectionFilter = 'all' | 'up' | 'down';
 type ViewMode = 'thin' | 'broad';
-type SortKey = 'symbol' | 'lastPrice' | 'change' | 'changePercent' | 'open' | 'dayLow' | 'dayHigh' | 'volume' | 'level';
+type SortKey = 'symbol' | 'lastPrice' | 'change' | 'changePercent' | 'open' | 'dayLow' | 'dayHigh' | 'volume' | 'level' | 'nextEarnings' | 'lastResult';
 
-type ColumnKey = 'open' | 'dayLow' | 'dayHigh' | 'volume' | 'level';
+type ColumnKey = 'open' | 'dayLow' | 'dayHigh' | 'volume' | 'level' | 'nextEarnings' | 'lastResult';
+// Shown only to viewers with the `earnings` feature (the quotes route says which).
+const EARNINGS_COLUMNS: ReadonlySet<ColumnKey> = new Set(['nextEarnings', 'lastResult']);
 const OPTIONAL_COLUMNS: Array<{ key: ColumnKey; label: string }> = [
   { key: 'open', label: 'Open' },
   { key: 'dayLow', label: 'Day Low' },
   { key: 'dayHigh', label: 'Day High' },
   { key: 'volume', label: 'Volume' },
   { key: 'level', label: 'Nearest Level' },
+  { key: 'nextEarnings', label: 'Next Earnings' },
+  { key: 'lastResult', label: 'Last Result' },
 ];
 
 const inputClass = "px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white";
@@ -60,6 +66,8 @@ export default function WatchlistsPage() {
   const [levelFilter, setLevelFilter] = useState<LevelKey | ''>('');
   const [proximityEnabled, setProximityEnabled] = useState(false);
   const [proximityThreshold, setProximityThreshold] = useState(5);
+  const [earningsEnabled, setEarningsEnabled] = useState(false);
+  const [earningsFilter, setEarningsFilter] = useState<EarningsFilter>('');
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [viewMode, setViewMode] = useState<ViewMode>('thin');
@@ -93,8 +101,10 @@ export default function WatchlistsPage() {
       const distancePercent = levelBySymbol.get(r.symbol)?.distancePercent;
       if (distancePercent == null || Math.abs(distancePercent) > proximityThreshold) return false;
     }
+    if (earningsEnabled && !earningsMatches(r.earnings, earningsFilter, selectedExpiry || null)) return false;
     return true;
   });
+  const colOn = (k: ColumnKey) => visibleCols.has(k) && (earningsEnabled || !EARNINGS_COLUMNS.has(k));
 
   function sortValue(r: QuoteRow, key: SortKey): number | string | null {
     switch (key) {
@@ -110,6 +120,8 @@ export default function WatchlistsPage() {
         const pct = levelBySymbol.get(r.symbol)?.distancePercent;
         return pct == null ? null : Math.abs(pct);
       }
+      case 'nextEarnings': return nextEarningsSortValue(r.earnings);
+      case 'lastResult': return lastResultSortValue(r.earnings);
     }
   }
 
@@ -166,6 +178,7 @@ export default function WatchlistsPage() {
     const json = await res.json();
     setRowsLoading(false);
     setRows(json.success ? json.data.rows : []);
+    setEarningsEnabled(!!(json.success && json.data.earningsEnabled));
   }
 
   async function loadLevels(id: string, expiry: string) {
@@ -258,7 +271,7 @@ export default function WatchlistsPage() {
     await Promise.all([loadRows(selected.id), loadLevels(selected.id, selectedExpiry), refreshLists(true)]);
   }
 
-  const colSpan = 4 + visibleCols.size + (canEdit ? 1 : 0);
+  const colSpan = 4 + OPTIONAL_COLUMNS.filter(c => colOn(c.key)).length + (canEdit ? 1 : 0);
 
   if (listsLoading) {
     return (
@@ -366,6 +379,23 @@ export default function WatchlistsPage() {
                     className="w-32 accent-blue-500 disabled:opacity-40 mb-2"
                   />
                 </div>
+
+                {earningsEnabled && (
+                  <div>
+                    <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">Earnings</label>
+                    <select
+                      value={earningsFilter}
+                      onChange={e => setEarningsFilter(e.target.value as EarningsFilter)}
+                      className="px-3 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white"
+                    >
+                      {EARNINGS_FILTER_OPTIONS.filter(o => o.value !== 'beforeExpiry' || selectedExpiry).map(o => (
+                        <option key={o.value} value={o.value}>
+                          {o.value === 'beforeExpiry' ? `Before ${fmtExpiry(selectedExpiry)} expiry` : o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center gap-4">
@@ -397,7 +427,7 @@ export default function WatchlistsPage() {
                   {customizeOpen && (
                     <div className="absolute right-0 mt-2 w-44 bg-white border border-gray-200 rounded-lg shadow-lg p-2 z-50">
                       <p className="text-[10px] font-semibold text-gray-400 uppercase px-1 pb-1">Columns</p>
-                      {OPTIONAL_COLUMNS.map(c => (
+                      {OPTIONAL_COLUMNS.filter(c => earningsEnabled || !EARNINGS_COLUMNS.has(c.key)).map(c => (
                         <label key={c.key} className="flex items-center gap-2 text-xs text-gray-700 px-1 py-1 hover:bg-gray-50 rounded cursor-pointer select-none">
                           <input type="checkbox" checked={visibleCols.has(c.key)} onChange={() => toggleCol(c.key)} className="accent-blue-600" />
                           {c.label}
@@ -483,11 +513,13 @@ export default function WatchlistsPage() {
                   <th className={`${cellPad} text-right`}><SortHeader label="Last Price" align="right" active={sortKey === 'lastPrice'} dir={sortDir} onClick={() => toggleSort('lastPrice')} /></th>
                   <th className={`${cellPad} text-right`}><SortHeader label="Change" align="right" active={sortKey === 'change'} dir={sortDir} onClick={() => toggleSort('change')} /></th>
                   <th className={`${cellPad} text-right`}><SortHeader label="Change %" align="right" active={sortKey === 'changePercent'} dir={sortDir} onClick={() => toggleSort('changePercent')} /></th>
-                  {visibleCols.has('open') && <th className={`${cellPad} text-right`}><SortHeader label="Open" align="right" active={sortKey === 'open'} dir={sortDir} onClick={() => toggleSort('open')} /></th>}
-                  {visibleCols.has('dayLow') && <th className={`${cellPad} text-right`}><SortHeader label="Day Low" align="right" active={sortKey === 'dayLow'} dir={sortDir} onClick={() => toggleSort('dayLow')} /></th>}
-                  {visibleCols.has('dayHigh') && <th className={`${cellPad} text-right`}><SortHeader label="Day High" align="right" active={sortKey === 'dayHigh'} dir={sortDir} onClick={() => toggleSort('dayHigh')} /></th>}
-                  {visibleCols.has('volume') && <th className={`${cellPad} text-right`}><SortHeader label="Volume" align="right" active={sortKey === 'volume'} dir={sortDir} onClick={() => toggleSort('volume')} /></th>}
-                  {visibleCols.has('level') && <th className={`${cellPad} text-right`}><SortHeader label="Nearest Level" align="right" active={sortKey === 'level'} dir={sortDir} onClick={() => toggleSort('level')} /></th>}
+                  {colOn('open') && <th className={`${cellPad} text-right`}><SortHeader label="Open" align="right" active={sortKey === 'open'} dir={sortDir} onClick={() => toggleSort('open')} /></th>}
+                  {colOn('dayLow') && <th className={`${cellPad} text-right`}><SortHeader label="Day Low" align="right" active={sortKey === 'dayLow'} dir={sortDir} onClick={() => toggleSort('dayLow')} /></th>}
+                  {colOn('dayHigh') && <th className={`${cellPad} text-right`}><SortHeader label="Day High" align="right" active={sortKey === 'dayHigh'} dir={sortDir} onClick={() => toggleSort('dayHigh')} /></th>}
+                  {colOn('volume') && <th className={`${cellPad} text-right`}><SortHeader label="Volume" align="right" active={sortKey === 'volume'} dir={sortDir} onClick={() => toggleSort('volume')} /></th>}
+                  {colOn('level') && <th className={`${cellPad} text-right`}><SortHeader label="Nearest Level" align="right" active={sortKey === 'level'} dir={sortDir} onClick={() => toggleSort('level')} /></th>}
+                  {colOn('nextEarnings') && <th className={`${cellPad} text-right`}><SortHeader label="Next Earnings" align="right" active={sortKey === 'nextEarnings'} dir={sortDir} onClick={() => toggleSort('nextEarnings')} /></th>}
+                  {colOn('lastResult') && <th className={`${cellPad} text-right`}><SortHeader label="Last Result" align="right" active={sortKey === 'lastResult'} dir={sortDir} onClick={() => toggleSort('lastResult')} /></th>}
                   {canEdit && <th className={cellPad}></th>}
                 </tr>
               </thead>
@@ -530,11 +562,13 @@ export default function WatchlistsPage() {
                         <ChangePercentCell changePercent={r.changePercent} />
                       </Link>
                     </td>
-                    {visibleCols.has('open') && <td className={`${cellPad} text-right text-gray-600 tabular-nums`}>{fmtPrice(r.open)}</td>}
-                    {visibleCols.has('dayLow') && <td className={`${cellPad} text-right text-gray-600 tabular-nums`}>{fmtPrice(r.dayLow)}</td>}
-                    {visibleCols.has('dayHigh') && <td className={`${cellPad} text-right text-gray-600 tabular-nums`}>{fmtPrice(r.dayHigh)}</td>}
-                    {visibleCols.has('volume') && <td className={`${cellPad} text-right text-gray-600 tabular-nums`}>{fmtVolume(r.volume)}</td>}
-                    {visibleCols.has('level') && <td className={cellPad}><LevelCell level={levelBySymbol.get(r.symbol)} compact={thin} /></td>}
+                    {colOn('open') && <td className={`${cellPad} text-right text-gray-600 tabular-nums`}>{fmtPrice(r.open)}</td>}
+                    {colOn('dayLow') && <td className={`${cellPad} text-right text-gray-600 tabular-nums`}>{fmtPrice(r.dayLow)}</td>}
+                    {colOn('dayHigh') && <td className={`${cellPad} text-right text-gray-600 tabular-nums`}>{fmtPrice(r.dayHigh)}</td>}
+                    {colOn('volume') && <td className={`${cellPad} text-right text-gray-600 tabular-nums`}>{fmtVolume(r.volume)}</td>}
+                    {colOn('level') && <td className={cellPad}><LevelCell level={levelBySymbol.get(r.symbol)} compact={thin} /></td>}
+                    {colOn('nextEarnings') && <td className={`${cellPad} text-right`}><NextEarningsCell earnings={r.earnings} compact={thin} /></td>}
+                    {colOn('lastResult') && <td className={`${cellPad} text-right`}><LastResultBadge earnings={r.earnings} /></td>}
                     {canEdit && (
                       <td className={`${cellPad} text-right`}>
                         <button

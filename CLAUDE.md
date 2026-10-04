@@ -55,6 +55,18 @@ The level with `value` closest to 0 is the `closestLevel` — i.e., the price is
 
 Column naming is inconsistent between the DB (`snake_case`) and the `StockData` TypeScript type (`types/stock.ts`, mixed `SCREAMING_CASE`/`camelCase`/`snake_case` fields like `PUT_INT`, `call_low`, `put_HIGH`) — `lib/db.ts` does the aliasing in SQL (`COALESCE(put_int, 0) as "PUT_INT"`) and also sanitizes all numeric fields (NaN/null → 0) via `sanitizeStockData`. Any new query against `eod_usmkts_price` should follow this same COALESCE + alias + sanitize pattern rather than reading raw columns.
 
+**Earnings** (Pro feature `earnings`; `lib/earnings.ts`, tables from `scripts/bootstrap-earnings.mjs`). Three sources, each used for what it's best at:
+- **Upcoming dates + EPS estimates:** Alpha Vantage `EARNINGS_CALENDAR`, one CSV for every symbol, 1 call/day → `nt_earnings_calendar`.
+- **Results on the day:** Benzinga results headlines from the Alpaca News API, e.g. `IBM Q2 Adj. EPS $2.93 Beats $2.86 Estimate, Sales …`, parsed by `lib/earningsParse.ts` → `nt_earnings`. The parser is dependency-free so scripts can import it; fixtures live in `scripts/test-earnings-parse.mjs`. Guidance headlines ("Sees/Raises … EPS") must never parse as results.
+- **Deep history and fallback:** Alpha Vantage `EARNINGS` per symbol, under the free tier's 25 calls/day budget (`nt_api_usage`, reserved atomically before each call).
+
+The rest of the pipeline:
+- **Merging:** news and AV rows for the same report (±3 days) merge into one row. News wins on figures; AV fills `fiscal_date_ending`/`report_time`.
+- **Cron:** `/api/cron/earnings` runs every 15 min (Railway `earnings-cron`) and picks the step by US/Eastern time. A single-row lease in `nt_job_lease` prevents overlapping runs, since pg advisory locks don't work over the Neon HTTP driver.
+- **Backfill:** `scripts/backfill-earnings-news.mjs` re-runs the news history.
+- **Readers:** `getEarningsSummary` / `getEarningsHistory` / `getEarningsEvents` feed the stock page (`components/stock/EarningsPanel.tsx`, chart "E" markers) and the watchlist columns, filters and alerts widget. Every route returns earnings only when the viewer has the feature.
+- **Don't use `public.securities.next/last_earnings_date`:** they're a stale one-off yfinance load in the sister app's table.
+
 ### Route structure
 
 - `app/page.tsx` — home dashboard (top OI stocks/ETFs, sector breakdown, top movers — the market indices moved out of this page into the shared Header's `IndicesStrip`), backed by `app/api/home/data/route.ts` which fans out to Neon (`securities`, `eod_usmkts_price`) and Alpaca (index quotes, mover bars) in parallel.

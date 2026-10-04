@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
 import { requireFeatureApi } from '@/lib/routeGuards';
-import { FEATURE_WATCHLISTS } from '@/lib/features';
+import { FEATURE_EARNINGS, FEATURE_WATCHLISTS, hasFeature } from '@/lib/features';
 import { getWatchlistSymbols } from '@/lib/watchlists';
 import { getSecuritiesMeta } from '@/lib/securitiesFilters';
 import { getSnapshotsMulti } from '@/lib/alpaca';
+import { getEarningsSummary } from '@/lib/earnings';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,13 +18,17 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 
   const { id } = await params;
   const symbols = await getWatchlistSymbols(id, ctx.userId);
+  // Earnings columns/filters are a separate Pro feature; the client hides
+  // them when this is false.
+  const earningsEnabled = hasFeature(ctx.features, FEATURE_EARNINGS);
   if (symbols.length === 0) {
-    return NextResponse.json({ success: true, data: { rows: [] } });
+    return NextResponse.json({ success: true, data: { rows: [], earningsEnabled } });
   }
 
-  const [secMeta, snapshots] = await Promise.all([
+  const [secMeta, snapshots, earnings] = await Promise.all([
     getSecuritiesMeta(symbols),
     getSnapshotsMulti(symbols),
+    earningsEnabled ? getEarningsSummary(symbols) : Promise.resolve(null),
   ]);
 
   const rows = symbols.map(symbol => {
@@ -44,8 +49,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       volume: dailyBar?.v ?? null,
       change,
       changePercent,
+      ...(earnings ? { earnings: earnings.get(symbol) ?? null } : {}),
     };
   });
 
-  return NextResponse.json({ success: true, data: { rows } });
+  return NextResponse.json({ success: true, data: { rows, earningsEnabled } });
 }

@@ -3,6 +3,13 @@
 import { useEffect, useMemo, useRef, useState, ReactNode } from 'react';
 import { createChart, IChartApi, ISeriesApi, IPriceLine, CandlestickData, HistogramData, MouseEventParams, SeriesMarker, Time } from 'lightweight-charts';
 import { LevelCalculation, ScanAlert } from '@/types/stock';
+import type { EarningsResult } from '@/types/earnings';
+
+const EARNINGS_OUTCOME_COLOR: Record<NonNullable<EarningsResult['epsOutcome']>, string> = {
+  beat: '#16a34a',
+  miss: '#dc2626',
+  inline: '#6b7280',
+};
 import { getLevelColor, getLevelDisplayName, formatCurrency, formatPercentage, escapeHtml, SCAN_CODE_TO_LEVEL } from '@/lib/utils';
 
 interface TVChartProps {
@@ -37,6 +44,8 @@ interface TVChartProps {
   // proximity ladder don't populate it.
   historicalLevels?: Map<string, { levels: LevelCalculation[], closestLevel: string, sevenLevels?: { name: string; price: number; value: number }[] }>;
   scanAlerts?: ScanAlert[];
+  /** Reported quarters — drawn as an "E" marker on each report-date bar and listed in the hover tooltip. */
+  earningsEvents?: EarningsResult[];
   selectedExpiry?: string;
   isIntraday?: boolean;
   livePrice?: number;
@@ -86,6 +95,7 @@ export default function TVChart({
   closestLevel,
   historicalLevels,
   scanAlerts = [],
+  earningsEvents,
   selectedExpiry,
   isIntraday = false,
   livePrice,
@@ -122,6 +132,7 @@ export default function TVChart({
   const closestLevelRef = useRef(closestLevel);
   const oiDataRef = useRef(oiData);
   const scanAlertsByDateRef = useRef<Map<string, ScanAlert[]>>(new Map());
+  const earningsByDateRef = useRef<Map<string, EarningsResult>>(new Map());
   const dayKeyByTimeRef = useRef<Map<number, string>>(new Map());
   const [isLoading, setIsLoading] = useState(true);
   const [selectedPeriod, setSelectedPeriod] = useState<string>('ALL');
@@ -494,6 +505,17 @@ export default function TVChart({
         </div>
       ` : '';
 
+      // Earnings reported on this day
+      const dayEarnings = earningsByDateRef.current.get(dayKey);
+      const fmtEpsHtml = (v: number | null) => (v == null ? '—' : `${v < 0 ? '-' : ''}$${Math.abs(v).toFixed(2)}`);
+      const earningsTooltipHtml = dayEarnings ? `
+        <div class="mt-3 pt-2 border-t border-gray-300">
+          <div class="font-semibold mb-1 text-gray-700">📣 Earnings${dayEarnings.period ? ` (${escapeHtml(dayEarnings.period)})` : ''}${dayEarnings.time === 'pre-market' ? ' · before open' : dayEarnings.time === 'post-market' ? ' · after close' : ''}</div>
+          <div class="flex justify-between gap-4"><span class="text-gray-600">EPS</span><span class="font-semibold">${escapeHtml(fmtEpsHtml(dayEarnings.epsActual))}${dayEarnings.epsEstimate != null ? ` <span class="text-gray-500 font-normal">vs ${escapeHtml(fmtEpsHtml(dayEarnings.epsEstimate))}</span>` : ''}</span></div>
+          ${dayEarnings.epsOutcome ? `<div class="flex justify-between gap-4"><span class="text-gray-600">Result</span><span class="font-semibold" style="color:${EARNINGS_OUTCOME_COLOR[dayEarnings.epsOutcome]}">${dayEarnings.epsOutcome === 'beat' ? 'Beat' : dayEarnings.epsOutcome === 'miss' ? 'Miss' : 'In-line'}${dayEarnings.epsSurprisePct != null && dayEarnings.epsOutcome !== 'inline' ? ` ${dayEarnings.epsSurprisePct > 0 ? '+' : ''}${dayEarnings.epsSurprisePct.toFixed(1)}%` : ''}</span></div>` : ''}
+        </div>
+      ` : '';
+
       // Build OI section for tooltip
       const oiTooltipHtml = currentOiData ? `
         <div class="mt-3 pt-2 border-t border-gray-300">
@@ -537,6 +559,7 @@ export default function TVChart({
             </div>
           </div>
           ${alertsTooltipHtml}
+          ${earningsTooltipHtml}
           ${oiTooltipHtml}
           ${levelsWithProximity.length > 0 ? `
             <div class="mt-3 pt-2 border-t border-gray-300">
@@ -858,6 +881,22 @@ export default function TVChart({
     const markers: SeriesMarker<Time>[] = rawMarkers
       .filter((m): m is SeriesMarker<Time> => m !== null);
 
+    // Earnings: an "E" under the report-date bar, colored by the EPS outcome.
+    const earningsByDate = new Map<string, EarningsResult>();
+    (earningsEvents ?? []).forEach(e => earningsByDate.set(e.date, e));
+    earningsByDateRef.current = earningsByDate;
+    earningsByDate.forEach((e, date) => {
+      const barTime = firstBarTimeByDay.get(date);
+      if (barTime === undefined) return;
+      markers.push({
+        time: barTime as Time,
+        position: 'belowBar',
+        shape: 'circle',
+        color: e.epsOutcome ? EARNINGS_OUTCOME_COLOR[e.epsOutcome] : '#d97706',
+        text: 'E',
+      });
+    });
+
     const lastBar = processedBars[processedBars.length - 1];
     const closestLevelData = closestLevel ? levels.find(l => l.name === closestLevel) : undefined;
     if (livePrice !== undefined && lastBar && closestLevelData) {
@@ -877,7 +916,7 @@ export default function TVChart({
     } catch (err) {
       console.error('Error setting scan alert markers:', err);
     }
-  }, [visibleScanAlerts, isLoading, processedBars, levels, closestLevel, livePrice]);
+  }, [visibleScanAlerts, earningsEvents, isLoading, processedBars, levels, closestLevel, livePrice]);
 
   // Live price — nudges the most recent bar's OHLC in place rather than trying
   // to roll over into a new bar client-side (which would need to duplicate the

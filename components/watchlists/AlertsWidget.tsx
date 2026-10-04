@@ -4,6 +4,10 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { format } from 'date-fns';
 import { getLevelColor, getLevelDisplayName, formatCurrency } from '@/lib/utils';
+import type { EarningsEvent } from '@/types/earnings';
+import { fmtShortDate, earningsTimeShort, daysUntilLabel, fmtEps } from '@/components/watchlists/watchlistShared';
+
+const EARNINGS_LIMIT = 8;
 
 interface Alert {
   id: string;
@@ -51,6 +55,7 @@ export default function AlertsWidget({
 }) {
   const [alerts, setAlerts] = useState<Alert[] | null>(null);
   const [levelsRedacted, setLevelsRedacted] = useState(false);
+  const [earningsEvents, setEarningsEvents] = useState<EarningsEvent[]>([]);
   const [search, setSearch] = useState('');
 
   useEffect(() => {
@@ -64,6 +69,7 @@ export default function AlertsWidget({
         if (cancelled) return;
         setAlerts(json.success ? json.data.alerts : []);
         setLevelsRedacted(json.success ? json.data.levelsRedacted : false);
+        setEarningsEvents(json.success && Array.isArray(json.data.earningsEvents) ? json.data.earningsEvents : []);
       })
       .catch(() => { if (!cancelled) setAlerts([]); });
     return () => { cancelled = true; };
@@ -75,6 +81,15 @@ export default function AlertsWidget({
     const q = search.trim().toUpperCase();
     return q ? alerts.filter(a => a.symbol.includes(q)) : alerts;
   }, [alerts, search, symbolFilter]);
+
+  // Same symbol pin / search as the alerts list. Events arrive just-reported
+  // first, then upcoming soonest first (lib/earnings.ts getEarningsEvents).
+  const visibleEarnings = useMemo(() => {
+    const q = search.trim().toUpperCase();
+    return earningsEvents
+      .filter(e => (symbolFilter ? e.symbol === symbolFilter : !q || e.symbol.includes(q)))
+      .slice(0, EARNINGS_LIMIT);
+  }, [earningsEvents, search, symbolFilter]);
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
@@ -102,6 +117,45 @@ export default function AlertsWidget({
             className="w-full mb-3 px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
           />
         )
+      )}
+
+      {visibleEarnings.length > 0 && (
+        <div className="mb-3 pb-3 border-b border-gray-100">
+          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Earnings</p>
+          <div className="space-y-1">
+            {visibleEarnings.map(e => (
+              <Link
+                key={`${e.kind}-${e.symbol}-${e.date}`}
+                href={`/stock/${encodeURIComponent(e.symbol)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                <span className="font-semibold text-xs text-gray-900">{e.symbol}</span>
+                {e.kind === 'reported' ? (
+                  <span className="flex items-center gap-1.5 text-[11px]">
+                    <span className="text-gray-400">{fmtShortDate(e.date)}</span>
+                    {e.epsOutcome ? (
+                      <span className={`font-semibold px-1.5 py-0.5 rounded ${e.epsOutcome === 'beat' ? 'bg-green-50 text-green-700' : e.epsOutcome === 'miss' ? 'bg-red-50 text-red-700' : 'bg-gray-100 text-gray-600'}`}>
+                        {e.epsOutcome === 'beat' ? 'Beat' : e.epsOutcome === 'miss' ? 'Miss' : 'In-line'}
+                        {e.epsOutcome !== 'inline' && e.epsSurprisePct != null && ` ${e.epsSurprisePct > 0 ? '+' : ''}${e.epsSurprisePct.toFixed(1)}%`}
+                      </span>
+                    ) : (
+                      <span className="text-gray-500">EPS {fmtEps(e.epsActual)}</span>
+                    )}
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1.5 text-[11px] text-gray-600">
+                    {fmtShortDate(e.date)}{earningsTimeShort(e.time) && ` · ${earningsTimeShort(e.time)}`}
+                    <span className={`font-semibold px-1.5 py-0.5 rounded tabular-nums ${e.daysUntil <= 1 ? 'bg-red-50 text-red-700' : e.daysUntil <= 7 ? 'bg-amber-50 text-amber-700' : 'bg-gray-100 text-gray-600'}`}>
+                      {e.daysUntil <= 1 ? daysUntilLabel(e.daysUntil) : `in ${e.daysUntil}d`}
+                    </span>
+                  </span>
+                )}
+              </Link>
+            ))}
+          </div>
+        </div>
       )}
 
       {alerts === null && (
