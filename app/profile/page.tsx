@@ -38,7 +38,7 @@ export default async function ProfilePage() {
                     <h3 className="text-xs font-semibold text-gray-700">Active session</h3>
                     <p className="text-[11px] text-gray-500 mt-1">
                       Only one session stays signed in at a time. Logging in elsewhere makes this
-                      session's access token stop refreshing — you'll just be asked to log in again here.
+                      session&apos;s access token stop refreshing — you&apos;ll just be asked to log in again here.
                     </p>
                   </div>
                 </div>

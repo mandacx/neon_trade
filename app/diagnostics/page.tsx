@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
+import Link from 'next/link';
 
 export default function DiagnosticsPage() {
   const [dbHealth, setDbHealth] = useState<any>(null);
@@ -111,12 +112,12 @@ export default function DiagnosticsPage() {
         </div>
 
         <div className="text-center">
-          <a
+          <Link
             href="/"
             className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors inline-block"
           >
             ← Back to Home
-          </a>
+          </Link>
         </div>
       </div>
     </div>

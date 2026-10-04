@@ -124,7 +124,6 @@ export default function OptionContractChart({
       candleSeriesRef.current = null;
       underlyingSeriesRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [height, isIntraday]);
 
   // Option candles.

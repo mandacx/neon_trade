@@ -224,7 +224,7 @@ function LoginPageInner() {
                     {busy ? 'Verifying…' : 'Verify & continue'}
                   </button>
                   <p className="text-center text-xs text-gray-400">
-                    Didn't get it? <button type="button" onClick={resendOtp} className="text-blue-600 font-semibold">Resend code</button>
+                    Didn&apos;t get it? <button type="button" onClick={resendOtp} className="text-blue-600 font-semibold">Resend code</button>
                   </p>
                 </form>
               )}
