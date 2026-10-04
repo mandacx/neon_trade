@@ -1,19 +1,13 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef, useId } from 'react';
-import { debounce } from '@/lib/utils';
+import { useState, useEffect, useRef, useId } from 'react';
 import { useRouter } from 'next/navigation';
-
-interface SearchResult {
-  symbol: string;
-  name: string;
-  exchange: string;
-}
+import { useSymbolSearch } from '@/components/ui/useSymbolSearch';
 
 export default function StockSearch({ compact }: { compact?: boolean }) {
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState<SearchResult[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  // Ticker or company name; our symbols show at once, Tradier's are appended.
+  const { results, isLoading, isLoadingMore } = useSymbolSearch(query);
   const [isOpen, setIsOpen] = useState(false);
   // -1 = nothing highlighted; Enter and the go arrow both fall back to the
   // first result, matching components/watchlists/AddSymbolInput.tsx.
@@ -44,44 +38,11 @@ export default function StockSearch({ compact }: { compact?: boolean }) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Debounced search function
-  const performSearch = useCallback(
-    debounce(async (searchQuery: string) => {
-      if (searchQuery.length < 1) {
-        setResults([]);
-        setActiveIndex(-1);
-        setIsLoading(false);
-        return;
-      }
-
-      try {
-        const response = await fetch(`/api/stocks/search?q=${encodeURIComponent(searchQuery)}`);
-        const data = await response.json();
-
-        if (data.success && data.data.results) {
-          setResults(data.data.results);
-        } else {
-          setResults([]);
-        }
-      } catch (error) {
-        console.error('Search error:', error);
-        setResults([]);
-      } finally {
-        // A new result set invalidates whatever row was highlighted against
-        // the previous one.
-        setActiveIndex(-1);
-        setIsLoading(false);
-      }
-    }, 300),
-    []
-  );
-
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value;
-    setQuery(value);
-    setIsLoading(true);
+    setQuery(e.target.value);
     setIsOpen(true);
-    performSearch(value);
+    // A new query invalidates whatever row was highlighted against the old one.
+    setActiveIndex(-1);
   };
 
   const handleSelectStock = (symbol: string) => {
@@ -140,7 +101,7 @@ export default function StockSearch({ compact }: { compact?: boolean }) {
           aria-controls={listboxId}
           aria-autocomplete="list"
           aria-activedescendant={activeIndex >= 0 ? `${listboxId}-option-${activeIndex}` : undefined}
-          placeholder={compact ? 'Search stocks...' : 'Search stocks (e.g., AAPL, TSLA...)'}
+          placeholder={compact ? 'Search ticker or name...' : 'Search by ticker or name (e.g. AAPL, Nvidia)'}
           className={`w-full border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
             compact ? 'px-3 py-1.5 pr-9 text-sm' : 'px-4 py-3 pr-11 text-base border-gray-300'
           }`}
@@ -211,6 +172,9 @@ export default function StockSearch({ compact }: { compact?: boolean }) {
                   this dropdown is only as wide as the header's search box. */}
               <div className="flex items-baseline gap-2">
                 <span className="min-w-0 truncate font-semibold text-gray-900">{result.symbol}</span>
+                {result.hasLevels && (
+                  <span className="shrink-0 text-[10px] font-semibold px-1.5 py-px rounded bg-green-50 text-green-700" title="Option levels available">Levels</span>
+                )}
                 <span className="ml-auto shrink-0 text-xs text-gray-500">{result.exchange}</span>
               </div>
               <div className="text-sm text-gray-600 truncate">{result.name}</div>
@@ -219,7 +183,7 @@ export default function StockSearch({ compact }: { compact?: boolean }) {
         </div>
       )}
 
-      {isOpen && query && !isLoading && results.length === 0 && (
+      {isOpen && query && !isLoading && !isLoadingMore && results.length === 0 && (
         <div className="absolute z-50 w-full mt-2 bg-white border border-gray-200 rounded-lg shadow-lg p-4 text-center text-gray-600">
           No stocks found for &quot;{query}&quot;
         </div>

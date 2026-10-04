@@ -298,26 +298,6 @@ export async function getAllStocksByDate(date: string): Promise<StockData[]> {
 }
 
 /**
- * Search stocks by symbol pattern
- */
-export async function searchStocks(query: string, limit: number = 20): Promise<string[]> {
-  try {
-    const result = await sql`
-      SELECT DISTINCT symbol
-      FROM public.eod_usmkts_price
-      WHERE symbol LIKE ${query.toUpperCase() + '%'}
-      ORDER BY symbol
-      LIMIT ${limit}
-    `;
-
-    return result.map((row: any) => row.symbol);
-  } catch (error) {
-    console.error('Error searching stocks:', error);
-    throw error;
-  }
-}
-
-/**
  * Get available trading dates
  */
 export async function getAvailableDates(limit: number = 30): Promise<string[]> {

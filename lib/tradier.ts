@@ -150,6 +150,27 @@ export async function getTimeSales(
 /**
  * Search for symbols
  */
+/**
+ * Company-name search (/markets/search), e.g. "nvidia" → NVDA. Like
+ * searchSymbols, resolves to [] on any error or timeout.
+ */
+export async function searchCompanies(query: string): Promise<Array<{ symbol: string; description: string }>> {
+  try {
+    const response = await tradierClient.get('/markets/search', {
+      params: { q: query, indexes: false },
+    });
+    const securities = response.data?.securities?.security;
+    if (!securities) return [];
+    const results = Array.isArray(securities) ? securities : [securities];
+    return results
+      .filter((s: any) => !s.type || s.type === 'stock' || s.type === 'etf')
+      .map((s: any) => ({ symbol: s.symbol, description: s.description }));
+  } catch (error) {
+    console.error('Error searching companies from Tradier:', error);
+    return [];
+  }
+}
+
 export async function searchSymbols(query: string): Promise<Array<{ symbol: string; description: string }>> {
   try {
     const response = await tradierClient.get('/markets/lookup', {
