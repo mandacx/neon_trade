@@ -6,7 +6,8 @@ import { getSnapshotsMulti } from '@/lib/alpaca';
 import { format } from 'date-fns';
 import { requireFeatureApi } from '@/lib/routeGuards';
 import { levelGate } from '@/lib/levelAccess';
-import { FEATURE_QUADRANT, FEATURE_WATCHLISTS, hasFeature } from '@/lib/features';
+import { FEATURE_EARNINGS, FEATURE_QUADRANT, FEATURE_WATCHLISTS, hasFeature } from '@/lib/features';
+import { earningsBadge, getEarningsSummary } from '@/lib/earnings';
 import { getWatchlistsForUser, getWatchlistSymbols } from '@/lib/watchlists';
 
 export async function GET(request: NextRequest) {
@@ -26,6 +27,11 @@ export async function GET(request: NextRequest) {
     const indexCode = searchParams.get('index');
     const watchlistId = searchParams.get('watchlist');
     const watchlistsEnabled = hasFeature(ctx.features, FEATURE_WATCHLISTS);
+    // Earnings flags/filter are a separate Pro feature. Filter values:
+    // 'week' (reports within 7 days), 'beforeExpiry' (reports on/before the
+    // row's expiry), 'exclude' (drop those that do).
+    const earningsEnabled = hasFeature(ctx.features, FEATURE_EARNINGS);
+    const earningsFilter = earningsEnabled ? searchParams.get('earnings') : null;
 
     // If requesting metadata only (dates + filter options)
     if (metadataOnly) {
@@ -43,6 +49,7 @@ export async function GET(request: NextRequest) {
           expiryDates,
           filterOptions,
           watchlists,
+          earningsEnabled,
         },
       });
     }
@@ -64,12 +71,13 @@ export async function GET(request: NextRequest) {
     // day's own close, same rule the stock detail page follows.
     const isLatestDate = !date || date === latestDate;
     const allSymbols = Array.from(new Set(stocksData.map(d => d.SYMBOL)));
-    const [snapshots, allSecMeta, watchlistSymbols] = await Promise.all([
+    const [snapshots, allSecMeta, watchlistSymbols, earningsMap] = await Promise.all([
       isLatestDate && allSymbols.length > 0
         ? getSnapshotsMulti(allSymbols)
         : Promise.resolve({} as Awaited<ReturnType<typeof getSnapshotsMulti>>),
       getSecuritiesMeta(allSymbols),
       watchlistId && watchlistsEnabled ? getWatchlistSymbols(watchlistId, ctx.userId) : Promise.resolve(null),
+      earningsEnabled ? getEarningsSummary(allSymbols) : Promise.resolve(null),
     ]);
     const liveBySymbol: Record<string, number> = {};
     for (const [symbol, snap] of Object.entries(snapshots)) {
@@ -148,10 +156,23 @@ export async function GET(request: NextRequest) {
     // `closestLevel`/`closestValue` are kept so the chart's X axis still
     // works — QuadrantChart degrades to discrete rungs without `levels`.
     const gate = levelGate(ctx.features);
-    const enriched = withMeta.map(s => {
-      const withheld = gate.withheld(s.tradeDate);
-      return { ...s, ...(withheld ? { levels: [] } : {}) };
-    });
+    const enriched = withMeta
+      .map(s => {
+        const withheld = gate.withheld(s.tradeDate);
+        return {
+          ...s,
+          ...(withheld ? { levels: [] } : {}),
+          ...(earningsMap ? { earnings: earningsBadge(earningsMap.get(s.symbol), s.expiryDate) } : {}),
+        };
+      })
+      .filter(s => {
+        if (!earningsFilter) return true;
+        const e = s.earnings;
+        if (earningsFilter === 'week') return e?.daysUntil != null && e.daysUntil <= 7;
+        if (earningsFilter === 'beforeExpiry') return !!e?.beforeExpiry;
+        if (earningsFilter === 'exclude') return !e?.beforeExpiry;
+        return true;
+      });
 
     const tradeDate = processedStocks.length > 0
       ? processedStocks[0].tradeDate
@@ -166,6 +187,7 @@ export async function GET(request: NextRequest) {
         stocks: enriched,
         filterOptions: derivedFilterOptions,
         hasSecurities: Object.keys(secMeta).length > 0,
+        earningsEnabled,
       },
     });
   } catch (error) {

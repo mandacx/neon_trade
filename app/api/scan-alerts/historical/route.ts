@@ -7,7 +7,8 @@ import {
 } from '@/lib/scanAlerts';
 import { deriveFilterOptions, getSecuritiesFilterOptions, getSecuritiesMeta, applySecuritiesFilters, attachSecuritiesMeta } from '@/lib/securitiesFilters';
 import { requireFeatureApi } from '@/lib/routeGuards';
-import { hasFeature, FEATURE_LEVELS, FEATURE_SCAN_ALERTS_HISTORY } from '@/lib/features';
+import { hasFeature, FEATURE_EARNINGS, FEATURE_LEVELS, FEATURE_SCAN_ALERTS_HISTORY } from '@/lib/features';
+import { getEarningsInWindows, windowKey } from '@/lib/earnings';
 
 // Historical scan alerts: browsed by calendar month. `metadata=true` alone lists
 // available months; `metadata=true&month=YYYY-MM` scopes trade/expiry date
@@ -50,7 +51,14 @@ export async function GET(request: NextRequest) {
     let alerts = await getScanAlerts({ yearMonth: month, tradeDate, expiryDate });
 
     const symbols = alerts.map(a => a.symbol);
-    const secMeta = await getSecuritiesMeta(symbols);
+    // Earnings (Pro): did a report land between each alert's trade date and its expiry?
+    const earningsEnabled = hasFeature(ctx.features, FEATURE_EARNINGS);
+    const [secMeta, inWindow] = await Promise.all([
+      getSecuritiesMeta(symbols),
+      earningsEnabled
+        ? getEarningsInWindows(alerts.map(a => ({ symbol: a.symbol, from: a.tradeDate, to: a.expiryDate })))
+        : Promise.resolve(null),
+    ]);
     const derivedFilterOptions = deriveFilterOptions(secMeta);
 
     alerts = applySecuritiesFilters(alerts, secMeta, { sector, industry, marketCapTier, indexCode });
@@ -58,7 +66,11 @@ export async function GET(request: NextRequest) {
     // See app/api/scan-alerts/latest/route.ts — same redaction pattern.
     const levelsVisible = hasFeature(ctx.features, FEATURE_LEVELS);
     const enriched = alerts.map(a => {
-      const withMeta = attachSecuritiesMeta(a, secMeta);
+      const report = inWindow?.get(windowKey(a.symbol, a.tradeDate, a.expiryDate));
+      const withMeta = {
+        ...attachSecuritiesMeta(a, secMeta),
+        ...(inWindow ? { earningsInWindow: report ? { date: report.date, outcome: report.epsOutcome, surprisePct: report.epsSurprisePct } : null } : {}),
+      };
       return levelsVisible ? withMeta : { ...withMeta, levels: [] };
     });
 
@@ -71,6 +83,7 @@ export async function GET(request: NextRequest) {
         filterOptions: derivedFilterOptions,
         hasSecurities: Object.keys(secMeta).length > 0,
         levelsRedacted: !levelsVisible,
+        earningsEnabled,
       },
     });
   } catch (error) {

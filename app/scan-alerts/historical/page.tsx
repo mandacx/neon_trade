@@ -7,6 +7,7 @@ import Header from '@/components/layout/Header';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import ErrorDisplay from '@/components/ui/ErrorDisplay';
 import { ScanAlert } from '@/types/stock';
+import { fmtShortDate } from '@/components/watchlists/watchlistShared';
 import { getLevelColor, getLevelDisplayName } from '@/lib/utils';
 
 interface FilterOptions {
@@ -32,6 +33,7 @@ function ChevronIcon({ open }: { open: boolean }) {
 function ScanAlertsHistoricalInner() {
   const searchParams = useSearchParams();
   const [alerts, setAlerts] = useState<ScanAlert[]>([]);
+  const [earningsEnabled, setEarningsEnabled] = useState(false);
   const [filteredAlerts, setFilteredAlerts] = useState<ScanAlert[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [monthsLoading, setMonthsLoading] = useState(true);
@@ -127,6 +129,7 @@ function ScanAlertsHistoricalInner() {
         const result = await response.json();
         if (!result.success) throw new Error(result.error || 'Unknown error');
         setAlerts(result.data.alerts);
+        setEarningsEnabled(!!result.data.earningsEnabled);
         setFilteredAlerts(result.data.alerts);
         if (result.data.filterOptions) setFilterOptions(result.data.filterOptions);
       } catch (err) {
@@ -349,6 +352,7 @@ function ScanAlertsHistoricalInner() {
                             <th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Alert</th>
                             <th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Trade Date</th>
                             <th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Expiry</th>
+                            {earningsEnabled && <th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase" title="A report landed between the alert's trade date and its expiry">Earnings in window</th>}
                             {hasSecurityFilters && (
                               <>
                                 <th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Sector</th>
@@ -377,6 +381,20 @@ function ScanAlertsHistoricalInner() {
                               </td>
                               <td className="px-4 py-2 text-xs text-gray-500">{a.tradeDate}</td>
                               <td className="px-4 py-2 text-xs text-gray-500">{a.expiryDate}</td>
+                              {earningsEnabled && (
+                                <td className="px-4 py-2 text-xs">
+                                  {a.earningsInWindow ? (
+                                    <span
+                                      className={`inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold whitespace-nowrap ${a.earningsInWindow.outcome === 'beat' ? 'bg-green-50 text-green-700' : a.earningsInWindow.outcome === 'miss' ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-800'}`}
+                                      title={`Reported ${a.earningsInWindow.date}, inside this alert's window`}
+                                    >
+                                      ER {fmtShortDate(a.earningsInWindow.date)}
+                                      {a.earningsInWindow.outcome && ` · ${a.earningsInWindow.outcome === 'beat' ? 'Beat' : a.earningsInWindow.outcome === 'miss' ? 'Miss' : 'In-line'}`}
+                                      {a.earningsInWindow.surprisePct != null && a.earningsInWindow.outcome !== 'inline' && ` ${a.earningsInWindow.surprisePct > 0 ? '+' : ''}${Number(a.earningsInWindow.surprisePct).toFixed(1)}%`}
+                                    </span>
+                                  ) : <span className="text-gray-300">—</span>}
+                                </td>
+                              )}
                               {hasSecurityFilters && (
                                 <>
                                   <td className="px-4 py-2 text-xs text-gray-500">{(a as any).sector || '—'}</td>

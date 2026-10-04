@@ -5,6 +5,8 @@ import { getScanAlertsSince, TickerAlert } from '@/lib/scanAlerts';
 import { getWatchlistSymbols } from '@/lib/watchlists';
 import { sendTelegramMessage, isPermanentTelegramError } from '@/lib/telegram';
 import { getLevelDisplayName, isUsMarketHours } from '@/lib/utils';
+import { getEarningsSummary } from '@/lib/earnings';
+import type { EarningsSummary } from '@/types/earnings';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -19,10 +21,24 @@ interface Subscriber {
   last_alert_time: string | null;
   consecutive_failures: number;
   tg_alerts: boolean;
+  /** Has the `earnings` feature: gets the " · ER <date> before exp" suffix. */
+  earnings: boolean;
 }
 
 function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * " · ER Oct 28 before exp" when the symbol reports on/before this alert's
+ * expiry, the case where the report can move price through the level.
+ * Plain text: messages are sent without parse_mode.
+ */
+function earningsSuffix(a: TickerAlert, summary: EarningsSummary | undefined): string {
+  const next = summary?.next;
+  if (!next || next.date > a.expiryDate) return '';
+  const label = new Date(`${next.date}T00:00:00Z`).toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric' });
+  return ` · ER ${label} before exp`;
 }
 
 function formatAlertLine(a: TickerAlert): string {
@@ -68,7 +84,8 @@ export async function GET(request: NextRequest) {
       )
       SELECT s.user_id, s.watchlist_id, u.telegram_chat_id,
              c.last_alert_time::timestamp::text as last_alert_time, c.consecutive_failures,
-             (e.features ? 'telegram_alerts') AS tg_alerts
+             (e.features ? 'telegram_alerts') AS tg_alerts,
+             (e.features ? 'earnings') AS earnings
       FROM public.nt_telegram_alert_subscriptions s
       JOIN public.nt_app_user_profiles u ON u.user_id = s.user_id
       JOIN public.nt_telegram_alert_cursors c ON c.user_id = s.user_id
@@ -90,6 +107,10 @@ export async function GET(request: NextRequest) {
     }
     const globalSince = validCursors.reduce((min, t) => (t < min ? t : min));
     const batch = await getScanAlertsSince(globalSince, 500);
+    // One earnings lookup for the whole batch, only if any subscriber can see it.
+    const earningsMap = subscribers.some(s => s.earnings) && batch.length > 0
+      ? await getEarningsSummary(batch.map(a => a.symbol))
+      : null;
 
     let sent = 0;
     let skippedEmpty = 0;
@@ -122,7 +143,7 @@ export async function GET(request: NextRequest) {
           continue;
         }
 
-        const text = `📈 Alert Update (${matched.length} new)\n${matched.map(formatAlertLine).join('\n')}`;
+        const text = `📈 Alert Update (${matched.length} new)\n${matched.map(a => formatAlertLine(a) + (sub.earnings && earningsMap ? earningsSuffix(a, earningsMap.get(a.symbol)) : '')).join('\n')}`;
         const result = await sendTelegramMessage(sub.telegram_chat_id, text);
 
         if (result.ok) {

@@ -18,6 +18,8 @@ interface PerformanceRow {
   expiryClose: number | null;
   movePct: number | null;
   outcome: PerformanceOutcome;
+  /** Earnings feature only: true = a report landed inside the alert window. */
+  earningsInWindow?: boolean | null;
 }
 
 export default function PerformanceDetailPage() {
@@ -89,7 +91,7 @@ export default function PerformanceDetailPage() {
                         </td>
                         <td className="px-3 py-2 text-gray-600">{r.direction === 'buy_above' ? '▲ Buy above' : '▼ Sell below'}</td>
                         <td className="px-3 py-2 text-right text-gray-700">{formatCurrency(r.price)}</td>
-                        <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{r.expiryDate}</td>
+                        <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{r.expiryDate}{r.earningsInWindow && <span className="ml-1.5 text-[9px] font-bold px-1 py-px rounded bg-amber-100 text-amber-800" title="An earnings report landed between this alert and its expiry">ER</span>}</td>
                         <td className="px-3 py-2 text-right text-gray-700">{r.expiryClose !== null ? formatCurrency(r.expiryClose) : '—'}</td>
                         <td className={`px-3 py-2 text-right font-semibold ${r.movePct === null ? 'text-gray-400' : r.movePct > 0 ? 'text-green-600' : r.movePct < 0 ? 'text-red-600' : 'text-gray-500'}`}>
                           {r.movePct !== null ? formatPercentage(r.movePct, 2) : '—'}

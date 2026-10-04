@@ -1,6 +1,7 @@
 import { sql } from '@/lib/db';
 import { getAlertsForSymbolsByExpiry, AlertsByExpiryOptions, TickerAlert, ScanLevelName, ScanDirection } from '@/lib/scanAlerts';
 import { usTradingDayKey } from '@/lib/utils';
+import { getEarningsCoverageStart, getEarningsInWindows, windowKey } from '@/lib/earnings';
 
 // How a fired alert actually played out by the time its option expiry
 // arrived. `not_yet_expired`/`awaiting_data` are both "no verdict yet" but
@@ -13,6 +14,12 @@ export interface PerformanceRow extends TickerAlert {
   /** (expiryClose - price) / price, signed by raw market direction (not yet normalized for buy/sell). Null until resolved. */
   movePct: number | null;
   outcome: PerformanceOutcome;
+  /**
+   * Did an earnings report land between the alert's trade date and its expiry?
+   * Only set for viewers with the earnings feature; null = unknown (the alert
+   * predates our earnings data, so "no report" can't be told from "no data").
+   */
+  earningsInWindow?: boolean | null;
 }
 
 // A move smaller than this is "flat" either direction — avoids classifying
@@ -222,4 +229,35 @@ export function summarizePerformanceRows(rows: PerformanceRow[]): PerformanceSum
     .reverse();
 
   return { total: rows.length, resolved: resolvedRows.length, favorable, unfavorable, flat, notYetExpired, awaitingData, winRate, reversionRate, avgMovePct, byLevel, bestSymbols, worstSymbols };
+}
+
+/** Tag each row with earningsInWindow (see PerformanceRow). One batched query. */
+export async function tagEarningsInWindow(rows: PerformanceRow[]): Promise<PerformanceRow[]> {
+  if (rows.length === 0) return rows;
+  const [coverageStart, reports] = await Promise.all([
+    getEarningsCoverageStart(),
+    getEarningsInWindows(rows.map(r => ({ symbol: r.symbol, from: r.tradeDate, to: r.expiryDate }))),
+  ]);
+  return rows.map(r => ({
+    ...r,
+    earningsInWindow: reports.has(windowKey(r.symbol, r.tradeDate, r.expiryDate))
+      ? true
+      : coverageStart && r.tradeDate >= coverageStart ? false : null,
+  }));
+}
+
+export interface EarningsSplit {
+  withEarnings: PerformanceSummary;
+  withoutEarnings: PerformanceSummary;
+  /** Alerts older than the earnings data, excluded from both halves. */
+  unknown: number;
+}
+
+/** The same summary computed separately for alerts with and without a report inside their window. */
+export function splitByEarnings(rows: PerformanceRow[]): EarningsSplit {
+  return {
+    withEarnings: summarizePerformanceRows(rows.filter(r => r.earningsInWindow === true)),
+    withoutEarnings: summarizePerformanceRows(rows.filter(r => r.earningsInWindow === false)),
+    unknown: rows.filter(r => r.earningsInWindow == null).length,
+  };
 }

@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireFeatureApi } from '@/lib/routeGuards';
-import { FEATURE_PERFORMANCE } from '@/lib/features';
+import { FEATURE_EARNINGS, FEATURE_PERFORMANCE, hasFeature } from '@/lib/features';
 import { getWatchlistDetail } from '@/lib/watchlists';
-import { getExpiryPerformanceForSymbols } from '@/lib/alertPerformance';
+import { getExpiryPerformanceForSymbols, tagEarningsInWindow } from '@/lib/alertPerformance';
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string; symbol: string }> }) {
   const { ctx, blocked } = await requireFeatureApi(FEATURE_PERFORMANCE);
@@ -20,6 +20,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const expiryCountParam = Number(request.nextUrl.searchParams.get('expiryCount'));
   const expiryCount = Number.isFinite(expiryCountParam) && expiryCountParam > 0 ? expiryCountParam : undefined;
 
-  const rows = await getExpiryPerformanceForSymbols([upperSymbol], { expiryCount });
-  return NextResponse.json({ success: true, data: { symbol: upperSymbol, rows } });
+  const baseRows = await getExpiryPerformanceForSymbols([upperSymbol], { expiryCount });
+  const earningsEnabled = hasFeature(ctx.features, FEATURE_EARNINGS);
+  const rows = earningsEnabled ? await tagEarningsInWindow(baseRows) : baseRows;
+  return NextResponse.json({ success: true, data: { symbol: upperSymbol, rows, earningsEnabled } });
 }

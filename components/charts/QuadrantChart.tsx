@@ -164,6 +164,8 @@ export default function QuadrantChart({ data, onStockClick, height = 600, title 
           chg: (stock as any).chg,
           prevClose: (stock as any).prevClose,
           loadDateTime: (stock as any).loadDateTime,
+          earnings: stock.earnings ?? null,
+          earningsInWindow: (stock as any).earningsInWindow ?? null,
         });
       });
     });
@@ -268,6 +270,26 @@ export default function QuadrantChart({ data, onStockClick, height = 600, title 
           <div className="text-xs text-gray-500 mb-2">
             <p>Trade: {d.tradeDate} · Expiry: {d.expiryDate}</p>
             {d.loadDateTime && <p>Alert loaded: {d.loadDateTime}</p>}
+            {d.earnings?.nextDate && (
+              <p className={d.earnings.beforeExpiry ? 'text-amber-700 font-semibold' : ''}>
+                Earnings: {d.earnings.nextDate}
+                {d.earnings.nextTime === 'pre-market' ? ' (before open)' : d.earnings.nextTime === 'post-market' ? ' (after close)' : ''}
+                {d.earnings.daysUntil != null && ` · in ${d.earnings.daysUntil}d`}
+                {d.earnings.beforeExpiry && ' · before expiry'}
+              </p>
+            )}
+            {d.earnings?.lastOutcome && (
+              <p>
+                Last report: {d.earnings.lastDate} ·{' '}
+                <span className={d.earnings.lastOutcome === 'beat' ? 'text-green-700' : d.earnings.lastOutcome === 'miss' ? 'text-red-700' : ''}>
+                  {d.earnings.lastOutcome === 'beat' ? 'Beat' : d.earnings.lastOutcome === 'miss' ? 'Miss' : 'In-line'}
+                  {d.earnings.lastSurprisePct != null && d.earnings.lastOutcome !== 'inline' && ` ${d.earnings.lastSurprisePct > 0 ? '+' : ''}${Number(d.earnings.lastSurprisePct).toFixed(1)}%`}
+                </span>
+              </p>
+            )}
+            {d.earningsInWindow && (
+              <p className="text-amber-700">Reported inside this alert window: {d.earningsInWindow.date}</p>
+            )}
           </div>
           <p className="text-sm text-gray-600 mb-2">
             Close: <span className="font-semibold">{formatCurrency(d.close)}</span>
@@ -310,8 +332,14 @@ export default function QuadrantChart({ data, onStockClick, height = 600, title 
   const CustomDot = (props: any) => {
     const { cx, cy, payload } = props;
     const r = payload.r ?? 6;
+    // Amber ring: earnings fall before this row's expiry (or, for historical
+    // alerts, a report landed inside the alert window).
+    const earningsRing = !!(payload.earnings?.beforeExpiry || payload.earningsInWindow);
     return (
       <g>
+        {earningsRing && (
+          <circle cx={cx} cy={cy} r={r + 3} fill="none" stroke="#d97706" strokeWidth={2} className="pointer-events-none" />
+        )}
         <circle
           cx={cx} cy={cy} r={r}
           fill={payload.color} opacity={0.85}
@@ -485,6 +513,7 @@ export default function QuadrantChart({ data, onStockClick, height = 600, title 
           <div className="px-4 pb-4 pt-2 text-sm text-gray-600 space-y-1">
             <p>• X-axis = where the close price sits <strong>among the stock&apos;s own 5 levels</strong> (rungs), interpolated between adjacent levels</p>
             <p>• Dot color = closest level (category) · Dot size = market cap (larger = bigger company)</p>
+            <p>• Amber ring = earnings fall before the expiry (Pro earnings data) — the report can move price through these levels</p>
             <p>• Scroll to zoom toward the cursor · Drag to pan · Use + / − / Reset to control the view</p>
             <p>• Click a level card to isolate stocks in that category · Click again to clear</p>
             <p>• Hover dots for detailed level info · Click a dot to open its chart</p>

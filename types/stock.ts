@@ -1,3 +1,5 @@
+import type { EarningsBadge } from '@/types/earnings';
+
 // Stock data from Neon DB - eod_usmkts_price table
 export interface StockData {
   SYMBOL: string;
@@ -53,6 +55,8 @@ export interface OHLCData {
 export interface QuadrantStock {
   symbol: string;
   name?: string | null;
+  /** Earnings flag relative to this row's expiry — only for viewers with the earnings feature. */
+  earnings?: EarningsBadge | null;
   close: number;
   livePrice?: number | null;
   tradeDate: string;
@@ -102,6 +106,10 @@ export interface LevelLine {
 export interface ScanAlert {
   symbol: string;
   name?: string | null;
+  /** Earnings flag relative to this alert's expiry — only for viewers with the earnings feature. */
+  earnings?: EarningsBadge | null;
+  /** Historical alerts: the report that landed between trade date and expiry, if any. */
+  earningsInWindow?: { date: string; outcome: 'beat' | 'miss' | 'inline' | null; surprisePct: number | null } | null;
   close: number;              // last_price at time of scan
   prevClose: number;
   chg: number;

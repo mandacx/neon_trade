@@ -8,6 +8,7 @@ import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import ErrorDisplay from '@/components/ui/ErrorDisplay';
 import ScanAlertsTicker from '@/components/ui/ScanAlertsTicker';
 import { ScanAlert } from '@/types/stock';
+import EarningsBadgeCell from '@/components/ui/EarningsBadgeCell';
 import { getLevelColor, getLevelDisplayName } from '@/lib/utils';
 
 interface FilterOptions {
@@ -28,6 +29,7 @@ function ChevronIcon({ open }: { open: boolean }) {
 function ScanAlertsLatestInner() {
   const searchParams = useSearchParams();
   const [alerts, setAlerts] = useState<ScanAlert[]>([]);
+  const [earningsEnabled, setEarningsEnabled] = useState(false);
   const [filteredAlerts, setFilteredAlerts] = useState<ScanAlert[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -83,6 +85,7 @@ function ScanAlertsLatestInner() {
         const result = await response.json();
         if (!result.success) throw new Error(result.error || 'Unknown error');
         setAlerts(result.data.alerts);
+        setEarningsEnabled(!!result.data.earningsEnabled);
         setFilteredAlerts(result.data.alerts);
         if (result.data.filterOptions) setFilterOptions(result.data.filterOptions);
       } catch (err) {
@@ -262,6 +265,7 @@ function ScanAlertsLatestInner() {
                         <th className="px-4 py-2 text-right text-[10px] font-semibold text-gray-500 uppercase">Chg</th>
                         <th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Alert</th>
                         <th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Expiry</th>
+                        {earningsEnabled && <th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Earnings</th>}
                         <th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Loaded</th>
                         {hasSecurityFilters && (
                           <>
@@ -290,6 +294,7 @@ function ScanAlertsLatestInner() {
                             </span>
                           </td>
                           <td className="px-4 py-2 text-xs text-gray-500">{a.expiryDate}</td>
+                          {earningsEnabled && <td className="px-4 py-2"><EarningsBadgeCell badge={a.earnings} /></td>}
                           <td className="px-4 py-2 text-xs text-gray-400">{a.loadDateTime}</td>
                           {hasSecurityFilters && (
                             <>

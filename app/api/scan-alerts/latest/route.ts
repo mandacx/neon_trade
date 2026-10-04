@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getScanAlerts, getScanTradeDates, getScanExpiryDates, getLatestScanTradeDate } from '@/lib/scanAlerts';
 import { deriveFilterOptions, getSecuritiesFilterOptions, getSecuritiesMeta, applySecuritiesFilters, attachSecuritiesMeta } from '@/lib/securitiesFilters';
 import { requireFeatureApi } from '@/lib/routeGuards';
-import { hasFeature, FEATURE_LEVELS, FEATURE_SCAN_ALERTS_LATEST } from '@/lib/features';
+import { hasFeature, FEATURE_EARNINGS, FEATURE_LEVELS, FEATURE_SCAN_ALERTS_LATEST } from '@/lib/features';
+import { earningsBadge, getEarningsSummary } from '@/lib/earnings';
 
 // Latest scan alerts: always scoped to expiry_dt >= today, per the "future dated
 // expiries only" requirement for this page. `expiry` further narrows to one date.
@@ -33,7 +34,12 @@ export async function GET(request: NextRequest) {
     let alerts = await getScanAlerts({ tradeDate, expiryDate, futureExpiryOnly: true });
 
     const symbols = alerts.map(a => a.symbol);
-    const secMeta = await getSecuritiesMeta(symbols);
+    // Earnings flags (Pro): next report relative to each alert's expiry.
+    const earningsEnabled = hasFeature(ctx.features, FEATURE_EARNINGS);
+    const [secMeta, earningsMap] = await Promise.all([
+      getSecuritiesMeta(symbols),
+      earningsEnabled ? getEarningsSummary(symbols) : Promise.resolve(null),
+    ]);
     const derivedFilterOptions = deriveFilterOptions(secMeta);
 
     alerts = applySecuritiesFilters(alerts, secMeta, { sector, industry, marketCapTier, indexCode });
@@ -45,7 +51,10 @@ export async function GET(request: NextRequest) {
     // level, not its price.
     const levelsVisible = hasFeature(ctx.features, FEATURE_LEVELS);
     const enriched = alerts.map(a => {
-      const withMeta = attachSecuritiesMeta(a, secMeta);
+      const withMeta = {
+        ...attachSecuritiesMeta(a, secMeta),
+        ...(earningsMap ? { earnings: earningsBadge(earningsMap.get(a.symbol), a.expiryDate) } : {}),
+      };
       return levelsVisible ? withMeta : { ...withMeta, levels: [] };
     });
 
@@ -58,6 +67,7 @@ export async function GET(request: NextRequest) {
         filterOptions: derivedFilterOptions,
         hasSecurities: Object.keys(secMeta).length > 0,
         levelsRedacted: !levelsVisible,
+        earningsEnabled,
       },
     });
   } catch (error) {

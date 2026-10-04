@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, Suspense } from 'react';
+import EarningsBadgeCell from '@/components/ui/EarningsBadgeCell';
 import { useSearchParams } from 'next/navigation';
 import QuadrantChart from '@/components/charts/QuadrantChart';
 import Header from '@/components/layout/Header';
@@ -60,6 +61,9 @@ function QuadrantPageInner() {
   const [marketCapTier, setMarketCapTier] = useState(searchParams.get('marketCapTier') || '');
   const [indexCode, setIndexCode] = useState(searchParams.get('index') || '');
   const [watchlistId, setWatchlistId] = useState(searchParams.get('watchlist') || '');
+  // Pro earnings filter: '' | 'week' | 'beforeExpiry' | 'exclude' (see /api/quadrant/data).
+  const [earningsEnabled, setEarningsEnabled] = useState(false);
+  const [earningsFilter, setEarningsFilter] = useState(searchParams.get('earnings') || '');
 
   useEffect(() => {
     const fetchMetadata = async () => {
@@ -72,6 +76,7 @@ function QuadrantPageInner() {
           setExpiryDates(result.data.expiryDates);
           setFilterOptions(result.data.filterOptions || {});
           setWatchlists(result.data.watchlists || []);
+          setEarningsEnabled(!!result.data.earningsEnabled);
           if (result.data.tradeDates.length > 0) setTradeDate(result.data.tradeDates[0]);
           if (result.data.expiryDates.length > 0) setExpiryDate(result.data.expiryDates[0]);
         }
@@ -94,6 +99,7 @@ function QuadrantPageInner() {
         if (marketCapTier) params.set('marketCapTier', marketCapTier);
         if (indexCode) params.set('index', indexCode);
         if (watchlistId) params.set('watchlist', watchlistId);
+        if (earningsFilter) params.set('earnings', earningsFilter);
         const response = await fetch(`/api/quadrant/data?${params}`);
         if (!response.ok) throw new Error('Failed to fetch quadrant data');
         const result = await response.json();
@@ -109,7 +115,7 @@ function QuadrantPageInner() {
       }
     };
     fetchData();
-  }, [tradeDate, expiryDate, sector, industry, marketCapTier, indexCode, watchlistId]);
+  }, [tradeDate, expiryDate, sector, industry, marketCapTier, indexCode, watchlistId, earningsFilter]);
 
   useEffect(() => {
     let filtered = stocks;
@@ -129,7 +135,7 @@ function QuadrantPageInner() {
     || (filterOptions.marketCapTiers?.length ?? 0) > 0
     || (filterOptions.indices?.length ?? 0) > 0;
 
-  const hasActiveFilters = !!(sector || industry || marketCapTier || indexCode || watchlistId);
+  const hasActiveFilters = !!(sector || industry || marketCapTier || indexCode || watchlistId || earningsFilter);
 
   const selectClass = "px-2 py-1.5 border border-gray-200 rounded-md text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white max-w-[180px]";
   const labelClass = "block text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-0.5";
@@ -241,10 +247,21 @@ function QuadrantPageInner() {
                       </select>
                     </div>
                   )}
+                  {earningsEnabled && (
+                    <div>
+                      <label className={labelClass}>Earnings</label>
+                      <select value={earningsFilter} onChange={e => setEarningsFilter(e.target.value)} className={selectClass}>
+                        <option value="">Any</option>
+                        <option value="week">Reporting within 7 days</option>
+                        <option value="beforeExpiry">Reports before expiry</option>
+                        <option value="exclude">Exclude reports before expiry</option>
+                      </select>
+                    </div>
+                  )}
                   {hasActiveFilters && (
                     <div className="flex items-end pb-0.5">
                       <button
-                        onClick={() => { setSector(''); setIndustry(''); setMarketCapTier(''); setIndexCode(''); setWatchlistId(''); }}
+                        onClick={() => { setSector(''); setIndustry(''); setMarketCapTier(''); setIndexCode(''); setWatchlistId(''); setEarningsFilter(''); }}
                         className="px-2.5 py-1.5 text-xs text-gray-500 border border-gray-200 rounded-md hover:bg-gray-50"
                       >
                         Clear
@@ -287,6 +304,7 @@ function QuadrantPageInner() {
                         <th className="px-4 py-2 text-right text-[10px] font-semibold text-gray-500 uppercase">Close</th>
                         <th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Closest Level</th>
                         <th className="px-4 py-2 text-right text-[10px] font-semibold text-gray-500 uppercase">Distance</th>
+                        {earningsEnabled && <th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Next Earnings</th>}
                         {hasSecurityFilters && (
                           <>
                             <th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Sector</th>
@@ -316,6 +334,7 @@ function QuadrantPageInner() {
                           <td className="px-4 py-2 text-xs text-right font-mono">
                             {stock.closestValue > 0 ? '+' : ''}{(stock.closestValue * 100).toFixed(2)}%
                           </td>
+                          {earningsEnabled && <td className="px-4 py-2"><EarningsBadgeCell badge={stock.earnings} /></td>}
                           {hasSecurityFilters && (
                             <>
                               <td className="px-4 py-2 text-xs text-gray-500">{(stock as any).sector || '—'}</td>

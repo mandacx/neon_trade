@@ -4,6 +4,20 @@ import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Header from '@/components/layout/Header';
 import ScanAlertsTicker from '@/components/ui/ScanAlertsTicker';
+import EarningsBadgeCell from '@/components/ui/EarningsBadgeCell';
+import { useAuthContext } from '@/components/providers/AuthContextProvider';
+import { FEATURE_EARNINGS, hasFeature } from '@/lib/features';
+import { fmtShortDate, earningsTimeShort, daysUntilLabel } from '@/components/watchlists/watchlistShared';
+import type { EarningsBadge, EarningsEvent } from '@/types/earnings';
+
+type HomeEarningsEvent = EarningsEvent & { name: string | null };
+interface HomeEarnings {
+  upcoming: HomeEarningsEvent[];
+  upcomingTotal: number;
+  reported: HomeEarningsEvent[];
+  reportedTotal: number;
+  badges: Record<string, EarningsBadge | null>;
+}
 
 const LEVEL_COLORS: Record<string, string> = {
   put_low: '#dc2626', put_int: '#ea580c', put_call_int: '#16a34a',
@@ -75,7 +89,7 @@ function SortHeader({ label, sortKey, current, dir, onSort, className }: {
   );
 }
 
-function OIRow({ s, i, onClick }: { s: any; i: number; onClick: () => void }) {
+function OIRow({ s, i, onClick, badge }: { s: any; i: number; onClick: () => void; badge?: EarningsBadge | null }) {
   const [tooltip, setTooltip] = useState(false);
   const putRatio = s.totalOi > 0 ? s.putOi / s.totalOi : 0;
   const sentiment = putRatio > 0.6 ? 'bearish' : putRatio < 0.4 ? 'bullish' : 'neutral';
@@ -103,7 +117,10 @@ function OIRow({ s, i, onClick }: { s: any; i: number; onClick: () => void }) {
             <div className="h-full bg-red-400" style={{ width: `${putRatio * 100}%` }} />
           </div>
           {s.expiryDate && (
-            <div className="text-[10px] text-gray-500 mt-0.5">exp {s.expiryDate}</div>
+            <div className="flex items-center gap-1.5 text-[10px] text-gray-500 mt-0.5">
+              exp {s.expiryDate}
+              {badge?.nextDate && <EarningsBadgeCell badge={badge} showDate={false} />}
+            </div>
           )}
         </div>
         <div className="text-right shrink-0">
@@ -167,8 +184,41 @@ function MoverRow({ s, onClick }: { s: any; onClick: () => void }) {
   );
 }
 
+function EarningsEventRow({ e, onClick }: { e: HomeEarningsEvent; onClick: () => void }) {
+  const outcomeTone = e.epsOutcome === 'beat' ? 'bg-green-50 text-green-700' : e.epsOutcome === 'miss' ? 'bg-red-50 text-red-700' : 'bg-gray-100 text-gray-600';
+  return (
+    <button onClick={onClick} className="w-full px-4 py-2 flex items-center gap-2 hover:bg-gray-50 transition-colors text-left border-b border-gray-50 last:border-0">
+      <div className="min-w-0 flex-1">
+        <div className="font-bold text-gray-800 text-sm">{e.symbol}</div>
+        {e.name && <div className="text-[10px] text-gray-400 truncate" title={e.name}>{e.name}</div>}
+      </div>
+      {e.kind === 'upcoming' ? (
+        <div className="text-right shrink-0">
+          <div className="text-xs text-gray-700">{fmtShortDate(e.date)}{earningsTimeShort(e.time) && ` · ${earningsTimeShort(e.time)}`}</div>
+          <div className={`text-[10px] font-semibold ${e.daysUntil <= 1 ? 'text-red-600' : 'text-amber-700'}`}>{e.daysUntil <= 1 ? daysUntilLabel(e.daysUntil) : `in ${e.daysUntil}d`}</div>
+        </div>
+      ) : (
+        <div className="text-right shrink-0">
+          {e.epsOutcome ? (
+            <span className={`text-[11px] font-semibold px-1.5 py-0.5 rounded ${outcomeTone}`}>
+              {e.epsOutcome === 'beat' ? 'Beat' : e.epsOutcome === 'miss' ? 'Miss' : 'In-line'}
+              {e.epsOutcome !== 'inline' && e.epsSurprisePct != null && ` ${e.epsSurprisePct > 0 ? '+' : ''}${e.epsSurprisePct.toFixed(1)}%`}
+            </span>
+          ) : (
+            <span className="text-[11px] text-gray-500">Reported</span>
+          )}
+          <div className="text-[10px] text-gray-400 mt-0.5">{fmtShortDate(e.date)}</div>
+        </div>
+      )}
+    </button>
+  );
+}
+
 export default function Home() {
   const router = useRouter();
+  const authCtx = useAuthContext();
+  const earningsEnabled = hasFeature(authCtx.features, FEATURE_EARNINGS);
+  const [homeEarnings, setHomeEarnings] = useState<HomeEarnings | null>(null);
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [moverTab, setMoverTab] = useState('gainers');
@@ -195,6 +245,18 @@ export default function Home() {
       .then(res => { if (res.success) setData(res.data); })
       .finally(() => setLoading(false));
   }, []);
+
+  // Earnings card + Top OI flags (Pro) — a separate, gated request, since
+  // /api/home/data is public and CDN-cached for every visitor.
+  useEffect(() => {
+    if (!earningsEnabled || !data) return;
+    const rows: any[] = [...(data.topStocks || []), ...(data.topETFs || [])];
+    const pairs = rows.filter(r => r.expiryDate).map(r => `${r.symbol}:${r.expiryDate}`).join(',');
+    fetch(`/api/home/earnings${pairs ? `?pairs=${encodeURIComponent(pairs)}` : ''}`)
+      .then(r => r.json())
+      .then(res => { if (res.success) setHomeEarnings(res.data); })
+      .catch(() => {});
+  }, [earningsEnabled, data]);
 
   const topStocks: any[] = data?.topStocks || [];
   const topETFs: any[] = data?.topETFs || [];
@@ -243,7 +305,7 @@ export default function Home() {
               {loading
                 ? Array(8).fill(0).map((_, i) => <div key={i} className="px-4 py-2.5 animate-pulse h-10 border-b border-gray-50"><div className="h-3 bg-gray-200 rounded w-3/4" /></div>)
                 : sortedStocks.map((s: any, i: number) => (
-                    <OIRow key={s.symbol} s={s} i={i} onClick={() => router.push(`/stock/${s.symbol}`)} />
+                    <OIRow key={s.symbol} s={s} i={i} badge={homeEarnings?.badges[s.symbol]} onClick={() => router.push(`/stock/${s.symbol}`)} />
                   ))}
             </section>
 
@@ -273,7 +335,7 @@ export default function Home() {
                 ? Array(8).fill(0).map((_, i) => <div key={i} className="px-4 py-2.5 animate-pulse h-10 border-b border-gray-50"><div className="h-3 bg-gray-200 rounded w-3/4" /></div>)
                 : sortedETFs.length > 0
                   ? sortedETFs.map((s: any, i: number) => (
-                      <OIRow key={s.symbol} s={s} i={i} onClick={() => router.push(`/stock/${s.symbol}`)} />
+                      <OIRow key={s.symbol} s={s} i={i} badge={homeEarnings?.badges[s.symbol]} onClick={() => router.push(`/stock/${s.symbol}`)} />
                     ))
                   : <div className="px-4 py-8 text-center text-sm text-gray-400">No ETF data</div>}
             </section>
@@ -311,6 +373,34 @@ export default function Home() {
                   : <div className="px-4 py-8 text-center text-sm text-gray-400">No data available</div>}
             </section>
           </div>
+
+          {/* Earnings (Pro) */}
+          {homeEarnings && (homeEarnings.upcoming.length > 0 || homeEarnings.reported.length > 0) && (
+            <div className="grid md:grid-cols-2 gap-5">
+              <section className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                <div className="px-4 py-3 border-b border-gray-100">
+                  <h2 className="font-bold text-gray-800 text-sm">Earnings This Week</h2>
+                  <div className="text-[10px] text-gray-400">
+                    Next 7 days · largest companies first{homeEarnings.upcomingTotal > homeEarnings.upcoming.length && ` · ${homeEarnings.upcomingTotal} reporting in total`}
+                  </div>
+                </div>
+                {homeEarnings.upcoming.length > 0
+                  ? homeEarnings.upcoming.map(e => <EarningsEventRow key={`u-${e.symbol}-${e.date}`} e={e} onClick={() => router.push(`/stock/${e.symbol}`)} />)
+                  : <div className="px-4 py-6 text-center text-xs text-gray-400">No reports scheduled this week.</div>}
+              </section>
+              <section className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                <div className="px-4 py-3 border-b border-gray-100">
+                  <h2 className="font-bold text-gray-800 text-sm">Just Reported</h2>
+                  <div className="text-[10px] text-gray-400">
+                    Last 3 days · EPS vs consensus{homeEarnings.reportedTotal > homeEarnings.reported.length && ` · ${homeEarnings.reportedTotal} reports`}
+                  </div>
+                </div>
+                {homeEarnings.reported.length > 0
+                  ? homeEarnings.reported.map(e => <EarningsEventRow key={`r-${e.symbol}-${e.date}`} e={e} onClick={() => router.push(`/stock/${e.symbol}`)} />)
+                  : <div className="px-4 py-6 text-center text-xs text-gray-400">No reports in the last 3 days.</div>}
+              </section>
+            </div>
+          )}
 
           {/* Sector Breakdown */}
           <section>

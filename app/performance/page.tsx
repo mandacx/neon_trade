@@ -26,6 +26,7 @@ interface PerformanceSummary {
   bestSymbols: SymbolRanking[];
   worstSymbols: SymbolRanking[];
 }
+interface EarningsSplit { withEarnings: PerformanceSummary; withoutEarnings: PerformanceSummary; unknown: number }
 interface PerformanceRow {
   id: string;
   symbol: string;
@@ -38,6 +39,8 @@ interface PerformanceRow {
   expiryClose: number | null;
   movePct: number | null;
   outcome: PerformanceOutcome;
+  /** Earnings feature only: true = a report landed inside the alert window; null = predates earnings data. */
+  earningsInWindow?: boolean | null;
 }
 
 const EXPIRY_COUNT_OPTIONS = [3, 6, 12, 24];
@@ -47,7 +50,7 @@ const RESOLVED: PerformanceOutcome[] = ['favorable', 'unfavorable', 'flat'];
 // these. 'continuation'/'favorable' and 'reversion'/'unfavorable' are
 // deliberately the same underlying set — favorable IS a continuation instance
 // — they're just two labeled doors into the same list.
-type DrillKey = 'continuation' | 'reversion' | 'favorable' | 'unfavorable' | 'pending' | 'flat' | 'all' | `level:${string}`;
+type DrillKey = 'continuation' | 'reversion' | 'favorable' | 'unfavorable' | 'pending' | 'flat' | 'all' | 'earnings' | 'noEarnings' | `level:${string}`;
 
 function rowsForDrill(alerts: PerformanceRow[], key: DrillKey): { title: string; rows: PerformanceRow[] } {
   switch (true) {
@@ -61,6 +64,10 @@ function rowsForDrill(alerts: PerformanceRow[], key: DrillKey): { title: string;
       return { title: 'Pending — not yet resolved', rows: alerts.filter(a => a.outcome === 'not_yet_expired' || a.outcome === 'awaiting_data') };
     case key === 'all':
       return { title: 'All alerts seen', rows: alerts };
+    case key === 'earnings':
+      return { title: 'Resolved alerts with earnings inside the window', rows: alerts.filter(a => a.earningsInWindow === true && RESOLVED.includes(a.outcome)) };
+    case key === 'noEarnings':
+      return { title: 'Resolved alerts without earnings inside the window', rows: alerts.filter(a => a.earningsInWindow === false && RESOLVED.includes(a.outcome)) };
     case key.startsWith('level:'): {
       const level = key.slice('level:'.length);
       // Matches the byLevel stat, which is computed from resolvedRows only —
@@ -89,8 +96,8 @@ function groupBySymbol(rows: PerformanceRow[]): Array<{ symbol: string; rows: Pe
 
 function StatTile({
   label, value, sub, tone, onClick, active,
-}: { label: string; value: string; sub?: string; tone?: 'green' | 'red' | 'gray'; onClick?: () => void; active?: boolean }) {
-  const toneClass = tone === 'green' ? 'text-green-600' : tone === 'red' ? 'text-red-600' : 'text-gray-900';
+}: { label: string; value: string; sub?: string; tone?: 'green' | 'red' | 'gray' | 'amber'; onClick?: () => void; active?: boolean }) {
+  const toneClass = tone === 'green' ? 'text-green-600' : tone === 'red' ? 'text-red-600' : tone === 'amber' ? 'text-amber-700' : 'text-gray-900';
   return (
     <div
       onClick={onClick}
@@ -196,7 +203,7 @@ function DrillPanel({ title, rows, watchlistId, onClose }: { title: string; rows
                         </td>
                         <td className="px-3 py-1.5 text-gray-600">{r.direction === 'buy_above' ? '▲ Buy above' : '▼ Sell below'}</td>
                         <td className="px-3 py-1.5 text-right text-gray-700">{formatCurrency(r.price)}</td>
-                        <td className="px-3 py-1.5 text-gray-600 whitespace-nowrap">{r.expiryDate}</td>
+                        <td className="px-3 py-1.5 text-gray-600 whitespace-nowrap">{r.expiryDate}{r.earningsInWindow && <span className="ml-1.5 text-[9px] font-bold px-1 py-px rounded bg-amber-100 text-amber-800" title="An earnings report landed between this alert and its expiry">ER</span>}</td>
                         <td className="px-3 py-1.5 text-right text-gray-700">{r.expiryClose !== null ? formatCurrency(r.expiryClose) : '—'}</td>
                         <td className={`px-3 py-1.5 text-right font-semibold ${r.movePct === null ? 'text-gray-400' : r.movePct > 0 ? 'text-green-600' : r.movePct < 0 ? 'text-red-600' : 'text-gray-500'}`}>
                           {r.movePct !== null ? formatPercentage(r.movePct, 2) : '—'}
@@ -227,6 +234,7 @@ export default function PerformancePage() {
   const [watchlistId, setWatchlistId] = useState(initialWatchlistId);
   const [expiryCount, setExpiryCount] = useState(6);
   const [summary, setSummary] = useState<PerformanceSummary | null>(null);
+  const [earningsSplit, setEarningsSplit] = useState<EarningsSplit | null>(null);
   const [alerts, setAlerts] = useState<PerformanceRow[]>([]);
   const [drillKey, setDrillKey] = useState<DrillKey | null>(null);
   const [loading, setLoading] = useState(false);
@@ -254,6 +262,7 @@ export default function PerformancePage() {
         setLoading(false);
         if (!json.success) { setError(json.error ?? 'Could not load performance data.'); return; }
         setSummary(json.data.summary);
+        setEarningsSplit(json.data.earningsSplit ?? null);
         setAlerts(json.data.alerts ?? []);
       });
   }, [watchlistId, expiryCount]);
@@ -323,6 +332,36 @@ export default function PerformancePage() {
                 {' '}<strong className="text-gray-500">Reversion</strong> = it turned back toward the level (share of directional
                 outcomes, flats excluded). Only alerts whose expiry has passed are scored.
               </p>
+
+              {earningsSplit && (
+                <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
+                  <h2 className="text-sm font-semibold text-gray-800">Earnings in the alert window</h2>
+                  <p className="text-[11px] text-gray-400 mb-3">
+                    Do levels hold when a report lands between the alert and its expiry? Same scoring as above, split by whether one did.
+                  </p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <StatTile
+                      label="With earnings"
+                      value={earningsSplit.withEarnings.winRate !== null ? formatPercentage(earningsSplit.withEarnings.winRate, 0) : '—'}
+                      sub={`continuation · ${earningsSplit.withEarnings.reversionRate !== null ? formatPercentage(earningsSplit.withEarnings.reversionRate, 0) : '—'} reversion · ${earningsSplit.withEarnings.resolved} resolved`}
+                      tone="amber"
+                      onClick={() => toggle('earnings')}
+                      active={drillKey === 'earnings'}
+                    />
+                    <StatTile
+                      label="Without earnings"
+                      value={earningsSplit.withoutEarnings.winRate !== null ? formatPercentage(earningsSplit.withoutEarnings.winRate, 0) : '—'}
+                      sub={`continuation · ${earningsSplit.withoutEarnings.reversionRate !== null ? formatPercentage(earningsSplit.withoutEarnings.reversionRate, 0) : '—'} reversion · ${earningsSplit.withoutEarnings.resolved} resolved`}
+                      tone="gray"
+                      onClick={() => toggle('noEarnings')}
+                      active={drillKey === 'noEarnings'}
+                    />
+                  </div>
+                  {earningsSplit.unknown > 0 && (
+                    <p className="text-[10px] text-gray-400 mt-2">{earningsSplit.unknown} older alerts predate the earnings data and are left out of this split.</p>
+                  )}
+                </div>
+              )}
 
               {drill && (
                 <DrillPanel title={drill.title} rows={drill.rows} watchlistId={watchlistId} onClose={() => setDrillKey(null)} />
