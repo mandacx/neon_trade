@@ -47,29 +47,34 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // Get all stocks for the specified filters
-    let stocksData;
-
-    if (date && expiryDate) {
-      stocksData = await getAllStocksByDateAndExpiry(date, expiryDate);
-    } else if (date) {
-      stocksData = await getAllStocksByDate(date);
-    } else {
-      stocksData = await getAllStocksLatest();
-    }
+    // The stock rows and the latest-date check are independent, as are the
+    // live snapshots and the securities metadata below — each pair goes out
+    // together instead of as four sequential round trips.
+    const [stocksData, [latestDate]] = await Promise.all([
+      date && expiryDate
+        ? getAllStocksByDateAndExpiry(date, expiryDate)
+        : date
+          ? getAllStocksByDate(date)
+          : getAllStocksLatest(),
+      date ? getAvailableDates(1) : Promise.resolve([] as string[]),
+    ]);
 
     // Positions are only rebased onto a live LTP when looking at the latest
     // trade date — a historical date's levels stay measured against that
     // day's own close, same rule the stock detail page follows.
-    const [latestDate] = date ? await getAvailableDates(1) : [];
     const isLatestDate = !date || date === latestDate;
+    const allSymbols = Array.from(new Set(stocksData.map(d => d.SYMBOL)));
+    const [snapshots, allSecMeta, watchlistSymbols] = await Promise.all([
+      isLatestDate && allSymbols.length > 0
+        ? getSnapshotsMulti(allSymbols)
+        : Promise.resolve({} as Awaited<ReturnType<typeof getSnapshotsMulti>>),
+      getSecuritiesMeta(allSymbols),
+      watchlistId && watchlistsEnabled ? getWatchlistSymbols(watchlistId, ctx.userId) : Promise.resolve(null),
+    ]);
     const liveBySymbol: Record<string, number> = {};
-    if (isLatestDate && stocksData.length > 0) {
-      const snapshots = await getSnapshotsMulti(stocksData.map(d => d.SYMBOL));
-      for (const [symbol, snap] of Object.entries(snapshots)) {
-        const price = snap.dailyBar?.c ?? snap.latestTrade?.p;
-        if (price) liveBySymbol[symbol] = price;
-      }
+    for (const [symbol, snap] of Object.entries(snapshots)) {
+      const price = snap.dailyBar?.c ?? snap.latestTrade?.p;
+      if (price) liveBySymbol[symbol] = price;
     }
 
     // Process each stock to calculate levels
@@ -100,9 +105,13 @@ export async function GET(request: NextRequest) {
       !stock.levels.every(level => level.value === 1)
     );
 
-    // Enrich with securities metadata
-    const symbols = filteredStocks.map(s => s.symbol);
-    const secMeta = await getSecuritiesMeta(symbols);
+    // Securities metadata was fetched for every row above; narrow it to the
+    // stocks that survived the all-100% filter so the derived filter options
+    // (and hasSecurities) describe exactly what's plotted, as before.
+    const secMeta: Record<string, any> = {};
+    for (const s of filteredStocks) {
+      if (allSecMeta[s.symbol]) secMeta[s.symbol] = allSecMeta[s.symbol];
+    }
 
     // §4 — derive filter options from the present universe (pre sector/industry filtering).
     const derivedFilterOptions = deriveFilterOptions(secMeta);
@@ -111,9 +120,9 @@ export async function GET(request: NextRequest) {
     filteredStocks = applySecuritiesFilters(filteredStocks, secMeta, { sector, industry, marketCapTier, indexCode });
 
     // Restrict to a personal/curated watchlist's symbols (Pro only)
-    if (watchlistId && watchlistsEnabled) {
-      const watchlistSymbols = new Set(await getWatchlistSymbols(watchlistId, ctx.userId));
-      filteredStocks = filteredStocks.filter(stock => watchlistSymbols.has(stock.symbol));
+    if (watchlistSymbols) {
+      const allowed = new Set(watchlistSymbols);
+      filteredStocks = filteredStocks.filter(stock => allowed.has(stock.symbol));
     }
 
     // Filter by threshold

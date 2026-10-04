@@ -109,8 +109,9 @@ export async function getScanAlerts(filters: ScanAlertQueryFilters): Promise<Sca
     conditions.push(`trade_date = $${params.length}`);
   }
   if (filters.yearMonth) {
+    // A plain range (not date_trunc(...) = X) so idx_intra_us_scanner_eod_trade_date applies.
     params.push(`${filters.yearMonth}-01`);
-    conditions.push(`date_trunc('month', trade_date) = $${params.length}::date`);
+    conditions.push(`trade_date >= $${params.length}::date AND trade_date < ($${params.length}::date + INTERVAL '1 month')`);
   }
   if (filters.expiryDate) {
     params.push(filters.expiryDate);
@@ -230,7 +231,7 @@ export async function getScanTradeDatesInMonth(yearMonth: string): Promise<strin
   try {
     const rows = (await sql(
       `SELECT DISTINCT trade_date::text as d FROM public.intra_us_scanner_eod
-       WHERE date_trunc('month', trade_date) = $1::date
+       WHERE trade_date >= $1::date AND trade_date < ($1::date + INTERVAL '1 month')
        ORDER BY d DESC`,
       [`${yearMonth}-01`]
     )) as any[];
@@ -245,7 +246,7 @@ export async function getScanExpiryDatesInMonth(yearMonth: string): Promise<stri
   try {
     const rows = (await sql(
       `SELECT DISTINCT expiry_dt::text as d FROM public.intra_us_scanner_eod
-       WHERE date_trunc('month', trade_date) = $1::date
+       WHERE trade_date >= $1::date AND trade_date < ($1::date + INTERVAL '1 month')
        ORDER BY d ASC`,
       [`${yearMonth}-01`]
     )) as any[];
@@ -258,9 +259,16 @@ export async function getScanExpiryDatesInMonth(yearMonth: string): Promise<stri
 /** Distinct 'YYYY-MM' months with alert counts, most recent first — for the Historical page's Year/Month picker. */
 export async function getScanAlertMonths(): Promise<{ yearMonth: string; count: number }[]> {
   try {
+    // Count per day first (grouping on the raw date column is cheap), then
+    // roll the ~800 day rows up to months — about half the cost of running
+    // to_char() on every row before grouping.
     const rows = await sql`
-      SELECT to_char(trade_date, 'YYYY-MM') as ym, COUNT(*) as c
-      FROM public.intra_us_scanner_eod
+      SELECT to_char(d, 'YYYY-MM') as ym, SUM(c)::bigint as c
+      FROM (
+        SELECT trade_date AS d, COUNT(*) AS c
+        FROM public.intra_us_scanner_eod
+        GROUP BY trade_date
+      ) per_day
       GROUP BY ym
       ORDER BY ym DESC
     `;
