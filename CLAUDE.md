@@ -29,9 +29,10 @@ Note the split from what `README.md`/`QUICK_START.md` describe: those docs preda
 
 **Deployment**: hosted on Vercel, connected to the same Neon Postgres instance and Tradier API in production as in local dev — set `DATABASE_URL`, `TRADIER_API_KEY`, `TRADIER_API_URL`, `ALPACA_API_KEY`, `ALPACA_SECRET_KEY`, `ALPACA_BASE_URL` as Vercel project environment variables. API routes that read these are Node runtime by default (no `export const runtime = 'edge'` present), so Vercel serverless functions handle them.
 
-**Crons (Railway)**: the `neon-trade-crons` Railway project runs two services, each a tiny curl container that calls a protected route on `https://us.niftytrendz.com` with `Authorization: Bearer $CRON_SECRET` (`lib/cronAuth.ts`; the same secret is set in Vercel Production and on both services):
+**Crons (Railway)**: the `neon-trade-crons` Railway project runs three services, each a tiny curl container that calls a protected route on `https://us.niftytrendz.com` with `Authorization: Bearer $CRON_SECRET` (`lib/cronAuth.ts`; the secret is set in Vercel Production and on `market-catalog-cron`/`telegram-alerts-cron`; `earnings-cron` references it as `${{market-catalog-cron.CRON_SECRET}}`):
 - `telegram-alerts-cron` → `/api/cron/telegram-alerts`. **Currently disabled** (no schedule) until Telegram is configured (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_USERNAME`, `TELEGRAM_WEBHOOK_SECRET` in Vercel); to re-enable, restore `cronSchedule: "*/15 12-21 * * 1-5"` in `railway/.railway/railway.ts` and `railway config apply` (route enforces NYSE hours).
 - `market-catalog-cron` → `/api/cron/market-catalog`, every 30 min 13:00–17:30 UTC weekdays (route enforces 8:30–11:30 CT).
+- `earnings-cron` → `/api/cron/earnings`, every 15 min; the route picks calendar / news / catch-up by US/Eastern time (see `docs/earnings.md`).
 
 Service settings (schedules, restart policy, Dockerfile builds) are infrastructure-as-code in `railway/.railway/railway.ts`; the Railway SDK it imports is a devDependency of `railway/package.json`, deliberately separate from the app (and `railway/` is excluded in `tsconfig.json`). From `railway/`: `railway config plan` to diff against the live project, `railway config apply` to push changes, `railway up --service <name>` from a service's folder to redeploy its container. **On Windows** the CLI is an npm shim the SDK can't exec, so set `_` to the real binary first (PowerShell: `$env:_ = "$env:APPDATA\npm\node_modules\@railway\cli\bin\railway.exe"; & $env:_ config plan`); in Git Bash this fails regardless, use PowerShell.
 
@@ -55,17 +56,21 @@ The level with `value` closest to 0 is the `closestLevel` — i.e., the price is
 
 Column naming is inconsistent between the DB (`snake_case`) and the `StockData` TypeScript type (`types/stock.ts`, mixed `SCREAMING_CASE`/`camelCase`/`snake_case` fields like `PUT_INT`, `call_low`, `put_HIGH`) — `lib/db.ts` does the aliasing in SQL (`COALESCE(put_int, 0) as "PUT_INT"`) and also sanitizes all numeric fields (NaN/null → 0) via `sanitizeStockData`. Any new query against `eod_usmkts_price` should follow this same COALESCE + alias + sanitize pattern rather than reading raw columns.
 
-**Earnings** (Pro feature `earnings`; `lib/earnings.ts`, tables from `scripts/bootstrap-earnings.mjs`). Three sources, each used for what it's best at:
-- **Upcoming dates + EPS estimates:** Alpha Vantage `EARNINGS_CALENDAR`, one CSV for every symbol, 1 call/day → `nt_earnings_calendar`.
-- **Results on the day:** Benzinga results headlines from the Alpaca News API, e.g. `IBM Q2 Adj. EPS $2.93 Beats $2.86 Estimate, Sales …`, parsed by `lib/earningsParse.ts` → `nt_earnings`. The parser is dependency-free so scripts can import it; fixtures live in `scripts/test-earnings-parse.mjs`. Guidance headlines ("Sees/Raises … EPS") must never parse as results.
-- **Deep history and fallback:** Alpha Vantage `EARNINGS` per symbol, under the free tier's 25 calls/day budget (`nt_api_usage`, reserved atomically before each call).
-
-The rest of the pipeline:
-- **Merging:** news and AV rows for the same report (±3 days) merge into one row. News wins on figures; AV fills `fiscal_date_ending`/`report_time`.
-- **Cron:** `/api/cron/earnings` runs every 15 min (Railway `earnings-cron`) and picks the step by US/Eastern time. A single-row lease in `nt_job_lease` prevents overlapping runs, since pg advisory locks don't work over the Neon HTTP driver.
-- **Backfill:** `scripts/backfill-earnings-news.mjs` re-runs the news history.
-- **Readers:** `getEarningsSummary` / `getEarningsHistory` / `getEarningsEvents` feed the stock page (`components/stock/EarningsPanel.tsx`, chart "E" markers) and the watchlist columns, filters and alerts widget. Every route returns earnings only when the viewer has the feature.
-- **Don't use `public.securities.next/last_earnings_date`:** they're a stale one-off yfinance load in the sister app's table.
+**Earnings** (Pro feature `earnings`). Full design and runbook: **`docs/earnings.md`** — read it before touching any of this. The short version:
+- **Dates:** Alpha Vantage `EARNINGS_CALENDAR`, one CSV for every symbol, 1 call/day → `nt_earnings_calendar`.
+- **Results:** Benzinga results headlines from the Alpaca News API (e.g. `IBM Q2 Adj. EPS $2.93 Beats $2.86 Estimate, Sales …`), parsed by `lib/earningsParse.ts` → `nt_earnings`, the same day.
+  - The parser is dependency-free so scripts can import it.
+  - Fixtures live in `scripts/test-earnings-parse.mjs`; run them after any parser change.
+  - Guidance headlines ("Sees/Raises … EPS") must never parse as results.
+- **Not used:** Alpha Vantage per-symbol `EARNINGS` (too many calls on the free tier, and unreliable estimates), and `public.securities.next/last_earnings_date` (a stale one-off load in the sister app's table).
+- **Cron:** `/api/cron/earnings` runs every 15 min (Railway `earnings-cron`) and picks the step by US/Eastern time:
+  - weekdays 06:30–19:30: calendar + news;
+  - weekday evenings and weekend mornings: catch-up for dates that passed without a result.
+  - A single-row lease (`nt_job_lease`) prevents overlapping runs; pg advisory locks don't work over the Neon HTTP driver.
+  - Alpha Vantage calls are reserved against `nt_api_usage` before they're made.
+- **Readers** in `lib/earnings.ts` feed the stock page, watchlists, quadrant, scan alerts, performance (with/without-earnings split), home (separate gated `/api/home/earnings`, because `/api/home/data` is public and CDN-cached) and Telegram.
+- **Gating:** every route returns earnings only when the viewer has the feature.
+- **Dates** are US/Eastern `YYYY-MM-DD` strings; never parse them with `new Date('YYYY-MM-DD')` in local time.
 
 ### Route structure
 

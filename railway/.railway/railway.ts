@@ -16,10 +16,10 @@ export default defineRailway(() => {
     env: { CRON_SECRET: preserve() },
   });
 
-  // Earnings sync (lib/earnings.ts). Every 15 min around the clock; the route
-  // picks the step by US/Eastern time (calendar + news results on weekdays
-  // 06:30–19:30, Alpha Vantage backfill evenings and weekends) and returns
-  // without touching the DB outside those windows.
+  // Earnings sync (lib/earnings.ts, docs/earnings.md). Every 15 min around the
+  // clock; the route picks the step by US/Eastern time (AV calendar + Alpaca
+  // News results on weekdays 06:30–19:30, news catch-up weekday evenings and
+  // weekend mornings) and returns without touching the DB outside those windows.
   const earningsCron = service("earnings-cron", {
     build: { buildEnvironment: "V3", builder: "DOCKERFILE", dockerfilePath: "Dockerfile" },
     replicas: { "us-west2": 1 },

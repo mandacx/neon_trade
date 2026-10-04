@@ -35,6 +35,20 @@ export interface EarningsSummary {
   pending: { date: string; time: EarningsTime } | null;
 }
 
+/**
+ * Compact per-row earnings flag for list/ladder surfaces (quadrant, scan
+ * alerts, home). `beforeExpiry` is relative to that row's own expiry.
+ */
+export interface EarningsBadge {
+  nextDate: string | null;
+  nextTime: EarningsTime;
+  daysUntil: number | null;
+  beforeExpiry: boolean;
+  lastDate: string | null;
+  lastOutcome: EarningsOutcome | null;
+  lastSurprisePct: number | null;
+}
+
 /** Item for event lists (watchlist alerts widget). */
 export interface EarningsEvent {
   symbol: string;

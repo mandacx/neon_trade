@@ -1,19 +1,19 @@
 /**
- * Earnings dates & results. Tables come from scripts/bootstrap-earnings.mjs:
+ * Earnings dates & results — two sources, each used for what it's best at
+ * (see docs/earnings.md for the full design):
  *
  *   nt_earnings_calendar  upcoming schedule — Alpha Vantage EARNINGS_CALENDAR
- *                         (one CSV for every symbol, 1 call/day)
- *   nt_earnings           reported quarters — Alpaca News (Benzinga results
- *                         headlines, same day, EPS + sales vs consensus) and
- *                         Alpha Vantage EARNINGS (per-symbol history; backfill
- *                         and fallback when no headline parses)
- *   nt_earnings_sync      per-symbol AV history state (backfill queue)
- *   nt_api_usage          AV daily budget (free tier: 25 calls/day, UTC day)
+ *                         (one CSV covering every symbol; 1 call/day)
+ *   nt_earnings           reported results — Benzinga results headlines from
+ *                         the Alpaca News API, parsed by lib/earningsParse.ts
+ *                         (same day, EPS + sales vs consensus)
+ *   nt_api_usage          Alpha Vantage daily budget (free tier: 25/day)
  *   nt_job_lease          single-row lease so cron runs never overlap
  *
- * Driven by app/api/cron/earnings (Railway, every 15 min; the route decides
- * which step runs when). Readers at the bottom serve the stock and watchlist
- * pages; all of it is Pro-only (FEATURE_EARNINGS), enforced by the routes.
+ * Driven by app/api/cron/earnings (Railway, every 15 min; the route picks the
+ * step by US/Eastern time). Readers at the bottom serve the stock, watchlist,
+ * quadrant, scan-alert, performance and home surfaces; all of it is Pro-only
+ * (FEATURE_EARNINGS), enforced by the routes.
  *
  * Dates are US/Eastern calendar dates, stored as DATE and returned as text
  * ('YYYY-MM-DD'); day arithmetic is done on those strings, never through
@@ -21,7 +21,7 @@
  */
 import { sql } from '@/lib/db';
 import { parseEarningsHeadline, symbolsForResult, easternDateAndSession } from '@/lib/earningsParse';
-import type { EarningsEvent, EarningsOutcome, EarningsResult, EarningsSummary, EarningsTime } from '@/types/earnings';
+import type { EarningsBadge, EarningsEvent, EarningsOutcome, EarningsResult, EarningsSummary, EarningsTime } from '@/types/earnings';
 
 const AV_URL = 'https://www.alphavantage.co/query';
 const AV_PROVIDER = 'alphavantage';
@@ -29,7 +29,6 @@ const ALPACA_NEWS_URL = `${process.env.ALPACA_BASE_URL || 'https://data.alpaca.m
 
 const avKey = () => process.env.ALPHA_VANTAGE_API_KEY || '';
 const avDailyBudget = () => Number(process.env.ALPHA_VANTAGE_DAILY_BUDGET || 25);
-const avMinIntervalMs = () => Number(process.env.ALPHA_VANTAGE_MIN_INTERVAL_MS || 13000);
 
 // ---------------------------------------------------------------------------
 // Date helpers (string-based, US/Eastern)
@@ -194,9 +193,9 @@ interface ResultRow {
 
 /**
  * Insert or merge reported quarters. A row lands on an existing report for
- * the same symbol within ±3 days (news publish date vs AV reportedDate can
- * differ by a day). Existing news values win over AV (better consensus
- * numbers); AV fills gaps and owns report_time and fiscal_date_ending.
+ * the same symbol within ±3 days (a "Reported Earlier," copy can be a day
+ * late). Existing news values win; the source-aware rules also keep the few
+ * rows from the retired Alpha Vantage history backfill consistent.
  */
 async function upsertResults(input: ResultRow[]): Promise<number> {
   // Collapse repeats of one report inside the batch (e.g. the original
@@ -359,6 +358,12 @@ export async function syncCalendar(): Promise<{ status: string; rows?: number; d
     WHERE status = 'scheduled' AND report_date < ${today}::date
   `;
   await sql`DELETE FROM public.nt_earnings_calendar WHERE status = 'dropped' AND last_seen_at < now() - interval '30 days'`;
+  // A report with no parseable results headline after two weeks won't get one
+  // (the news catch-up looks back 14 days) — stop showing it as pending.
+  await sql`
+    UPDATE public.nt_earnings_calendar SET status = 'no_result'
+    WHERE status = 'pending_results' AND report_date < ${addDays(today, -14)}::date
+  `;
   await resolveCalendar();
   return { status: 'synced', rows: rows.length, dropped: dropped.length };
 }
@@ -450,165 +455,50 @@ export async function syncResultsFromNews(opts: { lookbackHours?: number; deadli
   return { articles, results };
 }
 
-// ---------------------------------------------------------------------------
-// Step 3 — Alpha Vantage per-symbol history (backfill + fallback)
-// ---------------------------------------------------------------------------
-
-/** Backoff after AV didn't have the quarter yet (or errored): 6h, 1d, 2d, then 7d. */
-function backoffHours(attempts: number): number {
-  return [6, 24, 48][attempts] ?? 168;
-}
-
-async function pickAvCandidates(limit: number): Promise<Array<{ symbol: string; fallback: boolean; attempts: number }>> {
+/**
+ * Catch-up for reports the rolling news window missed (cron outage, a late
+ * "Reported Earlier," headline, a symbol absent from the 30h scan): re-query
+ * Alpaca News for just the symbols whose scheduled date passed without a
+ * stored result, from the day before their earliest such date.
+ */
+export async function catchUpPendingFromNews(opts: { deadline?: number } = {}): Promise<{ pending: number; articles: number; results: number }> {
   const today = todayET();
-  const rows = await sql`
-    WITH tracked AS (
-      SELECT DISTINCT symbol FROM public.nt_market_expiries
-      WHERE source = 'eod' AND last_trade_date >= CURRENT_DATE - 30
-    ),
-    fallback AS (
-      -- Reports two+ days old with no result: no parseable headline, ask AV.
-      SELECT DISTINCT symbol FROM public.nt_earnings_calendar
-      WHERE status = 'pending_results' AND report_date <= ${today}::date - 2
-    ),
-    watch AS (SELECT DISTINCT symbol FROM public.nt_watchlist_items),
-    soon AS (
-      SELECT DISTINCT symbol FROM public.nt_earnings_calendar
-      WHERE status = 'scheduled' AND report_date BETWEEN ${today}::date AND ${today}::date + 14
-    )
-    SELECT t.symbol, (f.symbol IS NOT NULL) AS fallback, COALESCE(s.attempts, 0) AS attempts
-    FROM tracked t
-    LEFT JOIN public.nt_earnings_sync s ON s.symbol = t.symbol
-    LEFT JOIN fallback f ON f.symbol = t.symbol
-    LEFT JOIN watch w ON w.symbol = t.symbol
-    LEFT JOIN soon n ON n.symbol = t.symbol
-    LEFT JOIN public.securities sec ON sec.symbol = t.symbol
-    WHERE (s.next_attempt_at IS NULL OR s.next_attempt_at <= now())
-      AND (
-        f.symbol IS NOT NULL
-        OR (s.history_fetched_at IS NULL AND COALESCE(s.status, 'pending') NOT IN ('no_earnings', 'unmapped'))
-        OR (s.status IN ('no_earnings', 'unmapped') AND s.history_fetched_at < now() - interval '180 days')
-      )
-    ORDER BY
-      (f.symbol IS NOT NULL) DESC,
-      (w.symbol IS NOT NULL) DESC,
-      (n.symbol IS NOT NULL) DESC,
-      -- A null date in the old yfinance snapshot almost always means an ETF.
-      (sec.symbol IS NOT NULL AND sec.next_earnings_date IS NULL) ASC,
-      COALESCE(sec.market_cap, 0) DESC,
-      t.symbol
-    LIMIT ${limit}
-  `;
-  return rows.map((r: any) => ({ symbol: r.symbol, fallback: r.fallback, attempts: Number(r.attempts) }));
-}
+  const pending = (await sql`
+    SELECT symbol, MIN(report_date)::text AS since FROM public.nt_earnings_calendar
+    WHERE (status = 'pending_results' OR (status = 'scheduled' AND report_date < ${today}::date))
+      AND report_date >= ${addDays(today, -14)}::date
+    GROUP BY symbol
+  `) as Array<{ symbol: string; since: string }>;
+  if (pending.length === 0) return { pending: 0, articles: 0, results: 0 };
 
-async function recordSync(symbol: string, status: string, ok: boolean, attempts: number, error?: string): Promise<void> {
-  const nextAttempt = ok ? null : new Date(Date.now() + backoffHours(attempts) * 3_600_000).toISOString();
-  await sql`
-    INSERT INTO public.nt_earnings_sync AS s (symbol, status, history_fetched_at, next_attempt_at, attempts, last_error)
-    VALUES (${symbol}, ${status}, ${ok ? new Date().toISOString() : null}::timestamptz, ${nextAttempt}::timestamptz, ${ok ? 0 : attempts + 1}, ${error ?? null})
-    ON CONFLICT (symbol) DO UPDATE SET
-      status = EXCLUDED.status,
-      history_fetched_at = COALESCE(EXCLUDED.history_fetched_at, s.history_fetched_at),
-      next_attempt_at = EXCLUDED.next_attempt_at,
-      attempts = EXCLUDED.attempts,
-      last_error = EXCLUDED.last_error
-  `;
-}
-
-export async function backfillFromAv(opts: { maxCalls?: number; deadline: number }): Promise<{ status: string; fetched: string[] }> {
-  if (!avKey()) return { status: 'skipped: ALPHA_VANTAGE_API_KEY not set', fetched: [] };
-  const candidates = await pickAvCandidates(opts.maxCalls ?? 3);
-  const fetched: string[] = [];
-  for (const c of candidates) {
-    if (fetched.length > 0) await sleep(avMinIntervalMs());
-    if (Date.now() + 8_000 > opts.deadline) return { status: 'deadline', fetched };
-    if (!(await reserveAvCall())) return { status: 'budget used', fetched };
-
-    let body: any;
-    try {
-      body = JSON.parse(await avGet({ function: 'EARNINGS', symbol: c.symbol }));
-    } catch (err) {
-      if (err instanceof AvRateLimited) {
-        await markAvExhausted();
-        return { status: 'AV rate limited', fetched };
-      }
-      await recordSync(c.symbol, 'error', false, c.attempts, err instanceof Error ? err.message.slice(0, 300) : 'error');
-      continue;
-    }
-
-    const quarters: any[] = Array.isArray(body?.quarterlyEarnings) ? body.quarterlyEarnings : [];
-    const today = todayET();
-    const rows: ResultRow[] = quarters
-      .filter(q => /^\d{4}-\d{2}-\d{2}$/.test(q.reportedDate ?? '') && q.reportedDate <= today && avNum(q.reportedEPS) !== null)
-      .slice(0, 16)
-      .map(q => {
-        const actual = avNum(q.reportedEPS);
-        const estimate = avNum(q.estimatedEPS);
-        const pct = avNum(q.surprisePercentage) ?? surprisePct(actual, estimate);
-        return {
-          symbol: c.symbol,
-          reportedDate: q.reportedDate,
-          reportTime: avTime(q.reportTime),
-          period: null,
-          fiscalDateEnding: /^\d{4}-\d{2}-\d{2}$/.test(q.fiscalDateEnding ?? '') ? q.fiscalDateEnding : null,
-          epsActual: actual,
-          epsEstimate: estimate,
-          epsSurprisePct: pct,
-          epsOutcome: outcomeFromSurprise(pct),
-          epsAdjusted: null,
-          salesActual: null,
-          salesEstimate: null,
-          salesOutcome: null,
-          source: 'alphavantage' as const,
-          headline: null,
-          newsId: null,
-        };
-      });
-
-    if (rows.length === 0) {
-      // No history: an ETF/fund, or a ticker AV maps differently. Recheck in 180 days.
-      const [{ inCalendar }] = (await sql`
-        SELECT EXISTS (SELECT 1 FROM public.nt_earnings_calendar WHERE symbol = ${c.symbol}) AS "inCalendar"
-      `) as Array<{ inCalendar: boolean }>;
-      await recordSync(c.symbol, inCalendar ? 'unmapped' : 'no_earnings', true, c.attempts);
-    } else {
-      await upsertResults(rows);
-      await resolveCalendar();
-      const [{ stillPending }] = (await sql`
-        SELECT EXISTS (
-          SELECT 1 FROM public.nt_earnings_calendar
-          WHERE symbol = ${c.symbol} AND status = 'pending_results' AND report_date <= ${today}::date - 2
-        ) AS "stillPending"
-      `) as Array<{ stillPending: boolean }>;
-      // History stored; if AV doesn't have the newest quarter yet, come back later for it.
-      if (c.fallback && stillPending) await recordSync(c.symbol, 'ok', false, c.attempts, 'latest quarter not yet in AV');
-      else await recordSync(c.symbol, 'ok', true, c.attempts);
-    }
-    fetched.push(c.symbol);
+  const symbols = pending.map(p => p.symbol);
+  const since = pending.map(p => p.since).sort()[0];
+  const tracked = new Set(await getTrackedSymbols());
+  let articles = 0;
+  let results = 0;
+  for await (const page of alpacaNews({ start: `${addDays(since, -1)}T00:00:00Z`, symbols, deadline: opts.deadline })) {
+    articles += page.length;
+    results += await storeNewsResults(page, tracked);
   }
-  return { status: candidates.length === 0 ? 'nothing to fetch' : 'ok', fetched };
+  return { pending: pending.length, articles, results };
 }
 
 // ---------------------------------------------------------------------------
 // Orchestration (one cron invocation)
 // ---------------------------------------------------------------------------
 
-export interface EarningsRunPlan { calendar: boolean; news: boolean; backfill: boolean }
+export interface EarningsRunPlan { calendar: boolean; news: boolean; catchUp: boolean }
 
 export async function processEarnings(plan: EarningsRunPlan, deadline: number): Promise<Record<string, unknown>> {
   if (!(await acquireLease(Math.ceil((deadline - Date.now()) / 1000) + 5))) return { skipped: 'another run holds the lease' };
   const out: Record<string, unknown> = {};
+  const attempt = async (key: string, fn: () => Promise<unknown>) => {
+    try { out[key] = await fn(); } catch (e) { out[key] = { error: e instanceof Error ? e.message : String(e) }; }
+  };
   try {
-    if (plan.calendar) {
-      try { out.calendar = await syncCalendar(); } catch (e) { out.calendar = { error: e instanceof Error ? e.message : String(e) }; }
-    }
-    if (plan.news) {
-      try { out.news = await syncResultsFromNews({ deadline: deadline - 20_000 }); } catch (e) { out.news = { error: e instanceof Error ? e.message : String(e) }; }
-    }
-    if (plan.backfill) {
-      try { out.backfill = await backfillFromAv({ deadline }); } catch (e) { out.backfill = { error: e instanceof Error ? e.message : String(e) }; }
-    }
+    if (plan.calendar) await attempt('calendar', syncCalendar);
+    if (plan.news) await attempt('news', () => syncResultsFromNews({ deadline: deadline - 15_000 }));
+    if (plan.catchUp) await attempt('catchUp', () => catchUpPendingFromNews({ deadline }));
   } finally {
     await releaseLease();
   }
@@ -686,6 +576,63 @@ export async function getEarningsSummary(symbols: string[]): Promise<Map<string,
   } catch (err) {
     // Tables not bootstrapped yet, or a transient error: pages render without earnings.
     console.error('[earnings] summary read failed:', err instanceof Error ? err.message : err);
+  }
+  return out;
+}
+
+/** Per-row flag for a symbol whose row has its own expiry (quadrant, scan alerts, home OI). */
+export function earningsBadge(summary: EarningsSummary | null | undefined, expiryDate?: string | null): EarningsBadge | null {
+  if (!summary || (!summary.next && !summary.last)) return null;
+  return {
+    nextDate: summary.next?.date ?? null,
+    nextTime: summary.next?.time ?? null,
+    daysUntil: summary.next?.daysUntil ?? null,
+    beforeExpiry: !!summary.next && !!expiryDate && summary.next.date <= expiryDate,
+    lastDate: summary.last?.date ?? null,
+    lastOutcome: summary.last?.epsOutcome ?? null,
+    lastSurprisePct: summary.last?.epsSurprisePct ?? null,
+  };
+}
+
+/**
+ * Earliest date our results data covers (start of the Alpaca News backfill).
+ * Before this, "no report in the window" means "no data", not "no report".
+ */
+export async function getEarningsCoverageStart(): Promise<string | null> {
+  try {
+    const rows = await sql`SELECT MIN(reported_date)::text AS d FROM public.nt_earnings WHERE source = 'alpaca_news'`;
+    return (rows[0] as { d: string | null } | undefined)?.d ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export const windowKey = (symbol: string, from: string, to: string) => `${symbol.toUpperCase()}__${from}__${to}`;
+
+/**
+ * For each (symbol, from, to) window — typically an alert's trade date →
+ * expiry — the report that landed inside it, if any (latest first). One
+ * batched query; keys via windowKey().
+ */
+export async function getEarningsInWindows(windows: Array<{ symbol: string; from: string; to: string }>): Promise<Map<string, EarningsResult>> {
+  const out = new Map<string, EarningsResult>();
+  const unique = Array.from(new Map(windows.map(w => [windowKey(w.symbol, w.from, w.to), w])).values())
+    .filter(w => /^\d{4}-\d{2}-\d{2}$/.test(w.from) && /^\d{4}-\d{2}-\d{2}$/.test(w.to));
+  if (unique.length === 0) return out;
+  try {
+    const rows = await sql(
+      `SELECT w.symbol AS w_symbol, w.from_date::text AS w_from, w.to_date::text AS w_to, ${RESULT_COLUMNS}
+       FROM unnest($1::text[], $2::date[], $3::date[]) AS w(symbol, from_date, to_date)
+       CROSS JOIN LATERAL (
+         SELECT * FROM public.nt_earnings e
+         WHERE e.symbol = upper(w.symbol) AND e.reported_date BETWEEN w.from_date AND w.to_date
+         ORDER BY e.reported_date DESC LIMIT 1
+       ) e`,
+      [unique.map(w => w.symbol.toUpperCase()), unique.map(w => w.from), unique.map(w => w.to)]
+    );
+    for (const r of rows as any[]) out.set(windowKey(r.w_symbol, r.w_from, r.w_to), toResult(r));
+  } catch (err) {
+    console.error('[earnings] window read failed:', err instanceof Error ? err.message : err);
   }
   return out;
 }

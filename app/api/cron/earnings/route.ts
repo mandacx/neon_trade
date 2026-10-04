@@ -21,23 +21,20 @@ const at = (h: number, m = 0) => h * 60 + m;
 
 /**
  * What a run at this moment should do (all times US/Eastern):
- *   weekdays 06:30–19:30  news results (pre-market, intraday and post-market
- *                         reports land as Benzinga headlines), plus the daily
- *                         Alpha Vantage calendar on the first run of the day
- *   weekdays 20:00–23:00  Alpha Vantage history backfill / fallback
- *   weekends (all day)    Alpha Vantage backfill — the 25/day budget is per
- *                         day, so weekends are free catch-up time
+ *   weekdays 06:30–19:30  news results — pre-market, intraday and post-market
+ *                         reports land as Benzinga headlines within minutes —
+ *                         plus the Alpha Vantage calendar (once a day; later
+ *                         runs see it's already synced and skip the call)
+ *   weekdays 20:00–23:00  news catch-up for any scheduled date that passed
+ *                         without a stored result
+ *   weekends 09:00–12:00  the same catch-up (Friday's late headlines)
  */
 function planFor(now: Date): EarningsRunPlan {
   const { weekday, minutes } = easternNow(now);
   const weekend = weekday === 'Sat' || weekday === 'Sun';
-  if (weekend) return { calendar: false, news: false, backfill: true };
+  if (weekend) return { calendar: false, news: false, catchUp: minutes >= at(9) && minutes <= at(12) };
   const day = minutes >= at(6, 30) && minutes <= at(19, 30);
-  return {
-    calendar: day,
-    news: day,
-    backfill: minutes >= at(20) && minutes <= at(23),
-  };
+  return { calendar: day, news: day, catchUp: minutes >= at(20) && minutes <= at(23) };
 }
 
 /**
@@ -53,8 +50,8 @@ export async function GET(request: NextRequest) {
 
   const startedAt = Date.now();
   const force = request.nextUrl.searchParams.get('force') === 'true';
-  const plan: EarningsRunPlan = force ? { calendar: true, news: true, backfill: true } : planFor(new Date());
-  if (!plan.calendar && !plan.news && !plan.backfill) {
+  const plan: EarningsRunPlan = force ? { calendar: true, news: true, catchUp: true } : planFor(new Date());
+  if (!plan.calendar && !plan.news && !plan.catchUp) {
     return NextResponse.json({ success: true, data: { skipped: 'outside earnings windows' } });
   }
 

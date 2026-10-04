@@ -3,8 +3,9 @@
 //   node --env-file=.env.local scripts/bootstrap-earnings.mjs
 //
 // Safe to re-run (IF NOT EXISTS). DDL only — data arrives through
-// /api/cron/earnings (Alpha Vantage calendar + Alpaca News results) and the
-// one-time scripts/backfill-earnings-news.mjs.
+// /api/cron/earnings (Alpha Vantage calendar for dates, Alpaca News headlines
+// for results) and the one-time scripts/backfill-earnings-news.mjs.
+// Design: docs/earnings.md.
 //
 // nt_ prefix: this database is shared with neon_nifty. public.securities
 // (owned by that app) has next/last_earnings_date columns, but they're a
@@ -18,9 +19,9 @@ if (!process.env.DATABASE_URL) {
 }
 const sql = neon(process.env.DATABASE_URL);
 
-// Reported quarters. One row per (symbol, reported_date); Alpaca News
-// (Benzinga headline) and Alpha Vantage rows for the same report are merged
-// by the writer (lib/earnings.ts), with news values preferred.
+// Reported quarters, one row per (symbol, reported_date), from Alpaca News
+// (Benzinga results headlines). `source` also allows 'alphavantage' for the
+// few rows from the retired per-symbol AV history backfill.
 await sql`
   CREATE TABLE IF NOT EXISTS public.nt_earnings (
     symbol             TEXT NOT NULL,
@@ -61,18 +62,6 @@ await sql`
 `;
 await sql`CREATE INDEX IF NOT EXISTS nt_earnings_calendar_date ON public.nt_earnings_calendar (report_date)`;
 
-// Per-symbol Alpha Vantage history state (backfill queue).
-await sql`
-  CREATE TABLE IF NOT EXISTS public.nt_earnings_sync (
-    symbol             TEXT PRIMARY KEY,
-    status             TEXT NOT NULL DEFAULT 'pending',
-    history_fetched_at TIMESTAMPTZ,
-    next_attempt_at    TIMESTAMPTZ,
-    attempts           INT NOT NULL DEFAULT 0,
-    last_error         TEXT
-  )
-`;
-
 // Daily external-API budget (Alpha Vantage free tier: 25/day), keyed on the UTC day.
 await sql`
   CREATE TABLE IF NOT EXISTS public.nt_api_usage (
@@ -96,7 +85,7 @@ await sql`INSERT INTO public.nt_job_lease (name) VALUES ('earnings') ON CONFLICT
 
 const tables = await sql`
   SELECT table_name FROM information_schema.tables
-  WHERE table_schema = 'public' AND table_name IN ('nt_earnings','nt_earnings_calendar','nt_earnings_sync','nt_api_usage','nt_job_lease')
+  WHERE table_schema = 'public' AND table_name IN ('nt_earnings','nt_earnings_calendar','nt_api_usage','nt_job_lease')
   ORDER BY 1
 `;
 console.log('earnings tables ready:', tables.map(t => t.table_name).join(', '));
