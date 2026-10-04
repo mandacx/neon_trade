@@ -10,7 +10,9 @@ export default defineRailway(() => {
   const telegramAlertsCron = service("telegram-alerts-cron", {
     build: { buildEnvironment: "V3", builder: "DOCKERFILE", dockerfilePath: "Dockerfile" },
     replicas: { "us-west2": 1 },
-    deploy: { cronSchedule: "*/15 12-21 * * 1-5", restartPolicyType: "NEVER" },
+    // Disabled until Telegram is configured (TELEGRAM_BOT_TOKEN etc. in Vercel).
+    // To re-enable: cronSchedule: "*/15 12-21 * * 1-5" (route enforces NYSE hours).
+    deploy: { cronSchedule: null, restartPolicyType: "NEVER" },
     env: { CRON_SECRET: preserve() },
   });
 
