@@ -72,7 +72,13 @@ export async function getLatestStockData(symbol: string): Promise<StockData | nu
         COALESCE(put_oi, 0) as "PUT_OI",
         COALESCE((put_oi - call_oi), 0) as "OI_DIFF"
       FROM public.eod_usmkts_price
-      WHERE symbol = ${symbol.toUpperCase()}
+      -- upper(symbol), not symbol: matches idx_eod_usmkts_price_usym_date
+      -- (upper(symbol), trade_date) exactly. With a plain symbol = filter the planner
+      -- walks idx_eod_usmkts_price_trade_date backwards hoping to hit the
+      -- symbol early — instant for tracked tickers, but a full ~5M-row scan
+      -- (~3s) for a ticker we don't have. Symbols are stored uppercase, so
+      -- the results are identical.
+      WHERE upper(symbol) = ${symbol.toUpperCase()}
       ORDER BY trade_date DESC
       LIMIT 1
     `;
@@ -189,7 +195,10 @@ export async function getStockDataAsOf(symbol: string, asOf: string, expiryDate?
             COALESCE(put_oi, 0) as "PUT_OI",
             COALESCE((put_oi - call_oi), 0) as "OI_DIFF"
           FROM public.eod_usmkts_price
-          WHERE symbol = ${symbol.toUpperCase()}
+          -- upper(symbol) for the (upper(symbol), trade_date) index — see
+          -- getLatestStockData. (The expiry branch above is fine as is: the
+          -- primary key covers symbol + expiry_dt + trade_date.)
+          WHERE upper(symbol) = ${symbol.toUpperCase()}
             AND trade_date <= ${asOf}::date
           ORDER BY trade_date DESC
           LIMIT 1
