@@ -40,6 +40,9 @@ function Spinner() {
   return <div className="inline-block animate-spin h-3.5 w-3.5 border-2 border-blue-600 border-t-transparent rounded-full" />;
 }
 
+/** How long arrow-key browsing must pause before the chart loads the highlighted symbol. */
+const KEY_NAV_CHART_DELAY_MS = 300;
+
 function SortHeader({ label, active, dir, align = 'left', onClick }: {
   label: string; active: boolean; dir: 'asc' | 'desc'; align?: 'left' | 'right'; onClick: () => void;
 }) {
@@ -256,6 +259,57 @@ export default function WatchlistViewPage() {
     setSymbol(prev => (prev && rows.some(r => r.symbol === prev) ? prev : rows[0].symbol));
   }, [rows]);
 
+  // The chart trails the highlighted row. Clicks load it straight away;
+  // arrow-key moves wait until the keys settle, so holding ↓ through ten rows
+  // mounts one chart instead of ten (each mount fetches levels history, which
+  // is rate limited to LEVEL_RANGE_RATE per user).
+  const [chartSymbol, setChartSymbol] = useState<string | null>(null);
+  const keyNavRef = useRef(false);
+  useEffect(() => {
+    if (!keyNavRef.current) { setChartSymbol(symbol); return; }
+    keyNavRef.current = false;
+    const t = setTimeout(() => setChartSymbol(symbol), KEY_NAV_CHART_DELAY_MS);
+    return () => clearTimeout(t);
+  }, [symbol]);
+
+  // ↑/↓ step through the table in its current filtered + sorted order.
+  // Ignored while typing (search, add-symbol, list name, selects) or with a
+  // modifier held, so it never steals keys from a form control.
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+      if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName))) return;
+      if (visibleRows.length === 0) return;
+      e.preventDefault();
+      const i = visibleRows.findIndex(r => r.symbol === symbol);
+      const next = i === -1
+        ? (e.key === 'ArrowDown' ? 0 : visibleRows.length - 1)
+        : Math.min(visibleRows.length - 1, Math.max(0, i + (e.key === 'ArrowDown' ? 1 : -1)));
+      if (next === i) return;
+      keyNavRef.current = true;
+      setSymbol(visibleRows[next].symbol);
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [visibleRows, symbol]);
+
+  // Keep the highlighted row visible inside the table's own scroll box (not
+  // the page), clear of the sticky header. A no-op for clicked rows.
+  const tableScrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const box = tableScrollRef.current;
+    if (!box || !symbol) return;
+    const row = box.querySelector<HTMLElement>(`tr[data-symbol="${CSS.escape(symbol)}"]`);
+    if (!row) return;
+    const headerHeight = box.querySelector('thead')?.getBoundingClientRect().height ?? 0;
+    const boxRect = box.getBoundingClientRect();
+    const rowRect = row.getBoundingClientRect();
+    if (rowRect.top < boxRect.top + headerHeight) box.scrollTop -= boxRect.top + headerHeight - rowRect.top;
+    else if (rowRect.bottom > boxRect.bottom) box.scrollTop += rowRect.bottom - boxRect.bottom;
+  }, [symbol]);
+
   // Same POST the /watchlists page uses, so a list created here shows up
   // there (and vice versa) — both read the one watchlists table.
   async function handleCreate(e: React.FormEvent) {
@@ -317,8 +371,8 @@ export default function WatchlistViewPage() {
         <div className="mx-auto max-w-[1800px] px-4 pt-3 pb-8 grid gap-4 lg:grid-cols-[minmax(0,1fr)_460px] items-stretch">
           {/* Left — chart for the picked symbol */}
           <div className="min-w-0">
-            {symbol ? (
-              <StockAnalysis key={symbol} symbol={symbol} embedded />
+            {chartSymbol ? (
+              <StockAnalysis key={chartSymbol} symbol={chartSymbol} embedded />
             ) : (
               <div className="bg-white rounded-lg shadow-md p-10 text-center text-sm text-gray-400">
                 {rows === null ? <><Spinner /> <span className="ml-2">Loading…</span></> : 'Add a symbol to this watchlist to see its chart.'}
@@ -338,6 +392,9 @@ export default function WatchlistViewPage() {
                 <h2 className="text-lg font-bold text-gray-900">Watchlists</h2>
                 <div className="flex items-center gap-2 text-[11px] text-gray-400">
                   {rows && `${visibleRows.length !== rows.length ? `${visibleRows.length} of ${rows.length}` : rows.length} symbols`}
+                  {visibleRows.length > 1 && (
+                    <span className="hidden lg:inline" title="Use the ↑ and ↓ arrow keys to move through the list">· ↑↓ to browse</span>
+                  )}
                   <button
                     onClick={() => selectedId && (loadRows(selectedId), loadLevels(selectedId, selectedExpiry))}
                     disabled={rowsLoading}
@@ -408,7 +465,7 @@ export default function WatchlistViewPage() {
             </div>
 
             {/* Scrolls inside the panel; header row sticks to the top. */}
-            <div className="overflow-auto flex-1 min-h-0 max-h-[60vh] lg:max-h-none">
+            <div ref={tableScrollRef} className="overflow-auto flex-1 min-h-0 max-h-[60vh] lg:max-h-none">
               <table className="text-xs" style={{ tableLayout: 'fixed', width: tableWidth }}>
                 <colgroup>
                   {COLUMN_ORDER.map(k => <col key={k} style={{ width: colWidths[k] }} />)}
@@ -430,6 +487,7 @@ export default function WatchlistViewPage() {
                     return (
                       <tr
                         key={r.symbol}
+                        data-symbol={r.symbol}
                         onClick={() => setSymbol(r.symbol)}
                         aria-selected={isSelected}
                         className={`border-b border-gray-50 cursor-pointer transition-colors ${isSelected ? 'bg-blue-50' : 'hover:bg-blue-50/40'}`}
