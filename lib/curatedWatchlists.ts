@@ -10,7 +10,15 @@ import { getSecuritiesFilterOptions } from '@/lib/securitiesFilters';
 // handful of index codes as of writing — so every catalog entry is shown,
 // no curation-subset needed).
 
-export type CuratedListKind = 'sector' | 'index';
+export type CuratedListKind = 'etf' | 'sector' | 'index';
+
+// Fixed ETF set, shared with the home dashboard's "Top ETFs" split.
+export const ETF_SYMBOLS = [
+  'SPY', 'QQQ', 'IWM', 'DIA', 'GLD', 'SLV', 'TLT', 'GDX',
+  'EEM', 'EFA', 'XLF', 'XLE', 'XLK', 'XLV', 'XLU', 'XLI',
+  'ARKK', 'VXX', 'IBIT', 'AVGO',
+];
+export const ETF_LIST_ID = 'sys:etf';
 
 export interface CuratedListDef {
   id: string;
@@ -22,18 +30,20 @@ const SECTOR_PREFIX = 'sys:sector:';
 const INDEX_PREFIX = 'sys:idx:';
 
 export function isCuratedListId(id: string): boolean {
-  return id.startsWith(SECTOR_PREFIX) || id.startsWith(INDEX_PREFIX);
+  return id === ETF_LIST_ID || id.startsWith(SECTOR_PREFIX) || id.startsWith(INDEX_PREFIX);
 }
 
 export async function curatedListCatalog(): Promise<CuratedListDef[]> {
   const { sectors, indices } = await getSecuritiesFilterOptions();
   return [
+    { id: ETF_LIST_ID, name: 'ETFs', kind: 'etf' as const },
     ...sectors.map(sector => ({ id: `${SECTOR_PREFIX}${encodeURIComponent(sector)}`, name: sector, kind: 'sector' as const })),
     ...indices.map(idx => ({ id: `${INDEX_PREFIX}${idx.code}`, name: idx.name, kind: 'index' as const })),
   ];
 }
 
 export async function curatedListDef(id: string): Promise<CuratedListDef | null> {
+  if (id === ETF_LIST_ID) return { id, name: 'ETFs', kind: 'etf' };
   if (id.startsWith(SECTOR_PREFIX)) {
     const sector = decodeURIComponent(id.slice(SECTOR_PREFIX.length));
     return { id, name: sector, kind: 'sector' };
@@ -48,6 +58,7 @@ export async function curatedListDef(id: string): Promise<CuratedListDef | null>
 }
 
 export async function symbolsOfCuratedList(id: string): Promise<string[]> {
+  if (id === ETF_LIST_ID) return [...ETF_SYMBOLS];
   if (id.startsWith(SECTOR_PREFIX)) {
     const sector = decodeURIComponent(id.slice(SECTOR_PREFIX.length));
     try {

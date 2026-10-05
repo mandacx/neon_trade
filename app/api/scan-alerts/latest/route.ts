@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getScanAlerts, getScanTradeDates, getScanExpiryDates, getLatestScanTradeDate } from '@/lib/scanAlerts';
 import { deriveFilterOptions, getSecuritiesFilterOptions, getSecuritiesMeta, applySecuritiesFilters, attachSecuritiesMeta } from '@/lib/securitiesFilters';
 import { requireFeatureApi } from '@/lib/routeGuards';
-import { hasFeature, FEATURE_EARNINGS, FEATURE_LEVELS, FEATURE_SCAN_ALERTS_LATEST } from '@/lib/features';
+import { hasFeature, FEATURE_EARNINGS, FEATURE_LEVELS, FEATURE_SCAN_ALERTS_LATEST, FEATURE_WATCHLISTS } from '@/lib/features';
 import { earningsBadge, getEarningsSummary } from '@/lib/earnings';
+import { getWatchlistsForUser, getWatchlistSymbols } from '@/lib/watchlists';
 
 // Latest scan alerts: always scoped to expiry_dt >= today, per the "future dated
 // expiries only" requirement for this page. `expiry` further narrows to one date.
@@ -18,20 +19,30 @@ export async function GET(request: NextRequest) {
     const industry = searchParams.get('industry');
     const marketCapTier = searchParams.get('marketCapTier');
     const indexCode = searchParams.get('index');
+    const watchlistId = searchParams.get('watchlist');
+    const watchlistsEnabled = hasFeature(ctx.features, FEATURE_WATCHLISTS);
 
     if (metadataOnly) {
-      const [tradeDates, expiryDates, filterOptions] = await Promise.all([
+      const [tradeDates, expiryDates, filterOptions, watchlists] = await Promise.all([
         getScanTradeDates(30),
         getScanExpiryDates({ futureOnly: true }),
         getSecuritiesFilterOptions(),
+        watchlistsEnabled ? getWatchlistsForUser(ctx.userId) : Promise.resolve([]),
       ]);
-      return NextResponse.json({ success: true, data: { tradeDates, expiryDates, filterOptions } });
+      return NextResponse.json({ success: true, data: { tradeDates, expiryDates, filterOptions, watchlists } });
     }
 
     const tradeDate = searchParams.get('tradeDate') || (await getLatestScanTradeDate()) || undefined;
     const expiryDate = searchParams.get('expiry') || undefined;
 
-    let alerts = await getScanAlerts({ tradeDate, expiryDate, futureExpiryOnly: true });
+    const [allAlerts, watchlistSymbols] = await Promise.all([
+      getScanAlerts({ tradeDate, expiryDate, futureExpiryOnly: true }),
+      watchlistId && watchlistsEnabled ? getWatchlistSymbols(watchlistId, ctx.userId) : Promise.resolve(null),
+    ]);
+    // Restrict to a watchlist's symbols first, so the meta/earnings lookups and
+    // derived filter options below only cover the alerts that will be shown.
+    const allowed = watchlistSymbols ? new Set(watchlistSymbols) : null;
+    let alerts = allowed ? allAlerts.filter(a => allowed.has(a.symbol)) : allAlerts;
 
     const symbols = alerts.map(a => a.symbol);
     // Earnings flags (Pro): next report relative to each alert's expiry.

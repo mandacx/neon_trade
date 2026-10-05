@@ -22,6 +22,16 @@ const MONTH_NAMES = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
 
+// Default to the curated ETF list: an unscoped all-stocks scan is too heavy to load by default.
+const DEFAULT_WATCHLIST = 'sys:etf';
+
+interface WatchlistOption {
+  id: string;
+  name: string;
+  isSystem: boolean;
+  symbolCount: number;
+}
+
 function ChevronIcon({ open }: { open: boolean }) {
   return (
     <svg className={`w-4 h-4 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -57,6 +67,8 @@ function ScanAlertsHistoricalInner() {
   const [industry, setIndustry] = useState(searchParams.get('industry') || '');
   const [marketCapTier, setMarketCapTier] = useState(searchParams.get('marketCapTier') || '');
   const [indexCode, setIndexCode] = useState(searchParams.get('index') || '');
+  const [watchlists, setWatchlists] = useState<WatchlistOption[]>([]);
+  const [watchlistId, setWatchlistId] = useState(searchParams.get('watchlist') || DEFAULT_WATCHLIST);
 
   // Load available months on mount.
   useEffect(() => {
@@ -68,6 +80,7 @@ function ScanAlertsHistoricalInner() {
         if (result.success) {
           setMonths(result.data.months);
           setFilterOptions(result.data.filterOptions || {});
+          setWatchlists(result.data.watchlists || []);
           if (result.data.months.length > 0) {
             const first = result.data.months[0].yearMonth;
             setYear(first.slice(0, 4));
@@ -124,6 +137,7 @@ function ScanAlertsHistoricalInner() {
         if (industry) params.set('industry', industry);
         if (marketCapTier) params.set('marketCapTier', marketCapTier);
         if (indexCode) params.set('index', indexCode);
+        if (watchlistId) params.set('watchlist', watchlistId);
         const response = await fetch(`/api/scan-alerts/historical?${params}`);
         if (!response.ok) throw new Error('Failed to fetch historical alerts');
         const result = await response.json();
@@ -139,7 +153,7 @@ function ScanAlertsHistoricalInner() {
       }
     };
     fetchData();
-  }, [month, tradeDate, expiryDate, sector, industry, marketCapTier, indexCode]);
+  }, [month, tradeDate, expiryDate, sector, industry, marketCapTier, indexCode, watchlistId]);
 
   useEffect(() => {
     let filtered = alerts;
@@ -171,7 +185,7 @@ function ScanAlertsHistoricalInner() {
     || (filterOptions.marketCapTiers?.length ?? 0) > 0
     || (filterOptions.indices?.length ?? 0) > 0;
 
-  const hasActiveFilters = !!(sector || industry || marketCapTier || indexCode);
+  const hasActiveFilters = !!(sector || industry || marketCapTier || indexCode || watchlistId !== DEFAULT_WATCHLIST);
 
   const selectClass = "px-2 py-1.5 border border-gray-200 rounded-md text-xs focus:outline-none focus:ring-1 focus:ring-purple-400 bg-white max-w-[180px]";
   const labelClass = "block text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-0.5";
@@ -299,10 +313,22 @@ function ScanAlertsHistoricalInner() {
                       </select>
                     </div>
                   )}
+                  {watchlists.length > 0 && (
+                    <div>
+                      <label className={labelClass}>Watchlist</label>
+                      <select value={watchlistId} onChange={e => setWatchlistId(e.target.value)} className={selectClass}>
+                        {watchlists.map(w => (
+                          <option key={w.id} value={w.id}>
+                            {w.name} ({w.symbolCount})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                   {hasActiveFilters && (
                     <div className="flex items-end pb-0.5">
                       <button
-                        onClick={() => { setSector(''); setIndustry(''); setMarketCapTier(''); setIndexCode(''); }}
+                        onClick={() => { setSector(''); setIndustry(''); setMarketCapTier(''); setIndexCode(''); setWatchlistId(DEFAULT_WATCHLIST); }}
                         className="px-2.5 py-1.5 text-xs text-gray-500 border border-gray-200 rounded-md hover:bg-gray-50"
                       >
                         Clear

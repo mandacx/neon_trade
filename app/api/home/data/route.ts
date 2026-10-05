@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { sql, getAvailableDates } from '@/lib/db';
 import { calculateLevels, findClosestLevel } from '@/lib/calculations';
+import { ETF_SYMBOLS } from '@/lib/curatedWatchlists';
 
 // The DISTINCT / window-function / GROUP BY queries below scan a large slice
 // of eod_usmkts_price rather than filtering to one symbol, so they're the
@@ -13,11 +14,6 @@ import { calculateLevels, findClosestLevel } from '@/lib/calculations';
 // cross-project indirection here.
 
 const INDEX_SYMBOLS = ['SPY', 'QQQ', 'DIA', 'IWM'];
-const ETF_SYMBOLS = [
-  'SPY', 'QQQ', 'IWM', 'DIA', 'GLD', 'SLV', 'TLT', 'GDX',
-  'EEM', 'EFA', 'XLF', 'XLE', 'XLK', 'XLV', 'XLU', 'XLI',
-  'ARKK', 'VXX', 'IBIT', 'AVGO',
-];
 
 async function alpacaFetch(path: string, params: Record<string, string>): Promise<any> {
   const apiKey = process.env.ALPACA_API_KEY;

@@ -7,8 +7,9 @@ import {
 } from '@/lib/scanAlerts';
 import { deriveFilterOptions, getSecuritiesFilterOptions, getSecuritiesMeta, applySecuritiesFilters, attachSecuritiesMeta } from '@/lib/securitiesFilters';
 import { requireFeatureApi } from '@/lib/routeGuards';
-import { hasFeature, FEATURE_EARNINGS, FEATURE_LEVELS, FEATURE_SCAN_ALERTS_HISTORY } from '@/lib/features';
+import { hasFeature, FEATURE_EARNINGS, FEATURE_LEVELS, FEATURE_SCAN_ALERTS_HISTORY, FEATURE_WATCHLISTS } from '@/lib/features';
 import { getEarningsInWindows, windowKey } from '@/lib/earnings';
+import { getWatchlistsForUser, getWatchlistSymbols } from '@/lib/watchlists';
 
 // Historical scan alerts: browsed by calendar month. `metadata=true` alone lists
 // available months; `metadata=true&month=YYYY-MM` scopes trade/expiry date
@@ -25,14 +26,17 @@ export async function GET(request: NextRequest) {
     const industry = searchParams.get('industry');
     const marketCapTier = searchParams.get('marketCapTier');
     const indexCode = searchParams.get('index');
+    const watchlistId = searchParams.get('watchlist');
+    const watchlistsEnabled = hasFeature(ctx.features, FEATURE_WATCHLISTS);
 
     if (metadataOnly) {
       if (!month) {
-        const [months, filterOptions] = await Promise.all([
+        const [months, filterOptions, watchlists] = await Promise.all([
           getScanAlertMonths(),
           getSecuritiesFilterOptions(),
+          watchlistsEnabled ? getWatchlistsForUser(ctx.userId) : Promise.resolve([]),
         ]);
-        return NextResponse.json({ success: true, data: { months, filterOptions } });
+        return NextResponse.json({ success: true, data: { months, filterOptions, watchlists } });
       }
       const [tradeDates, expiryDates] = await Promise.all([
         getScanTradeDatesInMonth(month),
@@ -48,7 +52,13 @@ export async function GET(request: NextRequest) {
     const tradeDate = searchParams.get('tradeDate') || undefined;
     const expiryDate = searchParams.get('expiry') || undefined;
 
-    let alerts = await getScanAlerts({ yearMonth: month, tradeDate, expiryDate });
+    const [allAlerts, watchlistSymbols] = await Promise.all([
+      getScanAlerts({ yearMonth: month, tradeDate, expiryDate }),
+      watchlistId && watchlistsEnabled ? getWatchlistSymbols(watchlistId, ctx.userId) : Promise.resolve(null),
+    ]);
+    // See app/api/scan-alerts/latest/route.ts — watchlist narrows before lookups.
+    const allowed = watchlistSymbols ? new Set(watchlistSymbols) : null;
+    let alerts = allowed ? allAlerts.filter(a => allowed.has(a.symbol)) : allAlerts;
 
     const symbols = alerts.map(a => a.symbol);
     // Earnings (Pro): did a report land between each alert's trade date and its expiry?
