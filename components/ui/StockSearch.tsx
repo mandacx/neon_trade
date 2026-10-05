@@ -103,7 +103,8 @@ export default function StockSearch({ compact }: { compact?: boolean }) {
           aria-activedescendant={activeIndex >= 0 ? `${listboxId}-option-${activeIndex}` : undefined}
           placeholder={compact ? 'Search ticker or name...' : 'Search by ticker or name (e.g. AAPL, Nvidia)'}
           className={`w-full border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
-            compact ? 'px-3 py-1.5 pr-9 text-sm' : 'px-4 py-3 pr-11 text-base border-gray-300'
+            // text-base on phones: iOS Safari zooms the page on focus below 16px.
+            compact ? 'bg-white px-3 py-1.5 pr-9 text-base md:text-sm' : 'bg-white px-4 py-3 pr-11 text-base border-gray-300'
           }`}
         />
         {/* One slot on the right edge, three states: spinner while a search is
@@ -151,7 +152,7 @@ export default function StockSearch({ compact }: { compact?: boolean }) {
         <div
           id={listboxId}
           role="listbox"
-          className="absolute z-50 w-full mt-2 bg-white border border-gray-200 rounded-lg shadow-lg max-h-96 overflow-y-auto"
+          className="absolute left-0 z-50 w-full min-w-[min(20rem,calc(100vw-2rem))] mt-2 bg-white border border-gray-200 rounded-lg shadow-lg max-h-[min(24rem,60vh)] overflow-y-auto"
         >
           {results.map((result, i) => (
             <button
@@ -184,7 +185,7 @@ export default function StockSearch({ compact }: { compact?: boolean }) {
       )}
 
       {isOpen && query && !isLoading && !isLoadingMore && results.length === 0 && (
-        <div className="absolute z-50 w-full mt-2 bg-white border border-gray-200 rounded-lg shadow-lg p-4 text-center text-gray-600">
+        <div className="absolute left-0 z-50 w-full min-w-[min(20rem,calc(100vw-2rem))] mt-2 bg-white border border-gray-200 rounded-lg shadow-lg p-4 text-center text-gray-600">
           No stocks found for &quot;{query}&quot;
         </div>
       )}

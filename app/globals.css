@@ -2,22 +2,31 @@
 @tailwind components;
 @tailwind utilities;
 
+/* The whole UI is built on hard-coded light surfaces (bg-white, bg-gray-50),
+   so there is no dark theme. A dark `prefers-color-scheme` block here used to
+   turn the body text near-white, which inherited into inputs and made typed
+   text invisible on their white background. */
 :root {
   --background: #ffffff;
   --foreground: #171717;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  color-scheme: light;
 }
 
 body {
   color: var(--foreground);
   background: var(--background);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Form fields always carry their own readable colors, whatever they inherit. */
+input,
+textarea,
+select {
+  color: #111827;
+}
+input::placeholder,
+textarea::placeholder {
+  color: #9ca3af;
 }
 
 @layer utilities {

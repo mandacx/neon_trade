@@ -7,7 +7,7 @@ import { authClient } from '@/lib/auth/client';
 
 type Mode = 'login' | 'register' | 'otp';
 
-const inputClass = "w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white";
+const inputClass = "w-full px-3 py-2 border border-gray-300 rounded-lg text-base sm:text-sm text-gray-900 placeholder:text-gray-400 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400";
 const labelClass = "block text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1";
 
 // Only ever honor a same-origin relative path here — an open `redirect`
@@ -113,16 +113,16 @@ function LoginPageInner() {
     <>
       <Header />
       <div className="min-h-screen bg-gray-50">
-        <div className="container mx-auto px-4 py-10">
-          <div className="max-w-sm mx-auto">
+        <div className="container mx-auto px-4 py-5 sm:py-10">
+          <div className="w-full max-w-sm mx-auto">
             <h1 className="text-xl font-bold text-gray-900 text-center mb-1">
               {mode === 'otp' ? 'Verify your email' : 'Sign in to Neon Trade'}
             </h1>
-            <p className="text-xs text-gray-400 text-center mb-6">
+            <p className="text-xs text-gray-400 text-center mb-4 sm:mb-6">
               {mode === 'otp' ? `We sent a 6-digit code to ${email}` : 'Email + password, with a one-time code to verify your address.'}
             </p>
 
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
               {mode !== 'otp' && (
                 <div className="flex gap-1 bg-gray-100 p-1 rounded-lg mb-5">
                   <button
@@ -144,15 +144,39 @@ function LoginPageInner() {
                 <div className="mb-4 px-3 py-2 rounded-lg bg-red-50 border border-red-100 text-xs text-red-700">{error}</div>
               )}
 
+              {mode !== 'otp' && (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleGoogleSignIn}
+                    disabled={busy}
+                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 text-sm font-semibold text-gray-700 disabled:opacity-50"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 48 48" aria-hidden="true">
+                      <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3c-1.6 4.7-6.1 8-11.3 8-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.6 6.1 29.6 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.7-.4-3.5z"/>
+                      <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.6 15.4 18.9 12 24 12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.6 6.1 29.6 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/>
+                      <path fill="#4CAF50" d="M24 44c5.5 0 10.4-2.1 14.1-5.6l-6.5-5.5C29.5 34.6 26.9 35.5 24 35.5c-5.2 0-9.6-3.3-11.2-7.9l-6.6 5.1C9.6 39.6 16.2 44 24 44z"/>
+                      <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.2 4.2-4.1 5.6l6.5 5.5C41.5 36.3 44 30.6 44 24c0-1.3-.1-2.7-.4-3.5z"/>
+                    </svg>
+                    Continue with Google
+                  </button>
+                  <div className="flex items-center gap-3 my-4">
+                    <div className="flex-1 h-px bg-gray-100" />
+                    <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">or use email</span>
+                    <div className="flex-1 h-px bg-gray-100" />
+                  </div>
+                </>
+              )}
+
               {mode === 'login' && (
                 <form onSubmit={handleLogin} className="space-y-4">
                   <div>
                     <label className={labelClass}>Email</label>
-                    <input className={inputClass} type="email" required value={loginEmail} onChange={e => setLoginEmail(e.target.value)} placeholder="you@example.com" />
+                    <input className={inputClass} type="email" autoComplete="email" required value={loginEmail} onChange={e => setLoginEmail(e.target.value)} placeholder="you@example.com" />
                   </div>
                   <div>
                     <label className={labelClass}>Password</label>
-                    <input className={inputClass} type="password" required value={loginPassword} onChange={e => setLoginPassword(e.target.value)} />
+                    <input className={inputClass} type="password" autoComplete="current-password" required value={loginPassword} onChange={e => setLoginPassword(e.target.value)} />
                   </div>
                   <button disabled={busy} className="w-full py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold disabled:opacity-50">
                     {busy ? 'Signing in…' : 'Log in'}
@@ -164,44 +188,20 @@ function LoginPageInner() {
                 <form onSubmit={handleRegister} className="space-y-4">
                   <div>
                     <label className={labelClass}>Name</label>
-                    <input className={inputClass} type="text" required value={name} onChange={e => setName(e.target.value)} placeholder="Jane Doe" />
+                    <input className={inputClass} type="text" autoComplete="name" required value={name} onChange={e => setName(e.target.value)} placeholder="Jane Doe" />
                   </div>
                   <div>
                     <label className={labelClass}>Email</label>
-                    <input className={inputClass} type="email" required value={email} onChange={e => setEmail(e.target.value)} placeholder="you@example.com" />
+                    <input className={inputClass} type="email" autoComplete="email" required value={email} onChange={e => setEmail(e.target.value)} placeholder="you@example.com" />
                   </div>
                   <div>
                     <label className={labelClass}>Password</label>
-                    <input className={inputClass} type="password" required minLength={8} value={password} onChange={e => setPassword(e.target.value)} placeholder="At least 8 characters" />
+                    <input className={inputClass} type="password" autoComplete="new-password" required minLength={8} value={password} onChange={e => setPassword(e.target.value)} placeholder="At least 8 characters" />
                   </div>
                   <button disabled={busy} className="w-full py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold disabled:opacity-50">
                     {busy ? 'Creating account…' : 'Create account'}
                   </button>
                 </form>
-              )}
-
-              {mode !== 'otp' && (
-                <>
-                  <div className="flex items-center gap-3 my-4">
-                    <div className="flex-1 h-px bg-gray-100" />
-                    <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">or</span>
-                    <div className="flex-1 h-px bg-gray-100" />
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleGoogleSignIn}
-                    disabled={busy}
-                    className="w-full flex items-center justify-center gap-2 py-2 rounded-lg border border-gray-200 hover:bg-gray-50 text-sm font-semibold text-gray-700 disabled:opacity-50"
-                  >
-                    <svg width="16" height="16" viewBox="0 0 48 48" aria-hidden="true">
-                      <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3c-1.6 4.7-6.1 8-11.3 8-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.6 6.1 29.6 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.7-.4-3.5z"/>
-                      <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.6 15.4 18.9 12 24 12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.6 6.1 29.6 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/>
-                      <path fill="#4CAF50" d="M24 44c5.5 0 10.4-2.1 14.1-5.6l-6.5-5.5C29.5 34.6 26.9 35.5 24 35.5c-5.2 0-9.6-3.3-11.2-7.9l-6.6 5.1C9.6 39.6 16.2 44 24 44z"/>
-                      <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.2 4.2-4.1 5.6l6.5 5.5C41.5 36.3 44 30.6 44 24c0-1.3-.1-2.7-.4-3.5z"/>
-                    </svg>
-                    Continue with Google
-                  </button>
-                </>
               )}
 
               {mode === 'otp' && (
@@ -210,8 +210,10 @@ function LoginPageInner() {
                     {otp.map((d, i) => (
                       <input
                         key={i}
+                        autoComplete="one-time-code"
+                        aria-label={`Digit ${i + 1}`}
                         ref={el => { otpRefs.current[i] = el; }}
-                        className="w-10 h-12 text-center text-lg font-bold border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-400"
+                        className="w-10 h-12 text-center text-lg font-bold text-gray-900 bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-400"
                         inputMode="numeric"
                         maxLength={1}
                         value={d}

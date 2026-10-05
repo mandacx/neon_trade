@@ -71,22 +71,17 @@ export default function Header() {
   return (
     <header className="bg-white shadow-sm border-b border-gray-200">
       <div className="container mx-auto px-4">
-        <div className="flex items-center h-14 gap-4">
+        <div className="flex items-center h-14 gap-2 sm:gap-4">
           {/* Logo — links home */}
-          <Link href="/" className="flex items-center shrink-0">
+          <Link href="/" className="flex items-center shrink-0 min-w-0">
             <Image src="/logo.svg" alt="Neon Trade" width={140} height={34} priority />
           </Link>
-
-          {/* Search — centre */}
-          <div className="hidden md:block flex-1 max-w-sm mx-4">
-            <StockSearch compact />
-          </div>
 
           {/* Spacer */}
           <div className="flex-1" />
 
           {/* Action buttons — right */}
-          <div className="hidden md:flex items-center gap-2 shrink-0">
+          <div className="hidden xl:flex items-center gap-2 shrink-0">
             <button
               onClick={() => router.push('/quadrant')}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
@@ -232,9 +227,20 @@ export default function Header() {
             )}
           </div>
 
+          {/* Logged-out phones get Sign in without opening the menu */}
+          {!authCtx.loggedIn && (
+            <button
+              onClick={() => router.push('/login')}
+              className="xl:hidden shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold border border-gray-200 text-gray-700 hover:bg-gray-50"
+            >
+              Sign in
+            </button>
+          )}
+
           {/* Mobile menu */}
           <button
-            className="md:hidden p-2 rounded-lg hover:bg-gray-100"
+            aria-label="Open menu"
+            className="xl:hidden shrink-0 p-2 rounded-lg hover:bg-gray-100"
             onClick={() => {
               const menu = document.getElementById('mobile-menu');
               if (menu) menu.classList.toggle('hidden');
@@ -246,13 +252,15 @@ export default function Header() {
           </button>
         </div>
 
-        {/* Search — always visible on mobile, no need to open the menu */}
-        <div className="md:hidden pb-3">
+        {/* Search — its own full-width row at every size. The 7 nav buttons need
+            ~830px plus the logo, so an inline search was squeezed to a sliver
+            on laptops (and still at 1920px, where the container caps at 1536). */}
+        <div className="pb-3 w-full md:max-w-xl">
           <StockSearch compact />
         </div>
 
         {/* Mobile dropdown */}
-        <div id="mobile-menu" className="hidden md:hidden border-t border-gray-100 py-3 space-y-1">
+        <div id="mobile-menu" className="hidden xl:!hidden border-t border-gray-100 py-3 space-y-1">
           <Link href="/" className="block px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 rounded-lg">
             🏠 Home
           </Link>
