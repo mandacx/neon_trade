@@ -48,6 +48,9 @@ const PRO_FEATURES = [
   'stock_analysis', 'levels', 'scan_alerts_latest', 'scan_alerts_history',
   'quadrant', 'watchlists', 'performance', 'telegram_alerts', 'earnings',
 ];
+// Top tier: everything in Pro, plus any feature that ships Expert-only. New
+// feature codes go here (and in lib/features.ts), NOT in PRO_FEATURES.
+const EXPERT_FEATURES = [...PRO_FEATURES];
 
 async function main() {
   console.log('Creating tables...');
@@ -166,6 +169,7 @@ async function main() {
   for (const [code, name, features, sortOrder] of [
     ['FREE', 'Free', FREE_FEATURES, 0],
     ['PRO', 'Pro', PRO_FEATURES, 10],
+    ['EXPERT', 'Pro Plus', EXPERT_FEATURES, 20],
   ]) {
     const featuresJson = JSON.stringify(features);
     if (FORCE_RESEED) {
