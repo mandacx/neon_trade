@@ -437,23 +437,24 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
           histLevelsPromise,
         ]);
 
-        // Check OHLC response (required)
-        if (!ohlcRes.ok) {
-          const errorData = await ohlcRes.json();
-          throw new Error(`OHLC data failed: ${errorData.error || ohlcRes.statusText}`);
-        }
-
-        const ohlc = await ohlcRes.json();
-        if (!ohlc.success) {
-          throw new Error(ohlc.error || 'Failed to fetch OHLC data');
+        // OHLC is required for the chart, but a failure must not block the
+        // levels / OI / details below — record it and throw once they're applied.
+        let ohlcError: Error | null = null;
+        try {
+          if (!ohlcRes.ok) {
+            const errorData = await ohlcRes.json().catch(() => ({}));
+            throw new Error(`OHLC data failed: ${errorData.error || ohlcRes.statusText}`);
+          }
+          const ohlc = await ohlcRes.json();
+          if (!ohlc.success) throw new Error(ohlc.error || 'Failed to fetch OHLC data');
+          setOhlcData(ohlc.data.data || []);
+        } catch (e) {
+          ohlcError = e instanceof Error ? e : new Error('Failed to fetch OHLC data');
         }
 
         // Details is optional (symbol may not exist in DB)
         const details = detailsRes.ok ? await detailsRes.json() : { success: true, data: null };
         if (expiryData?.success) setHistoricalExpiryDates(expiryData.data.historicalExpiryDates || []);
-
-        // Set OHLC data (always required)
-        setOhlcData(ohlc.data.data || []);
 
         if (scanAlertsRes.ok) {
           const scanAlertsData = await scanAlertsRes.json();
@@ -520,6 +521,7 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
             }
           }
         }
+        if (ohlcError) throw ohlcError;
       } catch (err) {
         console.error('Error fetching stock data:', err);
         setError(err instanceof Error ? err.message : 'Failed to load stock data');
