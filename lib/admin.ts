@@ -1,4 +1,5 @@
 import { sql } from '@/lib/db';
+import { ensureTable as ensureActivityTable } from '@/lib/activity';
 
 // Admin data layer. Reads/writes neon_auth."user" directly (read for
 // listing/search, write only for role) — everything else here is a table
@@ -41,21 +42,27 @@ export interface AdminUserSummary {
   plan_code: string | null;
   plan_expires_at: string | null;
   telegram_chat_id: string | null;
+  /** Latest tracked activity (null = never seen since tracking began). */
+  last_seen: string | null;
 }
 
-export async function listUsers(opts: { search?: string | null; limit?: number; offset?: number } = {}): Promise<{ users: AdminUserSummary[]; total: number }> {
-  const { search = null, limit = 25, offset = 0 } = opts;
+export async function listUsers(opts: { search?: string | null; limit?: number; offset?: number; sort?: 'joined' | 'last_seen' } = {}): Promise<{ users: AdminUserSummary[]; total: number }> {
+  const { search = null, limit = 25, offset = 0, sort = 'joined' } = opts;
+  await ensureActivityTable();
   const pattern = search ? `%${search}%` : null;
 
   const [users, totalRows] = await Promise.all([
     sql`
       SELECT u.id, u.email, u.name, u."emailVerified" AS email_verified, u.role, u.banned, u."createdAt" AS created_at,
-             p.code AS plan_code, up.plan_expires_at, up.telegram_chat_id
+             p.code AS plan_code, up.plan_expires_at, up.telegram_chat_id, ls.last_seen::text AS last_seen
       FROM neon_auth."user" u
+      LEFT JOIN LATERAL (
+        SELECT max(created_at) AS last_seen FROM public.nt_activity_events e WHERE e.user_id = u.id::text
+      ) ls ON true
       LEFT JOIN public.nt_app_user_profiles up ON up.user_id = u.id::text
       LEFT JOIN public.nt_plans p ON p.id = up.plan_id
       WHERE ${pattern}::text IS NULL OR u.email ILIKE ${pattern} OR u.name ILIKE ${pattern}
-      ORDER BY u."createdAt" DESC
+      ORDER BY (CASE WHEN ${sort} = 'last_seen' THEN ls.last_seen END) DESC NULLS LAST, u."createdAt" DESC
       LIMIT ${limit} OFFSET ${offset}
     `,
     sql`
@@ -216,4 +223,26 @@ export async function getDashboardStats(): Promise<AdminStats> {
     signupsLast7Days: Number((signupsRows[0] as { count: string }).count),
     loginsToday: Number((loginsTodayRows[0] as { count: string }).count),
   };
+}
+
+/**
+ * Permanently delete a user and everything keyed to them, atomically.
+ * neon_auth.session/account/member/invitation cascade from the user row (verified
+ * against the live FKs); the public tables below have no FK, so they're deleted
+ * explicitly. nt_watchlist_items cascades from nt_watchlists.
+ */
+export async function deleteUser(userId: string, email: string): Promise<void> {
+  await ensureActivityTable();
+  await sql.transaction([
+    sql`DELETE FROM public.nt_watchlists WHERE user_id = ${userId}`,
+    sql`DELETE FROM public.nt_telegram_alert_subscriptions WHERE user_id = ${userId}`,
+    sql`DELETE FROM public.nt_telegram_alert_cursors WHERE user_id = ${userId}`,
+    sql`DELETE FROM public.nt_telegram_link_codes WHERE user_id = ${userId}`,
+    sql`DELETE FROM public.nt_user_feature_overrides WHERE user_id = ${userId}`,
+    sql`DELETE FROM public.nt_app_user_profiles WHERE user_id = ${userId}`,
+    sql`DELETE FROM public.nt_activity_events WHERE user_id = ${userId}`,
+    sql`DELETE FROM public.nt_rate_limit_hits WHERE bucket LIKE ${'%:user:' + userId}`,
+    sql`DELETE FROM neon_auth.verification WHERE identifier = ${email}`,
+    sql`DELETE FROM neon_auth."user" WHERE id = ${userId}`,
+  ]);
 }

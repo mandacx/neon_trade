@@ -16,7 +16,38 @@ interface TelegramLinkedRow { userId: string; email: string; telegramLinkedAt: s
 interface AllUserRow { id: string; email: string; createdAt: string }
 interface PlanUserRow { userId: string; email: string; planExpiresAt: string | null }
 
+interface ActiveSessionRow { sessionId: string; who: string; pageviews: number; lastSeen: string }
+interface TopPageRow { path: string; views: number; avgSeconds: number | null }
+interface ErrorRow { path: string | null; message: string | null; kind: string; createdAt: string }
+interface Activity {
+  activeSessionsToday: number;
+  pageViewsToday: number;
+  errorsToday: number;
+  activeSessions: ActiveSessionRow[];
+  topPages: TopPageRow[];
+  errors: ErrorRow[];
+}
+interface HeavyUserRow { userId: string; email: string; requests: number; peakPerMinute: number; throttledMinutes: number; flagged: boolean }
+
+interface CountRow { label: string; count: number; extra?: number }
+interface Behavior {
+  days: number;
+  daily: Array<{ day: string; views: number; sessions: number; users: number }>;
+  dau: number; wau: number; mau: number;
+  sessions7d: number;
+  avgSessionSeconds: number | null;
+  bounceRate: number | null;
+  topStocks: CountRow[];
+  sections: CountRow[];
+  referrers: CountRow[];
+  devices: CountRow[];
+  returningUsers7d: number;
+}
+
 interface DashboardData {
+  behavior: Behavior;
+  activity: Activity;
+  heavyUsers: HeavyUserRow[];
   stats: Stats;
   todaysLogins: TodaysLoginRow[];
   recentSignups: RecentSignupRow[];
@@ -25,7 +56,24 @@ interface DashboardData {
   usersByPlan: Record<string, PlanUserRow[]>;
 }
 
-type DrillKey = 'users' | 'signups' | 'telegram' | 'logins' | `plan:${string}`;
+type DrillKey = 'users' | 'signups' | 'telegram' | 'logins' | 'sessions' | 'pages' | 'errors' | 'heavy' | `plan:${string}`;
+
+/** Table shell for drills whose columns differ from the simple user list. */
+function DataTable({ head, children, empty }: { head: string[]; children: React.ReactNode; empty: boolean }) {
+  if (empty) return <p className="text-[11px] text-gray-400">Nothing here.</p>;
+  return (
+    <div className="max-h-96 overflow-auto">
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="text-left text-[10px] uppercase tracking-wide text-gray-400">
+            {head.map((h, i) => <th key={h} className={`pb-1.5 pr-3 font-semibold whitespace-nowrap ${i > 0 ? 'text-right' : ''}`}>{h}</th>)}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-50">{children}</tbody>
+      </table>
+    </div>
+  );
+}
 
 function fmtTime(iso: string): string {
   return new Date(iso).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
@@ -81,6 +129,59 @@ function DrillPanel({ title, count, onClose, children }: { title: string; count:
   );
 }
 
+function fmtDuration(sec: number | null): string {
+  if (sec == null) return '—';
+  return sec >= 60 ? `${Math.floor(sec / 60)}m ${sec % 60}s` : `${sec}s`;
+}
+
+/** Ranked list with proportional bars — used for stocks, sections, referrers, devices. */
+function RankList({ title, subtitle, rows, empty }: { title: string; subtitle?: string; rows: CountRow[]; empty: string }) {
+  const max = Math.max(1, ...rows.map(r => r.count));
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-4">
+      <h3 className="text-xs font-semibold text-gray-700">{title}</h3>
+      {subtitle && <p className="text-[11px] text-gray-400 mb-2">{subtitle}</p>}
+      {rows.length === 0 ? <p className="text-[11px] text-gray-400 mt-2">{empty}</p> : (
+        <div className="space-y-1.5 max-h-72 overflow-y-auto mt-2">
+          {rows.map(r => (
+            <div key={r.label} className="flex items-center gap-2 text-xs">
+              <span className="w-24 sm:w-28 shrink-0 truncate font-medium text-gray-600" title={r.label}>{r.label}</span>
+              <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+                <div className="h-full bg-blue-500 rounded-full" style={{ width: `${(r.count / max) * 100}%` }} />
+              </div>
+              <span className="w-10 text-right font-mono text-gray-500">{r.count}</span>
+              {r.extra != null && <span className="hidden sm:inline w-16 text-right text-[10px] text-gray-400">{r.extra} sess.</span>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TrendChart({ daily }: { daily: Behavior['daily'] }) {
+  const max = Math.max(1, ...daily.map(d => d.views));
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-4">
+      <h3 className="text-xs font-semibold text-gray-700">Traffic — last {daily.length} days</h3>
+      <p className="text-[11px] text-gray-400 mb-3">Light bar = page views, dark = sessions. Hover a bar for details.</p>
+      <div className="flex items-end gap-1 h-32">
+        {daily.map(d => (
+          <div key={d.day} className="flex-1 h-full flex flex-col justify-end min-w-0" title={`${d.day}: ${d.views} views, ${d.sessions} sessions, ${d.users} signed-in users`}>
+            <div className="w-full bg-blue-200 rounded-t relative" style={{ height: `${(d.views / max) * 100}%`, minHeight: d.views ? 2 : 0 }}>
+              <div className="absolute bottom-0 inset-x-0 bg-blue-600 rounded-t" style={{ height: d.views ? `${Math.min(100, (d.sessions / d.views) * 100)}%` : 0 }} />
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="flex justify-between text-[10px] text-gray-400 mt-1">
+        <span>{daily[0]?.day.slice(5)}</span>
+        <span>{daily[daily.length - 1]?.day.slice(5)}</span>
+      </div>
+    </div>
+  );
+}
+
 export default function AdminDashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -113,6 +214,66 @@ export default function AdminDashboardPage() {
         <StatTile label="Telegram linked" value={String(stats.telegramLinkedCount)} onClick={() => toggle('telegram')} active={drillKey === 'telegram'} />
         <StatTile label="Logins today" value={String(stats.loginsToday)} onClick={() => toggle('logins')} active={drillKey === 'logins'} />
       </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <StatTile label="Active sessions today" value={String(data.activity.activeSessionsToday)} onClick={() => toggle('sessions')} active={drillKey === 'sessions'} />
+        <StatTile label="Page views today" value={String(data.activity.pageViewsToday)} onClick={() => toggle('pages')} active={drillKey === 'pages'} />
+        <StatTile label="Errors today" value={String(data.activity.errorsToday)} onClick={() => toggle('errors')} active={drillKey === 'errors'} />
+        <StatTile label="Heavy API users (24h)" value={String(data.heavyUsers.length)} onClick={() => toggle('heavy')} active={drillKey === 'heavy'} />
+      </div>
+
+      {drillKey === 'sessions' && (
+        <DrillPanel title="Active sessions today" count={data.activity.activeSessions.length} onClose={() => setDrillKey(null)}>
+          <DataTable head={['Who', 'Pageviews', 'Last seen']} empty={data.activity.activeSessions.length === 0}>
+            {data.activity.activeSessions.map(s => (
+              <tr key={s.sessionId + s.lastSeen}>
+                <td className="py-1.5 pr-3 font-medium text-gray-700 whitespace-nowrap">{s.who}</td>
+                <td className="py-1.5 pr-3 text-right text-gray-500">{s.pageviews}</td>
+                <td className="py-1.5 text-right text-gray-400 whitespace-nowrap">{fmtTime(s.lastSeen)}</td>
+              </tr>
+            ))}
+          </DataTable>
+        </DrillPanel>
+      )}
+      {drillKey === 'pages' && (
+        <DrillPanel title="Top pages today" count={data.activity.topPages.length} onClose={() => setDrillKey(null)}>
+          <DataTable head={['Path', 'Views', 'Avg time']} empty={data.activity.topPages.length === 0}>
+            {data.activity.topPages.map(p => (
+              <tr key={p.path}>
+                <td className="py-1.5 pr-3 font-medium text-gray-700 break-all">{p.path}</td>
+                <td className="py-1.5 pr-3 text-right text-gray-500">{p.views}</td>
+                <td className="py-1.5 text-right text-gray-400 whitespace-nowrap">{p.avgSeconds == null ? '—' : `${p.avgSeconds}s`}</td>
+              </tr>
+            ))}
+          </DataTable>
+        </DrillPanel>
+      )}
+      {drillKey === 'errors' && (
+        <DrillPanel title="Errors today" count={data.activity.errors.length} onClose={() => setDrillKey(null)}>
+          <DataTable head={['Path', 'Message', 'Time']} empty={data.activity.errors.length === 0}>
+            {data.activity.errors.map((er, i) => (
+              <tr key={i}>
+                <td className="py-1.5 pr-3 font-medium text-gray-700 break-all">{er.path ?? '—'}</td>
+                <td className="py-1.5 pr-3 text-right text-red-600 break-words">{er.message ?? er.kind}</td>
+                <td className="py-1.5 text-right text-gray-400 whitespace-nowrap">{fmtTime(er.createdAt)}</td>
+              </tr>
+            ))}
+          </DataTable>
+        </DrillPanel>
+      )}
+      {drillKey === 'heavy' && (
+        <DrillPanel title="Heavy API users — last 24h" count={data.heavyUsers.length} onClose={() => setDrillKey(null)}>
+          <DataTable head={['User', 'Requests', 'Peak/min', 'Throttled min']} empty={data.heavyUsers.length === 0}>
+            {data.heavyUsers.map(u => (
+              <tr key={u.userId} className={u.flagged ? 'bg-red-50' : undefined}>
+                <td className={`py-1.5 pr-3 pl-1 font-medium whitespace-nowrap ${u.flagged ? 'text-red-700' : 'text-gray-700'}`}>{u.email}</td>
+                <td className="py-1.5 pr-3 text-right text-gray-500">{u.requests}</td>
+                <td className="py-1.5 pr-3 text-right text-gray-500">{u.peakPerMinute}</td>
+                <td className="py-1.5 pr-1 text-right text-gray-500">{u.throttledMinutes}</td>
+              </tr>
+            ))}
+          </DataTable>
+        </DrillPanel>
+      )}
 
       {drillKey === 'users' && (
         <DrillPanel title="All users" count={data.allUsers.length} onClose={() => setDrillKey(null)}>
@@ -167,6 +328,63 @@ export default function AdminDashboardPage() {
             );
           })}
         </div>
+      </div>
+
+      <div className="pt-2">
+        <h2 className="text-sm font-semibold text-gray-700">User behavior</h2>
+        <p className="text-[11px] text-gray-400">From first-party activity tracking (page arrivals and exits). Stats start when tracking was deployed.</p>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        <StatTile label="DAU (signed-in)" value={String(data.behavior.dau)} />
+        <StatTile label="WAU" value={String(data.behavior.wau)} />
+        <StatTile label="MAU" value={String(data.behavior.mau)} />
+        <StatTile label="Sessions (7d)" value={String(data.behavior.sessions7d)} />
+        <StatTile label="Avg session" value={fmtDuration(data.behavior.avgSessionSeconds)} />
+        <StatTile label="Bounce rate" value={data.behavior.bounceRate == null ? '—' : `${Math.round(data.behavior.bounceRate * 100)}%`} />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <TrendChart daily={data.behavior.daily} />
+        <div className="bg-white rounded-xl border border-gray-200 p-4">
+          <h3 className="text-xs font-semibold text-gray-700">Funnel &amp; retention</h3>
+          <p className="text-[11px] text-gray-400 mb-3">Visitors to paying users, plus how many come back.</p>
+          {(() => {
+            const paid = stats.planDistribution.filter(p => p.code !== 'FREE').reduce((n, p) => n + p.count, 0);
+            const steps = [
+              { label: 'Visitor sessions (7d)', value: data.behavior.sessions7d },
+              { label: 'Signups (7d)', value: stats.signupsLast7Days },
+              { label: 'Total users', value: stats.totalUsers },
+              { label: 'On a paid plan', value: paid },
+            ];
+            const top = Math.max(1, ...steps.map(x => x.value));
+            return (
+              <div className="space-y-2">
+                {steps.map(st => (
+                  <div key={st.label} className="flex items-center gap-2 text-xs">
+                    <span className="w-32 sm:w-40 shrink-0 text-gray-600">{st.label}</span>
+                    <div className="flex-1 h-2.5 bg-gray-100 rounded-full overflow-hidden">
+                      <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${(st.value / top) * 100}%` }} />
+                    </div>
+                    <span className="w-10 text-right font-mono text-gray-500">{st.value}</span>
+                  </div>
+                ))}
+                <p className="text-[11px] text-gray-500 pt-2 border-t border-gray-100">
+                  Returning users (active on 2+ days this week): <b>{data.behavior.returningUsers7d}</b>
+                  {data.behavior.wau > 0 && <> · {Math.round((data.behavior.returningUsers7d / data.behavior.wau) * 100)}% of WAU</>}
+                  {data.behavior.mau > 0 && <> · stickiness (DAU/MAU) <b>{Math.round((data.behavior.dau / data.behavior.mau) * 100)}%</b></>}
+                </p>
+              </div>
+            );
+          })()}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+        <RankList title="Most viewed stocks" subtitle="Last 7 days, by page views" rows={data.behavior.topStocks} empty="No stock page views yet." />
+        <RankList title="Sections used" subtitle="Last 7 days, by page views" rows={data.behavior.sections} empty="No page views yet." />
+        <RankList title="Traffic sources" subtitle="External referrers, last 7 days" rows={data.behavior.referrers} empty="No external referrers yet (direct traffic only)." />
+        <RankList title="Devices" subtitle="Sessions, last 7 days" rows={data.behavior.devices} empty="No sessions yet." />
       </div>
     </div>
   );

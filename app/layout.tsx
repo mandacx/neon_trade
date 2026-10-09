@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { Analytics } from "@vercel/analytics/next";
 import AuthContextProvider from "@/components/providers/AuthContextProvider";
+import ActivityTracker from "@/components/providers/ActivityTracker";
 import { getCurrentUserContext } from "@/lib/appUsers";
 
 export const metadata: Metadata = {
@@ -28,6 +29,7 @@ export default async function RootLayout({
       <body className="antialiased">
         <AuthContextProvider value={authCtx}>
           {children}
+          <ActivityTracker />
           <Analytics />
         </AuthContextProvider>
       </body>

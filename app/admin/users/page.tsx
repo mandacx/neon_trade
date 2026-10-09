@@ -11,17 +11,19 @@ export default function AdminUsersPage() {
   const [users, setUsers] = useState<AdminUserSummary[]>([]);
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
+  const [sort, setSort] = useState<'joined' | 'last_seen'>('joined');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     setLoading(true);
     const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(offset) });
     if (search) params.set('search', search);
+    if (sort !== 'joined') params.set('sort', sort);
     fetch(`/api/admin/users?${params}`)
       .then(r => r.json())
       .then(json => { if (json.success) { setUsers(json.data.users); setTotal(json.data.total); } })
       .finally(() => setLoading(false));
-  }, [search, offset]);
+  }, [search, offset, sort]);
 
   return (
     <div className="space-y-3">
@@ -42,6 +44,13 @@ export default function AdminUsersPage() {
               <th className="px-4 py-2 text-center text-[10px] font-semibold text-gray-500 uppercase">Role</th>
               <th className="px-4 py-2 text-center text-[10px] font-semibold text-gray-500 uppercase">Telegram</th>
               <th className="px-4 py-2 text-right text-[10px] font-semibold text-gray-500 uppercase">Joined</th>
+              <th className="px-4 py-2 text-right text-[10px] font-semibold uppercase">
+                <button
+                  onClick={() => { setSort(x => (x === 'last_seen' ? 'joined' : 'last_seen')); setOffset(0); }}
+                  className={sort === 'last_seen' ? 'text-blue-600' : 'text-gray-500 hover:text-gray-700'}
+                  title="Sort by last seen"
+                >Last seen{sort === 'last_seen' ? ' ↓' : ''}</button>
+              </th>
               <th className="px-4 py-2"></th>
             </tr>
           </thead>
@@ -56,13 +65,14 @@ export default function AdminUsersPage() {
                 <td className="px-4 py-2 text-center">{u.role === 'admin' ? '⭐' : ''}</td>
                 <td className="px-4 py-2 text-center">{u.telegram_chat_id ? '✓' : ''}</td>
                 <td className="px-4 py-2 text-right text-gray-500 text-xs">{new Date(u.created_at).toLocaleDateString()}</td>
+                <td className="px-4 py-2 text-right text-gray-500 text-xs whitespace-nowrap">{u.last_seen ? new Date(u.last_seen).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' }) : '—'}</td>
                 <td className="px-4 py-2 text-right">
                   <Link href={`/admin/users/${u.id}`} className="text-blue-600 text-xs font-semibold">Manage →</Link>
                 </td>
               </tr>
             ))}
             {!loading && users.length === 0 && (
-              <tr><td colSpan={7} className="px-4 py-8 text-center text-sm text-gray-400">No users found</td></tr>
+              <tr><td colSpan={8} className="px-4 py-8 text-center text-sm text-gray-400">No users found</td></tr>
             )}
           </tbody>
         </table>

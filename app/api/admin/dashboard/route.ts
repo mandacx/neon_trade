@@ -4,6 +4,8 @@ import {
   getDashboardStats, getTodaysLogins, getUsersByPlan, listPlans,
   getRecentSignups, getTelegramLinkedUsers, getAllUsers,
 } from '@/lib/admin';
+import { getActivitySummary, getBehaviorStats } from '@/lib/activity';
+import { getHeavyApiUsers } from '@/lib/apiUsage';
 
 // Bundles everything the dashboard's tiles AND their drill-downs need into one
 // response — same call, same fetch, no per-click round-trip. Every list here
@@ -15,7 +17,7 @@ export async function GET() {
     return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
   }
 
-  const [stats, todaysLogins, recentSignups, telegramLinked, allUsers, plans] =
+  const [stats, todaysLogins, recentSignups, telegramLinked, allUsers, plans, activity, heavyUsers, behavior] =
     await Promise.all([
       getDashboardStats(),
       getTodaysLogins(),
@@ -23,6 +25,9 @@ export async function GET() {
       getTelegramLinkedUsers(),
       getAllUsers(),
       listPlans(),
+      getActivitySummary(),
+      getHeavyApiUsers(20),
+      getBehaviorStats(14),
     ]);
 
   // Per-plan user lists for the plan-distribution bars — fetched only for
@@ -44,6 +49,9 @@ export async function GET() {
       recentSignups,
       telegramLinked,
       allUsers,
+      activity,
+      heavyUsers,
+      behavior,
       usersByPlan: Object.fromEntries(usersByPlanEntries),
     },
   });

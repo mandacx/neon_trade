@@ -86,7 +86,31 @@ export default function UserDetailEditor({
     }
   }
 
+  const [confirmEmail, setConfirmEmail] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  async function deleteUser() {
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      const res = await fetch(`/api/admin/users/${user.id}`, {
+        method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmEmail }),
+      });
+      const json = await res.json();
+      if (json.success) router.push('/admin/users');
+      else setDeleteError(json.error ?? 'Delete failed');
+    } catch {
+      setDeleteError('Delete failed');
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   const isSelf = user.id === currentAdminId;
+  const isAdminUser = role === 'admin';
+  const canDelete = !isSelf && !isAdminUser;
 
   return (
     <div className="grid md:grid-cols-2 gap-4">
@@ -130,6 +154,33 @@ export default function UserDetailEditor({
               {savingPlan ? 'Saving…' : 'Save'}
             </button>
           </div>
+        </div>
+
+        <div className="border-t border-red-100 pt-4">
+          <h3 className="text-sm font-semibold text-red-600 mb-1">Delete user</h3>
+          <p className="text-[11px] text-gray-500 mb-2">
+            Permanently removes this account, sessions, plan, overrides, watchlists, Telegram link and tracked activity. This cannot be undone.
+          </p>
+          {canDelete ? (
+            <div className="flex flex-wrap gap-2 items-center">
+              <input
+                value={confirmEmail}
+                onChange={e => setConfirmEmail(e.target.value)}
+                placeholder={`Type ${user.email} to confirm`}
+                className="flex-1 min-w-[12rem] px-2 py-1.5 border border-red-200 rounded-lg text-xs"
+              />
+              <button
+                onClick={deleteUser}
+                disabled={deleting || confirmEmail.trim().toLowerCase() !== user.email.toLowerCase()}
+                className="px-3 py-1.5 rounded-lg bg-red-600 text-white text-xs font-semibold disabled:opacity-40"
+              >
+                {deleting ? 'Deleting…' : 'Delete user'}
+              </button>
+            </div>
+          ) : (
+            <p className="text-[11px] text-gray-400">{isSelf ? "You can't delete your own account." : 'Remove the admin role first to delete this user.'}</p>
+          )}
+          {deleteError && <p className="text-[11px] text-red-600 mt-1">{deleteError}</p>}
         </div>
       </div>
 

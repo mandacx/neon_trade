@@ -13,6 +13,7 @@ export async function GET(request: NextRequest) {
   const limit = sp.get('limit') ? Number(sp.get('limit')) : 25;
   const offset = sp.get('offset') ? Number(sp.get('offset')) : 0;
 
-  const { users, total } = await listUsers({ search, limit, offset });
+  const sort = sp.get('sort') === 'last_seen' ? 'last_seen' : 'joined';
+  const { users, total } = await listUsers({ search, limit, offset, sort });
   return NextResponse.json({ success: true, data: { users, total } });
 }
