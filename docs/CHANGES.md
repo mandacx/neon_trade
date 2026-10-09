@@ -12,6 +12,10 @@ anything not tested as *unverified*.
 Commit `c15599c`. Prompt this area was reconstructed from:
 `docs/ADMIN_DASHBOARD_PROMPT.md`.
 
+Follow-up: `docs/ADMIN_DASHBOARD_PROMPT.md` was first committed unchanged; it was
+then updated to describe the behavior section, referrer rule, last-seen sort,
+per-user behavior panel and delete user.
+
 ### What was added
 
 | Area | Files |
