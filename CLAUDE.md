@@ -2,6 +2,13 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Working rules (read first, every conversation)
+
+1. **Read before changing.** At the start of every conversation, read `docs/CHANGES.md` (the running change log and design notes) and any doc relevant to the area you're about to touch (e.g. `docs/earnings.md`, `docs/ADMIN_DASHBOARD_PROMPT.md`). Do this before proposing or making any change.
+2. **No assumptions, no guessing.** Verify against the real thing: read the code, query the live schema, fetch the docs, run the check. If something wasn't verified, say "unverified" rather than stating it as fact.
+3. **Verify completely, then recommend.** Confirm current behavior first, then suggest the best steps or a design/code update, and implement.
+4. **Record every change.** Append to `docs/CHANGES.md` in the same change: what changed (files), the design/why, what was verified, what was not, and follow-ups. If a change alters behavior described elsewhere in this file or a doc, update that too.
+
 ## Commands
 
 ```bash
