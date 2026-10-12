@@ -1,9 +1,6 @@
 import { getUserBehavior, type CountRow } from '@/lib/activity';
 import { getUserApiUsage } from '@/lib/apiUsage';
-
-function fmtTime(iso: string): string {
-  return new Date(iso).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
-}
+import { formatCT } from '@/lib/time';
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
@@ -47,7 +44,7 @@ export default async function UserBehaviorPanel({ userId }: { userId: string }) 
         <h3 className="text-sm font-semibold text-gray-700">Behavior</h3>
         <p className="text-[11px] text-gray-400">
           {b.firstSeen
-            ? <>First seen {fmtTime(b.firstSeen)} · last seen {b.lastSeen ? fmtTime(b.lastSeen) : '—'}</>
+            ? <>First seen {formatCT(b.firstSeen)} · last seen {b.lastSeen ? formatCT(b.lastSeen) : '—'}</>
             : 'No tracked activity for this user yet (tracking only covers visits since it was deployed).'}
         </p>
       </div>
@@ -80,7 +77,7 @@ export default async function UserBehaviorPanel({ userId }: { userId: string }) 
               <tbody className="divide-y divide-gray-50">
                 {b.timeline.map((e, i) => (
                   <tr key={i}>
-                    <td className="py-1.5 pr-3 text-gray-400 whitespace-nowrap">{fmtTime(e.createdAt)}</td>
+                    <td className="py-1.5 pr-3 text-gray-400 whitespace-nowrap">{formatCT(e.createdAt)}</td>
                     <td className="py-1.5 pr-3 whitespace-nowrap">
                       {e.kind === 'pageview'
                         ? <span className="text-gray-500">{e.durationSeconds == null ? 'Opened' : 'Left'}</span>

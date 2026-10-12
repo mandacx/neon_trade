@@ -26,8 +26,8 @@ export async function getHeavyApiUsers(limit: number = 20): Promise<HeavyUserRow
                substr(bucket, length(split_part(bucket, ':', 1)) + length(':user:') + 1) AS user_id,
                hits,
                hits > CASE split_part(bucket, ':', 1)
-                        WHEN ${LEVEL_RANGE_RATE.name} THEN ${LEVEL_RANGE_RATE.limit}
-                        ELSE ${LEVEL_POINT_RATE.limit} END AS throttled
+                        WHEN ${LEVEL_RANGE_RATE.name}::text THEN ${LEVEL_RANGE_RATE.limit}::int
+                        ELSE ${LEVEL_POINT_RATE.limit}::int END AS throttled
         FROM public.nt_rate_limit_hits
         WHERE window_start >= now() - interval '24 hours'
           AND bucket LIKE '%:user:%'

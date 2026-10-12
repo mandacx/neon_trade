@@ -6,6 +6,7 @@ import AccountEditor from '@/components/profile/AccountEditor';
 import TelegramCard from '@/components/profile/TelegramCard';
 import { getCurrentUserContext, getHasPassword } from '@/lib/appUsers';
 import { ALL_FEATURES, FEATURE_TELEGRAM_ALERTS, hasFeature } from '@/lib/features';
+import { formatCTDate } from '@/lib/time';
 
 // getCurrentUserContext() reads cookies, so this page can't be statically rendered.
 export const dynamic = 'force-dynamic';
@@ -52,7 +53,7 @@ export default async function ProfilePage() {
                   <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">{ctx.planCode}</span>
                 </div>
                 {ctx.planExpiresAt && (
-                  <p className="text-[11px] text-gray-400 mb-2">Renews/expires {new Date(ctx.planExpiresAt).toLocaleDateString()}</p>
+                  <p className="text-[11px] text-gray-400 mb-2">Renews/expires {formatCTDate(ctx.planExpiresAt)}</p>
                 )}
                 <ul className="text-xs space-y-1 mt-2">
                   {ALL_FEATURES.map(f => {

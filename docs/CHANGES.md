@@ -7,6 +7,147 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-12 — User / session history on the dashboard, clickable user rows
+
+Requested: on the admin dashboard, selecting a user name or a session should show
+the history of that user or session; on the Users page, selecting an email (direct
+click or row select) should open the manage page. *Interpretation (unverified with
+the user):* "selected" = clicked; the dashboard shows history in a modal, with a link
+on to the full user page (previously the name linked straight to the user page).
+
+### What changed
+
+| Area | Files |
+|---|---|
+| History queries (user: summary, last 300 events, last 20 auth logins; session: summary, first referrer/device, last 300 events) | `lib/adminHistory.ts` (new) |
+| Admin-only API `GET /api/admin/history?user=<id>` or `?session=<id>` (403 non-admin, 400 bad params, 404 unknown) | `app/api/admin/history/route.ts` (new) |
+| History modal (stats, logins, newest-first timeline, "Open user page →", a user's events link to their session) | `components/admin/HistoryModal.tsx` (new) |
+| Dashboard: user cells open history instead of navigating; anonymous rows open their session; new Session column in "Active sessions today" | `app/admin/page.tsx` |
+| Drill modal: cell shape `{text, user?, session?, iso?}` replaces `href`; Sessions drill has a clickable session id; Esc closes only the top modal | `lib/adminDrill.ts`, `components/admin/DrillModal.tsx` |
+| `ActiveSessionRow.sessionId` is now the full tracker id (was truncated to 8 chars) so it can be looked up; the UI still shows 8 chars | `lib/activity.ts` |
+| Users page: whole row opens the manage page (not when text is being selected); email and "Manage →" links still work | `app/admin/users/page.tsx` |
+
+### Design
+
+- A session is a tracker session (`nt_activity_events.session_id`, the `nn_sid`
+  cookie), not an auth session. Anonymous sessions have history but no user page.
+- The full session id is sent to admin-only endpoints only. It is a tracking id,
+  not an auth credential.
+- Events older than the 90-day activity retention are not available.
+
+### Verified
+
+- `npx tsc --noEmit` passes; eslint on changed files: 0 errors (warnings only).
+- The SQL of `getUserHistory` / `getSessionHistory` was run read-only against the live
+  Neon DB (a real user and a real session): email lookup, summary, logins
+  (`neon_auth.session` `createdAt`/`ipAddress`), first referrer/user agent all return rows.
+
+### Not verified
+
+- **No browser check** of the modals, row click, or Esc behavior, and the API was not
+  called over HTTP as an admin (the 403 guard mirrors the other admin routes).
+- The TypeScript wrappers were type-checked but not executed (only their SQL was).
+- `npm run build` was not re-run for this change.
+
+### Follow-ups
+
+- Opening a session from a user's history replaces the modal (no back button).
+- Errors panel rows have no session id, so anonymous errors are not clickable.
+
+---
+
+## 2026-10-10 — Period drill-downs, Central Time reporting, user links, heavy-users fix
+
+Requested: extended drill-down (period filters / date selection) for every
+dashboard tile and section title, timestamps in a US Central zone everywhere,
+and links from sessions / user names to the user page. The user's screenshot
+(a different app's dashboard: Funnel & retention, Most viewed stocks, Sections
+used, Traffic sources, Devices, Top pages, titles underlined) was treated as a
+reference list of sections, "but not limited to" those (*interpretation,
+unverified with the user*). The request first said IST, then corrected to CST;
+implemented as **America/Chicago** (CST in winter, CDT in summer) because fixed
+CST (UTC-6) would be an hour off during DST. Confirm if fixed UTC-6 was meant.
+
+### What was added / changed
+
+| Area | Files |
+|---|---|
+| Central Time helpers (parse, format, DST-aware day start) | `lib/time.ts` |
+| Period drill-down queries for 13 metrics (users, signups, telegram, logins, sessions, pages, errors, heavy, funnel, stocks, sections, referrers, devices) | `lib/adminDrill.ts`, `app/api/admin/drill/route.ts` |
+| Drill-down modal: presets (Today, Yesterday, 7/30/90 days, This month) + custom From/To, per-day bar chart, table | `components/admin/DrillModal.tsx` |
+| Dashboard: every tile and section title opens the modal; inline panels get "View over time"; Top pages (7d) section; funnel stat boxes; user cells link to `/admin/users/[id]` | `app/admin/page.tsx`, `lib/activity.ts` (adds user ids to sessions/errors, `topPages`) |
+| "Today" and day buckets now Central Time instead of DB `CURRENT_DATE` (UTC) | `lib/activity.ts`, `lib/admin.ts` |
+| Central Time display + user links elsewhere | `app/admin/users/page.tsx`, `components/admin/UserBehaviorPanel.tsx`, `components/admin/UserDetailEditor.tsx`, `app/upgrade/page.tsx`, `app/profile/page.tsx` |
+| **Bug fix** | `lib/apiUsage.ts` |
+
+### Design
+
+- A period is an inclusive range of **Central calendar days**; the API
+  (`GET /api/admin/drill?metric=&from=&to=`, admin-only, max 366 days) converts
+  it to `[start of from, start of to+1)` using the DST-aware `ctDayStartISO`.
+  Per-day buckets use `(ts AT TIME ZONE 'America/Chicago')::date`.
+- Result shape: `{ columns, rows, series, note, truncated }`; row cap 500 (the
+  chart still covers the full period). Cells can be plain, a link, or an instant
+  that the client formats with `formatCT`.
+- `heavy` ignores the period: rate-limit counters only retain about a day.
+- Sessions and user names link to the user page when a user id exists;
+  **anonymous sessions have no user page** and stay plain text.
+- DB timestamps are `timestamptz`; `lib/time.ts` parses Postgres `::text`
+  timestamps ("...+00") safely for all browsers.
+
+### Bug found and fixed
+
+`getHeavyApiUsers` (commit c15599c) failed with `operator does not exist:
+integer > text` (untyped CASE parameters) and its catch returned `[]`, so the
+**Heavy API users tile was always empty**. Fixed with `::int` / `::text`
+casts. After the fix it returns real rows (2 users in the last 24h, one with 2
+throttled minutes).
+
+### Verified
+
+- `npx tsc --noEmit` passes; `npm run build` succeeds; eslint 0 errors.
+- Against the live Neon DB (read-only): all 13 drill metrics execute and return
+  sensible rows/series; `getActivitySummary`, `getBehaviorStats`,
+  `getUserBehavior`, `listUsers({sort:'last_seen'})`, `getDashboardStats`,
+  `getTodaysLogins` and `getHeavyApiUsers` execute with the Central Time
+  boundaries. This closes the earlier "new SQL not executed" gap.
+- `lib/time.ts`: 19:51 UTC renders as 2:51 PM CDT, a December instant renders
+  as CST, and day starts are correct including both DST transition days
+  (2026-03-08, 2026-11-01).
+- Timezone facts: DB `TimeZone` is GMT; `neon_auth.user/session` and
+  `nt_activity_events` timestamps are `timestamptz`.
+- The user deleted several users; an orphan scan afterwards found no leftover
+  rows in any user-keyed table (one unrelated `neon_auth.verification` row with
+  a token identifier remains).
+
+### Not verified
+
+- **No browser check** of the dashboard, modal, date inputs or layouts (360–1880
+  px), and the modal's behavior with real clicks. Only compile, build and queries.
+- `/api/admin/drill` was not called through HTTP as an admin (auth path
+  untested); the 403 guard mirrors the other admin routes.
+- Page-view history only exists from when tracking was deployed, so most
+  periods before that are empty.
+
+### Deliberately NOT converted to Central Time
+
+- **Scan-alert load times** (`load_dt_tm`, `timestamp without time zone`, e.g.
+  "2026-10-09 14:45:34"): the source zone is unknown (could be Central or
+  Eastern), so converting would guess. Shown as stored (scan-alerts pages, the
+  watchlist alerts widget, quadrant tooltip).
+- **Chart axes** (`TVChart`, `OptionContractChart`) stay in America/New_York
+  (exchange time); **trade/expiry dates** (`YYYY-MM-DD`) are not instants.
+
+### Follow-ups
+
+- `pruneRateLimitHits` appears not to run: `nt_rate_limit_hits` still holds
+  user rows from 2026-08-13 (verified by query). Harmless to the 24h view but
+  the table keeps growing.
+- Decide zone for scan-alert times and whether chart axes should follow.
+- Anonymous session drill-down (a per-session timeline page) is not built.
+
+---
+
 ## 2026-10-09 — Admin dashboard: activity, behavior, last seen, delete user
 
 Commit `c15599c`. Prompt this area was reconstructed from:
@@ -46,7 +187,8 @@ per-user behavior panel and delete user.
   `<limit name>:user:<id>`. Counters are pruned after a day, so the view is 24h.
   Throttled = window hits above the limit of that bucket
   (`LEVEL_RANGE_RATE` / `LEVEL_POINT_RATE` in `lib/levelAccess.ts`).
-- **"Today"** in the dashboard means the DB server's `CURRENT_DATE`.
+- **"Today"** originally meant the DB server's `CURRENT_DATE` (UTC).
+  *Superseded 2026-10-10: it is now the Central Time day.*
 - **Retention:** events older than 90 days are pruned opportunistically on about
   1 in 200 tracking writes (no cron).
 - **Delete user** (`deleteUser`): one `sql.transaction` that deletes, for the
@@ -69,8 +211,10 @@ per-user behavior panel and delete user.
 
 ### Not verified
 
-- None of the new SQL (activity, behavior, last seen, heavy users, delete) has
-  been executed against the database.
+- *(Superseded 2026-10-10: the activity, behavior, last-seen and heavy-users SQL
+  has since been executed; the heavy-users query was broken and is fixed. The
+  delete SQL was exercised by the user deleting real users.)* Originally: none of
+  the new SQL had been executed against the database.
 - The pages have not been opened in a browser (no layout check at 360–1880 px).
 - No real user delete was performed (irreversible on the shared database).
 - `/api/track` has not been called end to end, including cookie behavior behind

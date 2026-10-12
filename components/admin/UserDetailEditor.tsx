@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { AdminUserDetail, AdminPlan } from '@/lib/admin';
+import { formatCT } from '@/lib/time';
 
 function toDateInputValue(iso: string | null): string {
   if (!iso) return '';
@@ -121,7 +122,7 @@ export default function UserDetailEditor({
             <div className="flex justify-between"><dt className="text-gray-500">Email</dt><dd>{user.email}</dd></div>
             <div className="flex justify-between"><dt className="text-gray-500">Name</dt><dd>{user.name ?? '—'}</dd></div>
             <div className="flex justify-between"><dt className="text-gray-500">Verified</dt><dd>{user.email_verified ? '✓' : 'No'}</dd></div>
-            <div className="flex justify-between"><dt className="text-gray-500">Joined</dt><dd>{new Date(user.created_at).toLocaleString()}</dd></div>
+            <div className="flex justify-between"><dt className="text-gray-500">Joined</dt><dd>{formatCT(user.created_at)}</dd></div>
           </dl>
         </div>
 

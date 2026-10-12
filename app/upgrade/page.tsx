@@ -5,6 +5,7 @@ import { sql } from '@/lib/db';
 import { getCurrentUserContext } from '@/lib/appUsers';
 import { ALL_FEATURES } from '@/lib/features';
 import { LEVEL_DELAY_DAYS } from '@/lib/levelAccess';
+import { formatCTDate } from '@/lib/time';
 
 export const dynamic = 'force-dynamic';
 
@@ -45,7 +46,7 @@ export default async function UpgradePage({ searchParams }: { searchParams: Prom
               <div className="text-center bg-green-50 border border-green-200 rounded-xl px-5 py-3">
                 <p className="text-sm font-semibold text-green-800">
                   🎉 You&apos;re on a free trial — Pro access until{' '}
-                  {ctx.planExpiresAt ? new Date(ctx.planExpiresAt).toLocaleDateString() : 'soon'}.
+                  {ctx.planExpiresAt ? formatCTDate(ctx.planExpiresAt) : 'soon'}.
                 </p>
               </div>
             ) : !ctx.loggedIn ? (

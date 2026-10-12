@@ -52,6 +52,33 @@ stickiness); and four ranked bar lists for the last 7 days: **most viewed stocks
 counted per session). Empty states say what is missing; stats only exist from when
 tracking was deployed.
 
+**Period drill-downs.** Every tile and every section title (funnel, most viewed
+stocks, top pages, sections, traffic sources, devices, traffic chart) opens a modal
+drill-down over a chosen period: presets (Today, Yesterday, Last 7/30/90 days, This
+month) plus custom From/To dates, a per-day bar chart, and a capped (500) table. One
+admin-only API (`GET /api/admin/drill?metric=&from=&to=`, max 366 days) serves all
+metrics; periods are inclusive calendar days in the reporting zone. Metrics whose
+data is retained only briefly (rate-limit counters) say so and ignore the period.
+Inline tile panels get a "View over time" link into the same modal.
+
+**Reporting time zone.** Show every instant (created, last seen, expiry, event times)
+and define "today" and daily buckets in ONE configured zone (this project:
+`America/Chicago`, so CST/CDT, via a shared `lib/time.ts`), never in the browser's or
+the DB server's zone (the DB runs in UTC). Day starts must be DST-aware. Do not convert
+zone-less source timestamps or exchange-time chart axes without confirming their zone.
+
+**User and session history.** Everywhere an admin page shows a user or a session (drill
+panels, modal tables, heavy users, errors), clicking the email opens a history modal
+(`GET /api/admin/history?user=` or `?session=`, admin-only): first/last seen, page views,
+errors, sessions, recent auth logins, and a newest-first event timeline (capped at 300).
+Clicking a session id (or an anonymous row) opens that session's history, including
+anonymous ones; the modal links on to `/admin/users/[id]`. On the Users list, clicking
+anywhere on a row (or the email / "Manage →") opens the manage page.
+
+**Never swallow query errors silently.** A drill/tile query that fails and returns an
+empty list looks identical to "no data" (this hid a broken Heavy API users query);
+run every new query against the real database and test it with data present.
+
 ## 3. Activity tracking (feeds the tiles)
 - `activity_events(session_id, user_id, event_type, path, referrer, duration_ms, message,
   status_code, user_agent, created_at)`, lazily created (`CREATE TABLE IF NOT EXISTS`).

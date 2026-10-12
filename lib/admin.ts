@@ -1,4 +1,5 @@
 import { sql } from '@/lib/db';
+import { ctTodayStartISO } from '@/lib/time';
 import { ensureTable as ensureActivityTable } from '@/lib/activity';
 
 // Admin data layer. Reads/writes neon_auth."user" directly (read for
@@ -128,7 +129,7 @@ export async function getTodaysLogins(limit: number = 200): Promise<TodaysLoginR
     SELECT s."userId"::text AS user_id, u.email, s."createdAt"::text AS created_at, s."ipAddress" AS ip_address
     FROM neon_auth."session" s
     JOIN neon_auth."user" u ON u.id = s."userId"
-    WHERE s."createdAt" >= CURRENT_DATE
+    WHERE s."createdAt" >= ${ctTodayStartISO()}::timestamptz
     ORDER BY s."createdAt" DESC
     LIMIT ${limit}
   `;
@@ -212,7 +213,7 @@ export async function getDashboardStats(): Promise<AdminStats> {
     `,
     sql`SELECT count(*) FROM public.nt_app_user_profiles WHERE telegram_chat_id IS NOT NULL`,
     sql`SELECT count(*) FROM neon_auth."user" WHERE "createdAt" >= now() - interval '7 days'`,
-    sql`SELECT count(*) FROM neon_auth."session" WHERE "createdAt" >= CURRENT_DATE`,
+    sql`SELECT count(*) FROM neon_auth."session" WHERE "createdAt" >= ${ctTodayStartISO()}::timestamptz`,
   ]);
 
   return {

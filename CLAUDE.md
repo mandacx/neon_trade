@@ -103,6 +103,7 @@ Column naming is inconsistent between the DB (`snake_case`) and the `StockData` 
 
 - All calculation happens server-side in API routes; chart components (`components/charts/*`) are `'use client'` and just render pre-computed data.
 - API routes return `{ success: boolean, data?, error?, message? }` (see `types/api.ts` `ApiResponse<T>`), and query failures are generally caught and degrade to empty arrays/`null` rather than throwing, so the frontend can render partial dashboards when one data source (e.g. Alpaca) is down.
+- **Report time zone:** instants shown in admin/account pages and the admin dashboard's "today" / day buckets use **Central Time** (`America/Chicago`, CST/CDT) via `lib/time.ts` (`formatCT`, `ctDayStartISO`, ...). Not converted: trade/expiry dates (`YYYY-MM-DD`), chart axes (America/New_York, exchange time) and scan-alert `load_dt_tm` (zone-less, source zone unconfirmed). See `docs/CHANGES.md`.
 - Symbols are always upper-cased before querying (`symbol.toUpperCase()`) since the DB stores them uppercase.
 
 ## Known follow-ups

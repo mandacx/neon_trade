@@ -3,6 +3,7 @@
  * admin dashboard tiles. Rows are written by POST /api/track.
  */
 import { sql } from '@/lib/db';
+import { addDaysYmd, ctDateString, ctDayStartISO, ctTodayStartISO } from '@/lib/time';
 
 export type ActivityEventType = 'pageview' | 'error_client' | 'error_server';
 
@@ -74,9 +75,9 @@ export async function claimAnonymousEvents(sessionId: string, userId: string): P
   await sql`UPDATE public.nt_activity_events SET user_id = ${userId} WHERE session_id = ${sessionId} AND user_id IS NULL`;
 }
 
-export interface ActiveSessionRow { sessionId: string; who: string; pageviews: number; lastSeen: string }
+export interface ActiveSessionRow { sessionId: string; userId: string | null; who: string; pageviews: number; lastSeen: string }
 export interface TopPageRow { path: string; views: number; avgSeconds: number | null }
-export interface ErrorRow { path: string | null; message: string | null; kind: string; createdAt: string }
+export interface ErrorRow { userId: string | null; email: string | null; path: string | null; message: string | null; kind: string; createdAt: string }
 export interface ActivitySummary {
   activeSessionsToday: number;
   pageViewsToday: number;
@@ -86,25 +87,26 @@ export interface ActivitySummary {
   errors: ErrorRow[];
 }
 
-/** "Today" = the DB server's current date, matching the logins tile. */
+/** "Today" = the current Central Time (America/Chicago) calendar day. */
 export async function getActivitySummary(limit: number = 100): Promise<ActivitySummary> {
   try {
     await ensureTable();
+    const todayStart = ctTodayStartISO();
     const [counts, sessions, pages, errs] = await Promise.all([
       sql`
         SELECT
           count(DISTINCT session_id) AS sessions,
           count(*) FILTER (WHERE event_type = 'pageview' AND duration_ms IS NULL) AS views,
           count(*) FILTER (WHERE event_type <> 'pageview') AS errors
-        FROM public.nt_activity_events WHERE created_at >= CURRENT_DATE
+        FROM public.nt_activity_events WHERE created_at >= ${todayStart}::timestamptz
       `,
       sql`
-        SELECT e.session_id, max(u.email) AS email,
+        SELECT e.session_id, max(e.user_id) AS uid, max(u.email) AS email,
                count(*) FILTER (WHERE e.event_type = 'pageview' AND e.duration_ms IS NULL) AS views,
                max(e.created_at)::text AS last_seen
         FROM public.nt_activity_events e
         LEFT JOIN neon_auth."user" u ON u.id::text = e.user_id
-        WHERE e.created_at >= CURRENT_DATE
+        WHERE e.created_at >= ${todayStart}::timestamptz
         GROUP BY e.session_id
         ORDER BY max(e.created_at) DESC
         LIMIT ${limit}
@@ -114,16 +116,17 @@ export async function getActivitySummary(limit: number = 100): Promise<ActivityS
                count(*) FILTER (WHERE duration_ms IS NULL) AS views,
                avg(duration_ms) FILTER (WHERE duration_ms IS NOT NULL) AS avg_ms
         FROM public.nt_activity_events
-        WHERE created_at >= CURRENT_DATE AND event_type = 'pageview'
+        WHERE created_at >= ${todayStart}::timestamptz AND event_type = 'pageview'
         GROUP BY path
         ORDER BY views DESC
         LIMIT ${limit}
       `,
       sql`
-        SELECT path, message, event_type, created_at::text AS created_at
-        FROM public.nt_activity_events
-        WHERE created_at >= CURRENT_DATE AND event_type <> 'pageview'
-        ORDER BY created_at DESC
+        SELECT e.user_id AS uid, u.email, e.path, e.message, e.event_type, e.created_at::text AS created_at
+        FROM public.nt_activity_events e
+        LEFT JOIN neon_auth."user" u ON u.id::text = e.user_id
+        WHERE e.created_at >= ${todayStart}::timestamptz AND e.event_type <> 'pageview'
+        ORDER BY e.created_at DESC
         LIMIT ${limit}
       `,
     ]);
@@ -133,7 +136,8 @@ export async function getActivitySummary(limit: number = 100): Promise<ActivityS
       pageViewsToday: Number(c.views),
       errorsToday: Number(c.errors),
       activeSessions: (sessions as any[]).map(r => ({
-        sessionId: String(r.session_id).slice(0, 8),
+        sessionId: String(r.session_id),
+        userId: r.uid ?? null,
         who: r.email ?? 'Anonymous',
         pageviews: Number(r.views),
         lastSeen: r.last_seen,
@@ -143,7 +147,7 @@ export async function getActivitySummary(limit: number = 100): Promise<ActivityS
         views: Number(r.views),
         avgSeconds: r.avg_ms == null ? null : Math.round(Number(r.avg_ms) / 1000),
       })),
-      errors: (errs as any[]).map(r => ({ path: r.path, message: r.message, kind: r.event_type, createdAt: r.created_at })),
+      errors: (errs as any[]).map(r => ({ userId: r.uid ?? null, email: r.email ?? null, path: r.path, message: r.message, kind: r.event_type, createdAt: r.created_at })),
     };
   } catch (err) {
     console.error('activity: summary failed', err);
@@ -169,30 +173,34 @@ export interface BehaviorStats {
   sections: CountRow[];
   referrers: CountRow[];
   devices: CountRow[];
+  /** Top paths over the last 7 days (extra = average seconds on page). */
+  topPages: CountRow[];
   /** Signed-in users active on 2+ distinct days in the last 7 days. */
   returningUsers7d: number;
 }
 
 const EMPTY_BEHAVIOR: BehaviorStats = {
   days: 14, daily: [], dau: 0, wau: 0, mau: 0, sessions7d: 0, avgSessionSeconds: null, bounceRate: null,
-  topStocks: [], sections: [], referrers: [], devices: [], returningUsers7d: 0,
+  topStocks: [], sections: [], referrers: [], devices: [], topPages: [], returningUsers7d: 0,
 };
 
 export async function getBehaviorStats(days: number = 14): Promise<BehaviorStats> {
   try {
     await ensureTable();
-    const [daily, active, engagement, stocks, sections, referrers, devices, returning] = await Promise.all([
+    const todayStart = ctTodayStartISO();
+    const seriesStart = ctDayStartISO(addDaysYmd(ctDateString(), -(days - 1)));
+    const [daily, active, engagement, stocks, sections, referrers, devices, pages7d, returning] = await Promise.all([
       sql`
-        SELECT created_at::date::text AS day,
+        SELECT (created_at AT TIME ZONE 'America/Chicago')::date::text AS day,
                count(*) FILTER (WHERE duration_ms IS NULL) AS views,
                count(DISTINCT session_id) AS sessions,
                count(DISTINCT user_id) AS users
         FROM public.nt_activity_events
-        WHERE event_type = 'pageview' AND created_at >= CURRENT_DATE - (${days - 1} || ' days')::interval
+        WHERE event_type = 'pageview' AND created_at >= ${seriesStart}::timestamptz
         GROUP BY 1 ORDER BY 1
       `,
       sql`
-        SELECT count(DISTINCT user_id) FILTER (WHERE created_at >= CURRENT_DATE) AS dau,
+        SELECT count(DISTINCT user_id) FILTER (WHERE created_at >= ${todayStart}::timestamptz) AS dau,
                count(DISTINCT user_id) FILTER (WHERE created_at >= now() - interval '7 days') AS wau,
                count(DISTINCT user_id) AS mau
         FROM public.nt_activity_events
@@ -241,12 +249,19 @@ export async function getBehaviorStats(days: number = 14): Promise<BehaviorStats
         WHERE created_at >= now() - interval '7 days'
         GROUP BY 1 ORDER BY sessions DESC
       `,
+      sql`
+        SELECT path, count(*) FILTER (WHERE duration_ms IS NULL) AS views,
+               avg(duration_ms) FILTER (WHERE duration_ms IS NOT NULL) AS avg_ms
+        FROM public.nt_activity_events
+        WHERE event_type = 'pageview' AND created_at >= now() - interval '7 days'
+        GROUP BY path ORDER BY views DESC LIMIT 15
+      `,
       // Signed-in users seen on at least 2 distinct days in the last 7 days.
       sql`
         SELECT count(*) AS n FROM (
           SELECT user_id FROM public.nt_activity_events
           WHERE user_id IS NOT NULL AND created_at >= now() - interval '7 days'
-          GROUP BY user_id HAVING count(DISTINCT created_at::date) >= 2
+          GROUP BY user_id HAVING count(DISTINCT (created_at AT TIME ZONE 'America/Chicago')::date) >= 2
         ) t
       `,
     ]);
@@ -254,9 +269,9 @@ export async function getBehaviorStats(days: number = 14): Promise<BehaviorStats
     // Fill days with no traffic so the chart has no gaps.
     const byDay = new Map((daily as any[]).map(r => [r.day as string, r]));
     const series: DailyPoint[] = [];
-    const nowMs = Date.now();
+    const todayIst = ctDateString();
     for (let i = days - 1; i >= 0; i--) {
-      const day = new Date(nowMs - i * 86400000).toISOString().slice(0, 10);
+      const day = addDaysYmd(todayIst, -i);
       const r = byDay.get(day);
       series.push({ day, views: Number(r?.views ?? 0), sessions: Number(r?.sessions ?? 0), users: Number(r?.users ?? 0) });
     }
@@ -274,6 +289,7 @@ export async function getBehaviorStats(days: number = 14): Promise<BehaviorStats
       sections: (sections as any[]).map(r => ({ label: r.section, count: Number(r.views), extra: Number(r.sessions) })),
       referrers: (referrers as any[]).map(r => ({ label: r.host, count: Number(r.visits) })),
       devices: (devices as any[]).map(r => ({ label: r.device, count: Number(r.sessions) })),
+      topPages: (pages7d as any[]).map(r => ({ label: r.path ?? '—', count: Number(r.views), extra: r.avg_ms == null ? undefined : Math.round(Number(r.avg_ms) / 1000) })),
       returningUsers7d: Number((returning[0] as { n: string }).n),
     };
   } catch (err) {
@@ -311,7 +327,7 @@ export async function getUserBehavior(userId: string, timelineLimit: number = 10
         SELECT min(created_at)::text AS first_seen, max(created_at)::text AS last_seen,
                count(*) FILTER (WHERE event_type = 'pageview' AND duration_ms IS NULL) AS views,
                count(DISTINCT session_id) AS sessions,
-               count(DISTINCT created_at::date) FILTER (WHERE created_at >= now() - interval '30 days') AS active_days,
+               count(DISTINCT (created_at AT TIME ZONE 'America/Chicago')::date) FILTER (WHERE created_at >= now() - interval '30 days') AS active_days,
                avg(duration_ms) FILTER (WHERE event_type = 'pageview' AND duration_ms IS NOT NULL) AS avg_ms,
                count(*) FILTER (WHERE event_type <> 'pageview') AS errors
         FROM public.nt_activity_events WHERE user_id = ${userId}

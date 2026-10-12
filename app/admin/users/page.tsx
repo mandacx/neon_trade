@@ -2,11 +2,14 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import type { AdminUserSummary } from '@/lib/admin';
+import { formatCT, formatCTDate } from '@/lib/time';
 
 const PAGE_SIZE = 25;
 
 export default function AdminUsersPage() {
+  const router = useRouter();
   const [search, setSearch] = useState('');
   const [users, setUsers] = useState<AdminUserSummary[]>([]);
   const [total, setTotal] = useState(0);
@@ -56,18 +59,27 @@ export default function AdminUsersPage() {
           </thead>
           <tbody className="divide-y divide-gray-50">
             {users.map(u => (
-              <tr key={u.id} className="hover:bg-gray-50">
-                <td className="px-4 py-2">{u.email}</td>
+              <tr
+                key={u.id}
+                onClick={() => {
+                  // Clicking anywhere on the row opens the manage page, unless the user is selecting text.
+                  if (window.getSelection()?.toString()) return;
+                  router.push(`/admin/users/${u.id}`);
+                }}
+                className="hover:bg-blue-50 cursor-pointer"
+                title="Open user"
+              >
+                <td className="px-4 py-2"><Link href={`/admin/users/${u.id}`} onClick={e => e.stopPropagation()} className="text-blue-600 hover:underline">{u.email}</Link></td>
                 <td className="px-4 py-2 text-gray-500">{u.name ?? '—'}</td>
                 <td className="px-4 py-2">
                   <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">{u.plan_code ?? 'FREE'}</span>
                 </td>
                 <td className="px-4 py-2 text-center">{u.role === 'admin' ? '⭐' : ''}</td>
                 <td className="px-4 py-2 text-center">{u.telegram_chat_id ? '✓' : ''}</td>
-                <td className="px-4 py-2 text-right text-gray-500 text-xs">{new Date(u.created_at).toLocaleDateString()}</td>
-                <td className="px-4 py-2 text-right text-gray-500 text-xs whitespace-nowrap">{u.last_seen ? new Date(u.last_seen).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' }) : '—'}</td>
+                <td className="px-4 py-2 text-right text-gray-500 text-xs">{formatCTDate(u.created_at)}</td>
+                <td className="px-4 py-2 text-right text-gray-500 text-xs whitespace-nowrap">{formatCT(u.last_seen)}</td>
                 <td className="px-4 py-2 text-right">
-                  <Link href={`/admin/users/${u.id}`} className="text-blue-600 text-xs font-semibold">Manage →</Link>
+                  <Link href={`/admin/users/${u.id}`} onClick={e => e.stopPropagation()} className="text-blue-600 text-xs font-semibold">Manage →</Link>
                 </td>
               </tr>
             ))}
