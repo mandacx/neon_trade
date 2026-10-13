@@ -7,6 +7,50 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-13 — Index charts (SPX) via Tradier fallback
+
+Reported: the SPX stock chart showed nothing.
+
+### Cause (verified live)
+
+Alpaca's stock-bars API has no indices: `SPX`/`SPXW` return HTTP 200 with `{"bars":{}}`,
+`^GSPC`/`I:SPX` return 400 "invalid symbol"; `SPY` works. `getHistoricalBars` returned `[]`, so
+`/api/stocks/SPX/ohlc` succeeded with no data. The DB does hold SPX levels (`eod_usmkts_price`).
+Tradier serves SPX: quote, daily/weekly/monthly history and 1/5/15-minute timesales.
+
+### What changed
+
+- `lib/tradier.ts`: new `getBarsForChart(symbol, interval, from, to)` returning Alpaca-shaped bars.
+  Daily/weekly/monthly from `/markets/history` (stamped at US/Eastern midnight like Alpaca);
+  1/5/15min from `/markets/timesales` (`session_filter=open`); 30min/1hour aggregated from 15min,
+  bucketed on ET clock boundaries (hourly bars at 09:00, 10:00 … like Alpaca). Tradier limits how
+  far back intraday goes, per interval; the oldest allowed start is read from its 400 message
+  ("start: must be on or after YYYY-MM-DD") and the request is retried once from there.
+- `app/api/stocks/[symbol]/ohlc/route.ts`: if Alpaca returns no bars (or errors), try Tradier; the
+  response now includes `source: 'alpaca' | 'tradier'`. If neither has bars and Alpaca errored, the
+  original error is returned as before.
+
+### Verified (dev server, real calls)
+
+- `/api/stocks/SPX/ohlc`: daily (9 bars), weekly, 15min (clamped from July to the earliest allowed
+  start, 2026-08-17; 1,138 bars), 30min and 1hour all return `source: tradier`. SPY still returns
+  `source: alpaca`. Timestamps match Alpaca's convention (daily 04:00Z; 15min from 09:30 ET).
+- A 5min request for March (older than Tradier keeps) returns an empty set, not an error.
+- `npx tsc --noEmit` passes; eslint 0 errors.
+
+### Not verified / limits
+
+- **No browser check** that the SPX page now draws candles with the level overlays.
+- Index bars have volume 0 (no volume pane). Intraday history is limited to Tradier's window
+  (observed ~57 days for 15min; 1min/5min limits not pinned down).
+- `^GSPC` still errors (Tradier has no such symbol; the route returns the Alpaca 400).
+- Today's bar is live/in progress. A DB-vs-Tradier date offset for SPX (DB `trade_date` 10-13
+  carried the 10-12 close, 7807.24) was noticed and **not investigated**; it could shift levels
+  by a day against candles.
+- Other indices (NDX, RUT, VIX) were not tested.
+
+---
+
 ## 2026-10-13 — More earnings date filters (watchlists + quadrant)
 
 Requested: more date filters wherever the earnings date filter is used.

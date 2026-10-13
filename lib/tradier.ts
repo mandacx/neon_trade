@@ -1,4 +1,5 @@
 import axios, { AxiosInstance } from 'axios';
+import type { AlpacaBar, ChartInterval } from '@/lib/alpaca';
 
 const TRADIER_API_URL = process.env.TRADIER_API_URL || 'https://api.tradier.com/v1';
 const TRADIER_API_KEY = process.env.TRADIER_API_KEY || '';
@@ -145,6 +146,97 @@ export async function getTimeSales(
     console.error('Error fetching time & sales from Tradier:', error);
     throw error;
   }
+}
+
+/**
+ * OHLC bars in Alpaca's shape, for symbols Alpaca has no bars for (indices
+ * such as SPX — its stock-bars API returns `{"bars":{}}` for them). Index bars
+ * carry no volume (Tradier reports 0). Intraday is limited by Tradier to a
+ * recent window that differs per interval; it is read from the 400 message
+ * ("start: must be on or after YYYY-MM-DD") rather than hardcoded, and the
+ * request is retried once from that date (older ranges return no bars).
+ * 30min/1hour are built from 15min bars, bucketed on US/Eastern clock time.
+ */
+export async function getBarsForChart(symbol: string, interval: ChartInterval, from: string, to: string): Promise<AlpacaBar[]> {
+  const sym = symbol.toUpperCase();
+  const longTimeout = { timeout: 10_000 };
+
+  if (interval === 'daily' || interval === 'weekly' || interval === 'monthly') {
+    const res = await tradierClient.get('/markets/history', { params: { symbol: sym, interval, start: from, end: to }, ...longTimeout });
+    const day = res.data?.history?.day;
+    const rows: any[] = !day ? [] : Array.isArray(day) ? day : [day];
+    return rows.map(r => ({
+      // Alpaca stamps daily bars at US/Eastern midnight; match it so day keys line up.
+      t: easternMidnightIso(r.date),
+      o: Number(r.open), h: Number(r.high), l: Number(r.low), c: Number(r.close), v: Number(r.volume) || 0,
+    }));
+  }
+
+  const source: '1min' | '5min' | '15min' = interval === '1min' ? '1min' : interval === '5min' ? '5min' : '15min';
+  // Resolves to the rows, or to the oldest start date Tradier allows when `start` is too old.
+  const fetchRows = async (start: string): Promise<{ rows: any[] } | { oldest: string }> => {
+    const res = await tradierClient.get('/markets/timesales', {
+      params: { symbol: sym, interval: source, start: `${start} 00:00`, end: `${to} 23:59`, session_filter: 'open' },
+      validateStatus: () => true,
+      ...longTimeout,
+    });
+    if (res.status === 400) {
+      const oldest = /on or after (\d{4}-\d{2}-\d{2})/.exec(JSON.stringify(res.data ?? ''))?.[1];
+      if (oldest) return { oldest };
+    }
+    if (res.status >= 400) throw new Error(`Tradier timesales HTTP ${res.status}`);
+    const data = res.data?.series?.data;
+    return { rows: !data ? [] : Array.isArray(data) ? data : [data] };
+  };
+
+  let first = await fetchRows(from);
+  if ('oldest' in first) {
+    if (first.oldest > to) return []; // the whole range is older than Tradier keeps
+    first = await fetchRows(first.oldest);
+  }
+  const rows = 'rows' in first ? first.rows : [];
+
+  const bars: AlpacaBar[] = rows.map(r => ({
+    t: new Date(Number(r.timestamp) * 1000).toISOString(),
+    o: Number(r.open), h: Number(r.high), l: Number(r.low), c: Number(r.close), v: Number(r.volume) || 0,
+  }));
+  if (interval === '30min' || interval === '1hour') return aggregateBars(bars, interval === '30min' ? 30 : 60);
+  return bars;
+}
+
+/** UTC ISO instant of 00:00 America/New_York on a 'YYYY-MM-DD' date (04:00Z in EDT, 05:00Z in EST). */
+function easternMidnightIso(date: string): string {
+  const [y, m, d] = date.split('-').map(Number);
+  const hourET = (ms: number) =>
+    Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', hour12: false }).format(new Date(ms))) % 24;
+  for (const utcHour of [4, 5]) {
+    const ms = Date.UTC(y, m - 1, d, utcHour);
+    if (hourET(ms) === 0) return new Date(ms).toISOString();
+  }
+  return new Date(Date.UTC(y, m - 1, d, 5)).toISOString();
+}
+
+/** Merge ascending bars into N-minute buckets aligned to US/Eastern clock time. */
+function aggregateBars(bars: AlpacaBar[], minutes: number): AlpacaBar[] {
+  const fmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+  const out: AlpacaBar[] = [];
+  let key = '';
+  for (const b of bars) {
+    const parts = fmt.formatToParts(new Date(b.t));
+    const get = (t: string) => parts.find(p => p.type === t)?.value ?? '';
+    const mins = (Number(get('hour')) % 24) * 60 + Number(get('minute'));
+    const k = `${get('year')}-${get('month')}-${get('day')}#${Math.floor(mins / minutes)}`;
+    const last = out[out.length - 1];
+    if (k === key && last) {
+      last.h = Math.max(last.h, b.h); last.l = Math.min(last.l, b.l); last.c = b.c; last.v += b.v;
+    } else {
+      key = k;
+      // Stamp the bucket at its clock boundary (e.g. 09:00 for the 09:30 bar), as Alpaca does.
+      const start = Math.floor(Date.parse(b.t) / 60_000) * 60_000 - (mins % minutes) * 60_000;
+      out.push({ ...b, t: new Date(start).toISOString() });
+    }
+  }
+  return out;
 }
 
 /**

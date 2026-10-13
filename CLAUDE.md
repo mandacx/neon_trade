@@ -29,12 +29,14 @@ There is no test suite/framework configured in this repo.
 Three services this app depends on, all configured via env vars (see `.env.example`):
 
 - **Neon (Postgres)** — `DATABASE_URL`. Primary data store. Accessed through `lib/db.ts` via `@neondatabase/serverless`'s `neon()` tagged-template client (HTTP-based, no connection pooling to manage). `lib/db.ts` throws at import time if `DATABASE_URL` is unset, so any route importing it will fail hard without it.
-- **Tradier** — `TRADIER_API_KEY`, `TRADIER_API_URL`. Used only for stock search, as the *remote* half (`lib/tradier.ts` → `searchCompanies` for names, `searchSymbols` for tickers). Missing key logs a warning, not a hard failure.
+- **Tradier** — `TRADIER_API_KEY`, `TRADIER_API_URL`. Used for stock search, as the *remote* half (`lib/tradier.ts` → `searchCompanies` for names, `searchSymbols` for tickers). Missing key logs a warning, not a hard failure.
   - **Search is local-first** (`lib/symbolSearch.ts`, `app/api/stocks/search?scope=local|remote`). An in-memory index of our ~750 symbols + `securities` names answers ticker *and* company-name queries in ~2ms. Tradier's matches are a second request appended by `components/ui/useSymbolSearch.ts`, so its slow responses (often near the 2s client timeout) never delay the dropdown.
   - Remote symbols are normalized: `BRK/B` → `BRK.B`, and anything the stock page wouldn't accept is dropped.
 - **Alpaca Markets** — `ALPACA_API_KEY`, `ALPACA_SECRET_KEY`, `ALPACA_BASE_URL`. Used for all OHLC/candlestick/bar data (`lib/alpaca.ts`, plus an inline fetch client duplicated in `app/api/home/data/route.ts`). Uses the IEX feed (`feed: 'iex'`) for free-tier compatibility and requests split-adjusted prices (`adjustment: 'split'`).
 
-Note the split from what `README.md`/`QUICK_START.md` describe: those docs predate the current code and describe Tradier as the OHLC source — in the actual code, **Alpaca provides OHLC/bars, Tradier only provides symbol search**. Trust the code in `lib/` over the older docs when they disagree.
+Tradier is also the **OHLC fallback for symbols Alpaca has no bars for** (indices such as SPX): `getBarsForChart` in `lib/tradier.ts`, called from `app/api/stocks/[symbol]/ohlc/route.ts` only when Alpaca returns nothing. Index bars have no volume.
+
+Note the split from what `README.md`/`QUICK_START.md` describe: those docs predate the current code and describe Tradier as the OHLC source — in the actual code, **Alpaca provides OHLC/bars, Tradier provides symbol search plus the index OHLC fallback above**. Trust the code in `lib/` over the older docs when they disagree.
 
 **Deployment**: hosted on Vercel, connected to the same Neon Postgres instance and Tradier API in production as in local dev — set `DATABASE_URL`, `TRADIER_API_KEY`, `TRADIER_API_URL`, `ALPACA_API_KEY`, `ALPACA_SECRET_KEY`, `ALPACA_BASE_URL` as Vercel project environment variables. API routes that read these are Node runtime by default (no `export const runtime = 'edge'` present), so Vercel serverless functions handle them.
 

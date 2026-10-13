@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getHistoricalBars, convertIntervalToTimeframe, ChartInterval } from '@/lib/alpaca';
+import type { AlpacaBar } from '@/lib/alpaca';
+import { getBarsForChart } from '@/lib/tradier';
 import { usTradingDayKey } from '@/lib/utils';
 import { format, subDays } from 'date-fns';
 
@@ -26,8 +28,30 @@ export async function GET(
     // Convert interval to Alpaca timeframe format
     const timeframe = convertIntervalToTimeframe(interval);
 
-    // Fetch OHLC data from Alpaca
-    const bars = await getHistoricalBars(symbol, timeframe, from, to);
+    // Fetch OHLC data from Alpaca. Alpaca's stock-bars API has no indices (SPX
+    // returns an empty set, ^GSPC a 400), so when it has nothing for the symbol
+    // the bars come from Tradier instead.
+    let bars: AlpacaBar[] = [];
+    let alpacaError: unknown = null;
+    try {
+      bars = await getHistoricalBars(symbol, timeframe, from, to);
+    } catch (err) {
+      alpacaError = err;
+    }
+    let source: 'alpaca' | 'tradier' = 'alpaca';
+    if (bars.length === 0) {
+      try {
+        const fallback = await getBarsForChart(symbol, interval, from, to);
+        if (fallback.length > 0) {
+          bars = fallback;
+          source = 'tradier';
+        }
+      } catch (err) {
+        console.error('Tradier OHLC fallback failed:', err instanceof Error ? err.message : err);
+      }
+    }
+    // Neither source has bars and Alpaca errored: report that error as before.
+    if (bars.length === 0 && alpacaError) throw alpacaError;
 
     // Transform Alpaca data to our format. `timestamp` (epoch seconds) is the
     // chart's canonical time — `date` is the US trading-day it falls on, used to
@@ -52,6 +76,7 @@ export async function GET(
         interval,
         from,
         to,
+        source,
         data: ohlcData,
       },
     });
