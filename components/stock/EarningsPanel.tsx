@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import type { EarningsResult, EarningsSummary } from '@/types/earnings';
 import {
-  LastResultBadge, fmtExpiry, fmtShortDate, fmtEps, fmtSales, earningsTimeShort, earningsTimeLong,
+  LastResultBadge, fmtExpiry, fmtShortDate, fmtNextDate, fmtEps, fmtSales, earningsTimeShort, earningsTimeLong,
 } from '@/components/watchlists/watchlistShared';
 
 /**
@@ -44,11 +44,12 @@ export function EarningsHeaderLines({ earnings, locked }: { earnings: EarningsSu
   return (
     <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-600">
       {next && (
-        <span title={`Next earnings ${fmtExpiry(next.date)}, ${earningsTimeLong(next.time)}`}>
+        <span title={`Next earnings ${fmtExpiry(next.date)}, ${next.estimated ? 'estimated date, not yet confirmed' : earningsTimeLong(next.time)}`}>
           Next earnings:{' '}
           <strong className="text-gray-800">
-            {fmtShortDate(next.date)}{earningsTimeShort(next.time) && ` · ${earningsTimeShort(next.time)}`}
+            {fmtNextDate(next.date, next.estimated)}{earningsTimeShort(next.time) && ` · ${earningsTimeShort(next.time)}`}
           </strong>{' '}
+          {next.estimated && <span className="text-gray-400">(est.) </span>}
           <span className={next.daysUntil <= 7 ? 'text-amber-700 font-semibold' : 'text-gray-500'}>
             {next.daysUntil === 0 ? 'today' : `in ${next.daysUntil}d`}
           </span>

@@ -564,6 +564,7 @@ export async function getEarningsSummary(symbols: string[]): Promise<Map<string,
         time: (r.time_of_day ?? null) as EarningsTime,
         epsEstimate: num(r.eps_estimate),
         daysUntil: daysBetween(today, r.report_date),
+        estimated: !r.time_of_day,
       };
     }
     for (const r of lastRows as any[]) out.get(r.symbol)!.last = toResult(r);
@@ -586,6 +587,7 @@ export function earningsBadge(summary: EarningsSummary | null | undefined, expir
   return {
     nextDate: summary.next?.date ?? null,
     nextTime: summary.next?.time ?? null,
+    nextEstimated: summary.next?.estimated ?? false,
     daysUntil: summary.next?.daysUntil ?? null,
     beforeExpiry: !!summary.next && !!expiryDate && summary.next.date <= expiryDate,
     lastDate: summary.last?.date ?? null,
@@ -673,7 +675,7 @@ export async function getEarningsEvents(symbols: string[], opts: { aheadDays?: n
     const events: EarningsEvent[] = [
       ...(upcoming as any[]).map(r => ({
         symbol: r.symbol, kind: 'upcoming' as const, date: r.report_date, time: (r.time_of_day ?? null) as EarningsTime,
-        daysUntil: daysBetween(today, r.report_date), epsEstimate: num(r.eps_estimate),
+        daysUntil: daysBetween(today, r.report_date), epsEstimate: num(r.eps_estimate), estimated: !r.time_of_day,
         epsActual: null, epsSurprisePct: null, epsOutcome: null,
       })),
       ...(reported as any[]).map(r => {

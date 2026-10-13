@@ -3,6 +3,7 @@ import { formatCurrency, getLevelColor, getLevelDisplayName } from '@/lib/utils'
 import { rebaseLevels, findClosestLevel } from '@/lib/calculations';
 import type { LevelCalculation } from '@/types/stock';
 import type { EarningsOutcome, EarningsSummary, EarningsTime } from '@/types/earnings';
+import { EARNINGS_FILTER_OPTIONS, earningsFilterMatches, type EarningsFilter } from '@/lib/earningsFilter';
 
 // Types, helpers and table cells shared by the full Watchlists page and the
 // split-pane Watchlist View.
@@ -181,6 +182,11 @@ export function earningsTimeLong(time: EarningsTime): string {
   return time === 'pre-market' ? 'before the open' : time === 'post-market' ? 'after the close' : time === 'during-market' ? 'during market hours' : 'time not announced';
 }
 
+/** "~Nov 4" for a projected date the company hasn't confirmed yet. */
+export function fmtNextDate(date: string, estimated?: boolean): string {
+  return `${estimated ? '~' : ''}${fmtShortDate(date)}`;
+}
+
 export function daysUntilLabel(days: number): string {
   if (days === 0) return 'Today';
   if (days === 1) return 'Tmrw';
@@ -216,19 +222,19 @@ export function NextEarningsCell({ earnings, compact = false }: { earnings: Earn
     }
     return <span className="text-xs text-gray-300">—</span>;
   }
-  const title = `Next earnings ${fmtExpiry(next.date)} (${earningsTimeLong(next.time)})${next.epsEstimate != null ? ` · EPS est ${fmtEps(next.epsEstimate)}` : ''}`;
+  const title = `Next earnings ${fmtExpiry(next.date)} (${next.estimated ? 'estimated date, not yet confirmed' : earningsTimeLong(next.time)})${next.epsEstimate != null ? ` · EPS est ${fmtEps(next.epsEstimate)}` : ''}`;
   const session = earningsTimeShort(next.time);
   if (compact) {
     return (
       <span title={title} className={`inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-semibold tabular-nums whitespace-nowrap ${nextTone(next.daysUntil)}`}>
-        E {daysUntilLabel(next.daysUntil)}
+        E{next.estimated && '~'} {daysUntilLabel(next.daysUntil)}
       </span>
     );
   }
   return (
     <div className="text-right whitespace-nowrap" title={title}>
       <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-semibold tabular-nums ${nextTone(next.daysUntil)}`}>
-        {fmtShortDate(next.date)}{session && ` · ${session}`}
+        {fmtNextDate(next.date, next.estimated)}{session && ` · ${session}`}
       </span>
       <div className="text-[10px] text-gray-400 mt-0.5 tabular-nums">
         {next.daysUntil === 0 ? 'today' : `in ${next.daysUntil}d`}{next.epsEstimate != null && ` · est ${fmtEps(next.epsEstimate)}`}
@@ -273,40 +279,43 @@ export function LastResultBadge({ earnings }: { earnings: EarningsSummary | null
   );
 }
 
-export type EarningsFilter = '' | 'today' | 'week' | '7' | '14' | '30' | 'beforeExpiry' | 'reported7';
-export const EARNINGS_FILTER_OPTIONS: { value: EarningsFilter; label: string }[] = [
-  { value: '', label: 'Any' },
-  { value: 'today', label: 'Reporting today' },
-  { value: 'week', label: 'This week' },
-  { value: '7', label: 'Next 7 days' },
-  { value: '14', label: 'Next 14 days' },
-  { value: '30', label: 'Next 30 days' },
-  { value: 'beforeExpiry', label: 'Before selected expiry' },
-  { value: 'reported7', label: 'Reported last 7 days' },
-];
+export { EARNINGS_FILTER_OPTIONS, type EarningsFilter };
 
-/** Days left in the current Mon–Fri week, US/Eastern (Fri → 0; on a weekend, through next Friday). */
-function daysToFriday(today: string): number {
-  const dow = new Date(`${today}T00:00:00Z`).getUTCDay(); // 0 Sun … 6 Sat
-  return dow === 6 ? 6 : dow === 0 ? 5 : 5 - dow;
+/** Filters that only make sense with a selected expiry. */
+export const EXPIRY_EARNINGS_FILTERS: EarningsFilter[] = ['beforeExpiry', 'afterExpiry'];
+
+export function earningsMatches(
+  e: EarningsSummary | null | undefined,
+  filter: EarningsFilter,
+  selectedExpiry: string | null,
+  range?: { from?: string; to?: string },
+): boolean {
+  if (!filter) return true;
+  const nextDate = e?.next?.date ?? null;
+  const reportedDate = [e?.last?.date, e?.pending?.date].filter((d): d is string => !!d).sort().pop() ?? null;
+  return earningsFilterMatches(
+    {
+      nextDate,
+      nextEstimated: !!e?.next?.estimated,
+      reportedDate,
+      beforeExpiry: !!nextDate && !!selectedExpiry && nextDate <= selectedExpiry,
+    },
+    filter,
+    { today: easternToday(), from: range?.from, to: range?.to },
+  );
 }
 
-export function earningsMatches(e: EarningsSummary | null | undefined, filter: EarningsFilter, selectedExpiry: string | null): boolean {
-  if (!filter) return true;
-  const today = easternToday();
-  const days = e?.next?.daysUntil;
-  switch (filter) {
-    case 'today': return days === 0;
-    case 'week': return days != null && days <= daysToFriday(today);
-    case '7': return days != null && days <= 7;
-    case '14': return days != null && days <= 14;
-    case '30': return days != null && days <= 30;
-    case 'beforeExpiry': return !!e?.next && !!selectedExpiry && e.next.date <= selectedExpiry;
-    case 'reported7': {
-      const latest = [e?.last?.date, e?.pending?.date].filter((d): d is string => !!d).sort().pop();
-      return !!latest && daysFrom(latest, today) >= 0 && daysFrom(latest, today) <= 7;
-    }
-  }
+/** From/To date inputs shown when the Earnings filter is "Custom date range". */
+export function EarningsRangeInputs({ from, to, onChange, className }: {
+  from: string; to: string; onChange: (from: string, to: string) => void; className?: string;
+}) {
+  return (
+    <div className="flex items-center gap-1.5 mt-1.5">
+      <input type="date" value={from} max={to || undefined} onChange={e => onChange(e.target.value, to)} className={className} aria-label="Earnings from date" />
+      <span className="text-xs text-gray-400">to</span>
+      <input type="date" value={to} min={from || undefined} onChange={e => onChange(from, e.target.value)} className={className} aria-label="Earnings to date" />
+    </div>
+  );
 }
 
 /** Sort keys (the tables' comparators put nulls last). */

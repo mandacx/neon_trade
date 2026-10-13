@@ -272,7 +272,7 @@ export default function QuadrantChart({ data, onStockClick, height = 600, title 
             {d.loadDateTime && <p>Alert loaded: {d.loadDateTime}</p>}
             {d.earnings?.nextDate && (
               <p className={d.earnings.beforeExpiry ? 'text-amber-700 font-semibold' : ''}>
-                Earnings: {d.earnings.nextDate}
+                Earnings: {d.earnings.nextEstimated ? '~' : ''}{d.earnings.nextDate}{d.earnings.nextEstimated && ' (estimated)'}
                 {d.earnings.nextTime === 'pre-market' ? ' (before open)' : d.earnings.nextTime === 'post-market' ? ' (after close)' : ''}
                 {d.earnings.daysUntil != null && ` · in ${d.earnings.daysUntil}d`}
                 {d.earnings.beforeExpiry && ' · before expiry'}

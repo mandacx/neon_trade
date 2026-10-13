@@ -9,7 +9,7 @@ import { getLevelDisplayName } from '@/lib/utils';
 import {
   type WatchlistSummary, type QuoteRow, type LevelRow, type LevelKey, LEVEL_FILTER_OPTIONS,
   rebaseToLtp, fmtExpiry, fmtPrice, fmtVolume, ChangeCell, ChangePercentCell, ChangeDot, LevelCell,
-  type EarningsFilter, EARNINGS_FILTER_OPTIONS, earningsMatches, nextEarningsSortValue, lastResultSortValue,
+  type EarningsFilter, EARNINGS_FILTER_OPTIONS, EXPIRY_EARNINGS_FILTERS, EarningsRangeInputs, earningsMatches, nextEarningsSortValue, lastResultSortValue,
   NextEarningsCell, LastResultBadge,
 } from '@/components/watchlists/watchlistShared';
 
@@ -68,6 +68,8 @@ export default function WatchlistsPage() {
   const [proximityThreshold, setProximityThreshold] = useState(5);
   const [earningsEnabled, setEarningsEnabled] = useState(false);
   const [earningsFilter, setEarningsFilter] = useState<EarningsFilter>('');
+  const [earningsFrom, setEarningsFrom] = useState('');
+  const [earningsTo, setEarningsTo] = useState('');
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [viewMode, setViewMode] = useState<ViewMode>('thin');
@@ -101,7 +103,7 @@ export default function WatchlistsPage() {
       const distancePercent = levelBySymbol.get(r.symbol)?.distancePercent;
       if (distancePercent == null || Math.abs(distancePercent) > proximityThreshold) return false;
     }
-    if (earningsEnabled && !earningsMatches(r.earnings, earningsFilter, selectedExpiry || null)) return false;
+    if (earningsEnabled && !earningsMatches(r.earnings, earningsFilter, selectedExpiry || null, { from: earningsFrom, to: earningsTo })) return false;
     return true;
   });
   const colOn = (k: ColumnKey) => visibleCols.has(k) && (earningsEnabled || !EARNINGS_COLUMNS.has(k));
@@ -388,12 +390,17 @@ export default function WatchlistsPage() {
                       onChange={e => setEarningsFilter(e.target.value as EarningsFilter)}
                       className="px-3 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white"
                     >
-                      {EARNINGS_FILTER_OPTIONS.filter(o => o.value !== 'beforeExpiry' || selectedExpiry).map(o => (
+                      {EARNINGS_FILTER_OPTIONS.filter(o => !EXPIRY_EARNINGS_FILTERS.includes(o.value) || selectedExpiry).map(o => (
                         <option key={o.value} value={o.value}>
-                          {o.value === 'beforeExpiry' ? `Before ${fmtExpiry(selectedExpiry)} expiry` : o.label}
+                          {o.value === 'beforeExpiry' ? `Before ${fmtExpiry(selectedExpiry)} expiry` : o.value === 'afterExpiry' ? `After ${fmtExpiry(selectedExpiry)} expiry` : o.label}
                         </option>
                       ))}
                     </select>
+                    {earningsFilter === 'range' && (
+                      <EarningsRangeInputs from={earningsFrom} to={earningsTo}
+                        className="px-2 py-1.5 border border-gray-200 rounded-lg text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white"
+                        onChange={(f, t) => { setEarningsFrom(f); setEarningsTo(t); }} />
+                    )}
                   </div>
                 )}
               </div>

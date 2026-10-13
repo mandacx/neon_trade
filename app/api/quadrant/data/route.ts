@@ -7,7 +7,8 @@ import { format } from 'date-fns';
 import { requireFeatureApi } from '@/lib/routeGuards';
 import { levelGate } from '@/lib/levelAccess';
 import { FEATURE_EARNINGS, FEATURE_QUADRANT, FEATURE_WATCHLISTS, hasFeature } from '@/lib/features';
-import { earningsBadge, getEarningsSummary } from '@/lib/earnings';
+import { earningsBadge, getEarningsSummary, todayET } from '@/lib/earnings';
+import { EARNINGS_FILTER_OPTIONS, earningsFilterMatches, type EarningsFilter } from '@/lib/earningsFilter';
 import { getWatchlistsForUser, getWatchlistSymbols } from '@/lib/watchlists';
 
 export async function GET(request: NextRequest) {
@@ -31,7 +32,12 @@ export async function GET(request: NextRequest) {
     // 'week' (reports within 7 days), 'beforeExpiry' (reports on/before the
     // row's expiry), 'exclude' (drop those that do).
     const earningsEnabled = hasFeature(ctx.features, FEATURE_EARNINGS);
-    const earningsFilter = earningsEnabled ? searchParams.get('earnings') : null;
+    const rawEarnings = earningsEnabled ? searchParams.get('earnings') : null;
+    // Unknown values are ignored rather than filtering everything out.
+    const earningsFilter = rawEarnings === 'exclude' || EARNINGS_FILTER_OPTIONS.some(o => o.value === rawEarnings) ? rawEarnings : null;
+    const isoDate = (v: string | null) => (v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null);
+    const earningsFrom = isoDate(searchParams.get('earningsFrom'));
+    const earningsTo = isoDate(searchParams.get('earningsTo'));
 
     // If requesting metadata only (dates + filter options)
     if (metadataOnly) {
@@ -168,10 +174,18 @@ export async function GET(request: NextRequest) {
       .filter(s => {
         if (!earningsFilter) return true;
         const e = s.earnings;
-        if (earningsFilter === 'week') return e?.daysUntil != null && e.daysUntil <= 7;
-        if (earningsFilter === 'beforeExpiry') return !!e?.beforeExpiry;
+        // 'exclude' predates the shared filters: keeps rows with no report at all.
         if (earningsFilter === 'exclude') return !e?.beforeExpiry;
-        return true;
+        return earningsFilterMatches(
+          {
+            nextDate: e?.nextDate ?? null,
+            nextEstimated: !!e?.nextEstimated,
+            reportedDate: e?.lastDate ?? null,
+            beforeExpiry: !!e?.beforeExpiry,
+          },
+          earningsFilter as EarningsFilter,
+          { today: todayET(), from: earningsFrom, to: earningsTo },
+        );
       });
 
     const tradeDate = processedStocks.length > 0

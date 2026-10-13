@@ -7,7 +7,7 @@ import ScanAlertsTicker from '@/components/ui/ScanAlertsTicker';
 import EarningsBadgeCell from '@/components/ui/EarningsBadgeCell';
 import { useAuthContext } from '@/components/providers/AuthContextProvider';
 import { FEATURE_EARNINGS, hasFeature } from '@/lib/features';
-import { fmtShortDate, earningsTimeShort, daysUntilLabel } from '@/components/watchlists/watchlistShared';
+import { fmtShortDate, fmtNextDate, earningsTimeShort, daysUntilLabel } from '@/components/watchlists/watchlistShared';
 import type { EarningsBadge, EarningsEvent } from '@/types/earnings';
 
 type HomeEarningsEvent = EarningsEvent & { name: string | null };
@@ -194,7 +194,7 @@ function EarningsEventRow({ e, onClick }: { e: HomeEarningsEvent; onClick: () =>
       </div>
       {e.kind === 'upcoming' ? (
         <div className="text-right shrink-0">
-          <div className="text-xs text-gray-700">{fmtShortDate(e.date)}{earningsTimeShort(e.time) && ` · ${earningsTimeShort(e.time)}`}</div>
+          <div className="text-xs text-gray-700">{fmtNextDate(e.date, e.estimated)}{earningsTimeShort(e.time) && ` · ${earningsTimeShort(e.time)}`}</div>
           <div className={`text-[10px] font-semibold ${e.daysUntil <= 1 ? 'text-red-600' : 'text-amber-700'}`}>{e.daysUntil <= 1 ? daysUntilLabel(e.daysUntil) : `in ${e.daysUntil}d`}</div>
         </div>
       ) : (

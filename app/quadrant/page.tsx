@@ -2,6 +2,8 @@
 
 import { useEffect, useState, Suspense } from 'react';
 import EarningsBadgeCell from '@/components/ui/EarningsBadgeCell';
+import { EarningsRangeInputs } from '@/components/watchlists/watchlistShared';
+import { EARNINGS_FILTER_OPTIONS } from '@/lib/earningsFilter';
 import { useSearchParams } from 'next/navigation';
 import QuadrantChart from '@/components/charts/QuadrantChart';
 import Header from '@/components/layout/Header';
@@ -61,9 +63,11 @@ function QuadrantPageInner() {
   const [marketCapTier, setMarketCapTier] = useState(searchParams.get('marketCapTier') || '');
   const [indexCode, setIndexCode] = useState(searchParams.get('index') || '');
   const [watchlistId, setWatchlistId] = useState(searchParams.get('watchlist') || '');
-  // Pro earnings filter: '' | 'week' | 'beforeExpiry' | 'exclude' (see /api/quadrant/data).
+  // Pro earnings filter: any EarningsFilter value or 'exclude' (see /api/quadrant/data).
   const [earningsEnabled, setEarningsEnabled] = useState(false);
   const [earningsFilter, setEarningsFilter] = useState(searchParams.get('earnings') || '');
+  const [earningsFrom, setEarningsFrom] = useState(searchParams.get('earningsFrom') || '');
+  const [earningsTo, setEarningsTo] = useState(searchParams.get('earningsTo') || '');
 
   useEffect(() => {
     const fetchMetadata = async () => {
@@ -100,6 +104,10 @@ function QuadrantPageInner() {
         if (indexCode) params.set('index', indexCode);
         if (watchlistId) params.set('watchlist', watchlistId);
         if (earningsFilter) params.set('earnings', earningsFilter);
+        if (earningsFilter === 'range') {
+          if (earningsFrom) params.set('earningsFrom', earningsFrom);
+          if (earningsTo) params.set('earningsTo', earningsTo);
+        }
         const response = await fetch(`/api/quadrant/data?${params}`);
         if (!response.ok) throw new Error('Failed to fetch quadrant data');
         const result = await response.json();
@@ -115,7 +123,7 @@ function QuadrantPageInner() {
       }
     };
     fetchData();
-  }, [tradeDate, expiryDate, sector, industry, marketCapTier, indexCode, watchlistId, earningsFilter]);
+  }, [tradeDate, expiryDate, sector, industry, marketCapTier, indexCode, watchlistId, earningsFilter, earningsFrom, earningsTo]);
 
   useEffect(() => {
     let filtered = stocks;
@@ -251,17 +259,21 @@ function QuadrantPageInner() {
                     <div>
                       <label className={labelClass}>Earnings</label>
                       <select value={earningsFilter} onChange={e => setEarningsFilter(e.target.value)} className={selectClass}>
-                        <option value="">Any</option>
-                        <option value="week">Reporting within 7 days</option>
-                        <option value="beforeExpiry">Reports before expiry</option>
+                        {EARNINGS_FILTER_OPTIONS.map(o => (
+                          <option key={o.value} value={o.value}>{o.label}</option>
+                        ))}
                         <option value="exclude">Exclude reports before expiry</option>
                       </select>
+                      {earningsFilter === 'range' && (
+                        <EarningsRangeInputs from={earningsFrom} to={earningsTo} className={selectClass}
+                          onChange={(f, t) => { setEarningsFrom(f); setEarningsTo(t); }} />
+                      )}
                     </div>
                   )}
                   {hasActiveFilters && (
                     <div className="flex items-end pb-0.5">
                       <button
-                        onClick={() => { setSector(''); setIndustry(''); setMarketCapTier(''); setIndexCode(''); setWatchlistId(''); setEarningsFilter(''); }}
+                        onClick={() => { setSector(''); setIndustry(''); setMarketCapTier(''); setIndexCode(''); setWatchlistId(''); setEarningsFilter(''); setEarningsFrom(''); setEarningsTo(''); }}
                         className="px-2.5 py-1.5 text-xs text-gray-500 border border-gray-200 rounded-md hover:bg-gray-50"
                       >
                         Clear

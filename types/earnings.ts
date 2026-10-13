@@ -8,6 +8,12 @@ export interface UpcomingEarnings {
   epsEstimate: number | null;
   /** Calendar days from today (US/Eastern); 0 = today. */
   daysUntil: number;
+  /**
+   * True when the source gave no session (BMO/AMC). Alpha Vantage only sets a
+   * session once the company has announced the date, so a blank one is treated
+   * as a projected, unconfirmed date.
+   */
+  estimated: boolean;
 }
 
 /** A reported quarter. */
@@ -42,6 +48,7 @@ export interface EarningsSummary {
 export interface EarningsBadge {
   nextDate: string | null;
   nextTime: EarningsTime;
+  nextEstimated: boolean;
   daysUntil: number | null;
   beforeExpiry: boolean;
   lastDate: string | null;
@@ -56,6 +63,7 @@ export interface EarningsEvent {
   date: string;
   time: EarningsTime;
   daysUntil: number; // negative for past events
+  estimated?: boolean; // upcoming only: date not yet confirmed by the company
   epsEstimate: number | null;
   epsActual: number | null;
   epsSurprisePct: number | null;

@@ -8,7 +8,7 @@ import { getLevelDisplayName, isUsMarketHours } from '@/lib/utils';
 import {
   type WatchlistSummary, type QuoteRow, type LevelRow, type LevelKey, LEVEL_FILTER_OPTIONS,
   rebaseToLtp, fmtExpiry, fmtPrice, ChangeCell, ChangePercentCell, ChangeDot, LevelCell,
-  type EarningsFilter, EARNINGS_FILTER_OPTIONS, earningsMatches, nextEarningsSortValue, NextEarningsCell,
+  type EarningsFilter, EARNINGS_FILTER_OPTIONS, EXPIRY_EARNINGS_FILTERS, EarningsRangeInputs, earningsMatches, nextEarningsSortValue, NextEarningsCell,
 } from '@/components/watchlists/watchlistShared';
 
 type SortKey = 'symbol' | 'lastPrice' | 'change' | 'changePercent' | 'level' | 'earnings';
@@ -75,6 +75,8 @@ export default function WatchlistViewPage() {
   const [levelFilter, setLevelFilter] = useState<LevelKey | ''>('');
   const [earningsEnabled, setEarningsEnabled] = useState(false);
   const [earningsFilter, setEarningsFilter] = useState<EarningsFilter>('');
+  const [earningsFrom, setEarningsFrom] = useState('');
+  const [earningsTo, setEarningsTo] = useState('');
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [symbol, setSymbol] = useState<string | null>(null);
@@ -99,7 +101,7 @@ export default function WatchlistViewPage() {
     const filtered = (rows ?? []).filter(r => {
       if (q && !r.symbol.includes(q) && !r.name.toUpperCase().includes(q)) return false;
       if (levelFilter && levelBySymbol.get(r.symbol)?.closestLevel !== levelFilter) return false;
-      if (earningsEnabled && !earningsMatches(r.earnings, earningsFilter, selectedExpiry || null)) return false;
+      if (earningsEnabled && !earningsMatches(r.earnings, earningsFilter, selectedExpiry || null, { from: earningsFrom, to: earningsTo })) return false;
       return true;
     });
     if (!sortKey) return filtered;
@@ -125,7 +127,7 @@ export default function WatchlistViewPage() {
       const cmp = typeof av === 'string' ? av.localeCompare(bv as string) : (av as number) - (bv as number);
       return sortDir === 'asc' ? cmp : -cmp;
     });
-  }, [rows, search, levelFilter, levelBySymbol, sortKey, sortDir, earningsEnabled, earningsFilter, selectedExpiry]);
+  }, [rows, search, levelFilter, levelBySymbol, sortKey, sortDir, earningsEnabled, earningsFilter, earningsFrom, earningsTo, selectedExpiry]);
 
   // Read saved widths after mount (not in the initial state) so server and
   // client render the same markup.
@@ -474,12 +476,16 @@ export default function WatchlistViewPage() {
                   <div>
                     <label className={labelClass}>Earnings</label>
                     <select value={earningsFilter} onChange={e => setEarningsFilter(e.target.value as EarningsFilter)} className={controlClass}>
-                      {EARNINGS_FILTER_OPTIONS.filter(o => o.value !== 'beforeExpiry' || selectedExpiry).map(o => (
+                      {EARNINGS_FILTER_OPTIONS.filter(o => !EXPIRY_EARNINGS_FILTERS.includes(o.value) || selectedExpiry).map(o => (
                         <option key={o.value} value={o.value}>
-                          {o.value === 'beforeExpiry' ? `Before ${fmtExpiry(selectedExpiry)} expiry` : o.label}
+                          {o.value === 'beforeExpiry' ? `Before ${fmtExpiry(selectedExpiry)} expiry` : o.value === 'afterExpiry' ? `After ${fmtExpiry(selectedExpiry)} expiry` : o.label}
                         </option>
                       ))}
                     </select>
+                    {earningsFilter === 'range' && (
+                      <EarningsRangeInputs from={earningsFrom} to={earningsTo} className={controlClass}
+                        onChange={(f, t) => { setEarningsFrom(f); setEarningsTo(t); }} />
+                    )}
                   </div>
                 )}
               </div>

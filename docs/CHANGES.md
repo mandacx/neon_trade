@@ -7,6 +7,79 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-13 — More earnings date filters (watchlists + quadrant)
+
+Requested: more date filters wherever the earnings date filter is used.
+
+### What changed
+
+- New pure module `lib/earningsFilter.ts` (shared by client and server): one filter list + matcher.
+  Options: today, tomorrow, this week, **next week**, next 7/14/30/**60/90** days, **this month**,
+  **custom From/To range**, before / **after** selected expiry, reported today-or-yesterday /
+  7 / **14 / 30** days, **date confirmed / estimated**, **no upcoming date**. (Bold = new.)
+- Watchlists (`app/watchlists/page.tsx`, `app/watchlists/view/page.tsx`): use the shared list;
+  From/To inputs appear for "Custom date range"; expiry-based options only show with a selected expiry.
+  `earningsMatches` in `components/watchlists/watchlistShared.tsx` now delegates to the shared matcher.
+- Quadrant (`app/quadrant/page.tsx`, `app/api/quadrant/data/route.ts`): same list plus the existing
+  "Exclude reports before expiry"; `earningsFrom` / `earningsTo` query params (YYYY-MM-DD validated);
+  unknown `earnings` values are ignored instead of emptying the list.
+- **Behavior change:** quadrant `earnings=week` used to mean "within 7 days"; it now means the
+  calendar week (Mon–Fri, like watchlists). Use `earnings=7` for the old meaning. Old bookmarked URLs
+  with `week` get the new meaning.
+
+### Verified
+
+- `npx tsc --noEmit` passes; eslint on touched files: 0 errors.
+- 26 matcher cases run with fixed dates (today = Tue 2026-10-13, plus a Saturday): week/next-week
+  boundaries, 60-day edge, month, open-ended range, after-expiry, reported windows, confirmed/estimated, none.
+
+### Not verified
+
+- No browser check of the dropdowns / date inputs; the quadrant route was not called over HTTP.
+- Quadrant rows only know the *last reported* date (no pending-result date), so its "Reported …"
+  filters can miss a report whose result hasn't been stored yet.
+- Not covered: home "Earnings This Week" card and the alerts widget have no filter (none existed).
+
+---
+
+## 2026-10-13 — Mark unconfirmed earnings dates as estimates (`~Nov 4`)
+
+Reported: META showed Nov 4 (user says Oct 21), MSFT also looked wrong.
+
+### Investigation (verified)
+
+- Fetched the live Alpha Vantage `EARNINGS_CALENDAR` CSV and compared it with `nt_earnings_calendar`:
+  stored rows equal the feed (parse/store is correct). META = 2026-11-04 with a blank
+  `timeOfTheDay`; MSFT = 2026-10-28 `post-market`. The 10-09 snapshot had MSFT on 11-04
+  (now `dropped`); the 10-13 sync moved it to 10-28.
+- Pattern in our stored snapshots: confirmed dates carry `pre-/post-market`; dates with a
+  blank time moved later (GOOGL 11-04 -> 10-28, AAPL 10-29 -> 11-02, MSFT 11-04 -> 10-28).
+  So a blank time looks like a projected date. *Inferred from a few symbols, not documented by
+  Alpha Vantage.*
+- Cadence: calendar is fetched once per UTC day, weekdays only, by the first `earnings-cron`
+  run inside 06:30-19:30 ET (stored `last_seen_at` 10:32 UTC = 06:32 ET). Not on weekends.
+- META's true date (user: Oct 21) could not be confirmed from any source I could reach.
+
+### What changed
+
+| Area | Files |
+|---|---|
+| `estimated` flag (`!time_of_day`) on `UpcomingEarnings`, `EarningsBadge.nextEstimated`, `EarningsEvent.estimated` | `types/earnings.ts`, `lib/earnings.ts` |
+| `~` prefix / "estimated, not yet confirmed" tooltips: stock panel, watchlist cell (full + compact `E~`), badge cell (`ER~`), home + alerts widget lists, quadrant tooltip | `components/watchlists/watchlistShared.tsx` (new `fmtNextDate`), `components/stock/EarningsPanel.tsx`, `components/ui/EarningsBadgeCell.tsx`, `components/watchlists/AlertsWidget.tsx`, `app/page.tsx`, `components/charts/QuadrantChart.tsx` |
+
+### Verified / not verified
+
+- `npx tsc --noEmit` passes.
+- *Not verified:* no browser check of the new labels; Telegram line and TVChart earnings markers
+  do not show the estimate marker; the "blank time = estimate" rule is a heuristic.
+
+### Follow-ups
+
+- A confirmed-date source (company IR / Benzinga "to announce" headlines) or an admin override
+  would fix wrong dates, not just label them.
+
+---
+
 ## 2026-10-12 — User / session history on the dashboard, clickable user rows
 
 Requested: on the admin dashboard, selecting a user name or a session should show

@@ -1,5 +1,5 @@
 import type { EarningsBadge } from '@/types/earnings';
-import { fmtShortDate, earningsTimeShort, daysUntilLabel } from '@/components/watchlists/watchlistShared';
+import { fmtNextDate, earningsTimeShort, daysUntilLabel } from '@/components/watchlists/watchlistShared';
 
 /**
  * Compact next-earnings cell for list surfaces that carry an EarningsBadge
@@ -9,7 +9,7 @@ import { fmtShortDate, earningsTimeShort, daysUntilLabel } from '@/components/wa
 export default function EarningsBadgeCell({ badge, showDate = true }: { badge: EarningsBadge | null | undefined; showDate?: boolean }) {
   if (!badge?.nextDate || badge.daysUntil == null) return <span className="text-xs text-gray-300">—</span>;
   const session = earningsTimeShort(badge.nextTime);
-  const title = `Earnings ${badge.nextDate}${session ? ` (${session})` : ''}${badge.beforeExpiry ? ' — before this expiry' : ''}`;
+  const title = `Earnings ${badge.nextEstimated ? '~' : ''}${badge.nextDate}${badge.nextEstimated ? ' (estimated, not yet confirmed)' : ''}${session ? ` (${session})` : ''}${badge.beforeExpiry ? ' — before this expiry' : ''}`;
   const tone = badge.beforeExpiry
     ? 'bg-amber-50 text-amber-800 border border-amber-300'
     : badge.daysUntil <= 7
@@ -18,7 +18,7 @@ export default function EarningsBadgeCell({ badge, showDate = true }: { badge: E
   return (
     <span title={title} className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold tabular-nums whitespace-nowrap ${tone}`}>
       {badge.beforeExpiry && <span aria-hidden>⚠</span>}
-      {showDate ? `${fmtShortDate(badge.nextDate)} · ${daysUntilLabel(badge.daysUntil)}` : `ER ${daysUntilLabel(badge.daysUntil)}`}
+      {showDate ? `${fmtNextDate(badge.nextDate, badge.nextEstimated)} · ${daysUntilLabel(badge.daysUntil)}` : `ER${badge.nextEstimated ? '~' : ''} ${daysUntilLabel(badge.daysUntil)}`}
     </span>
   );
 }

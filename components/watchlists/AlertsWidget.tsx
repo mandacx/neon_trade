@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { format } from 'date-fns';
 import { getLevelColor, getLevelDisplayName, formatCurrency } from '@/lib/utils';
 import type { EarningsEvent } from '@/types/earnings';
-import { fmtShortDate, earningsTimeShort, daysUntilLabel, fmtEps } from '@/components/watchlists/watchlistShared';
+import { fmtShortDate, fmtNextDate, earningsTimeShort, daysUntilLabel, fmtEps } from '@/components/watchlists/watchlistShared';
 
 const EARNINGS_LIMIT = 8;
 
@@ -146,7 +146,7 @@ export default function AlertsWidget({
                   </span>
                 ) : (
                   <span className="flex items-center gap-1.5 text-[11px] text-gray-600">
-                    {fmtShortDate(e.date)}{earningsTimeShort(e.time) && ` · ${earningsTimeShort(e.time)}`}
+                    {fmtNextDate(e.date, e.estimated)}{earningsTimeShort(e.time) && ` · ${earningsTimeShort(e.time)}`}
                     <span className={`font-semibold px-1.5 py-0.5 rounded tabular-nums ${e.daysUntil <= 1 ? 'bg-red-50 text-red-700' : e.daysUntil <= 7 ? 'bg-amber-50 text-amber-700' : 'bg-gray-100 text-gray-600'}`}>
                       {e.daysUntil <= 1 ? daysUntilLabel(e.daysUntil) : `in ${e.daysUntil}d`}
                     </span>

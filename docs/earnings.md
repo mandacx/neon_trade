@@ -60,6 +60,8 @@ All app tables are `nt_`-prefixed because the database is shared with neon_nifty
 | `nt_api_usage` | (provider, day) | Alpha Vantage calls per **UTC** day, plus `exhausted_at` |
 | `nt_job_lease` | name | `locked_until` — one cron run at a time |
 
+**Estimated dates:** Alpha Vantage only sets `timeOfTheDay` once a company has announced its date. A calendar row with no time is exposed as `estimated` and shown as `~Nov 4` / "(est.)" in the UI. (Heuristic from observed snapshots, not documented by Alpha Vantage.)
+
 Calendar `status` values: `scheduled` → `pending_results` once the date passes → `resolved` once a result is stored. A row becomes `dropped` if it vanishes from a later snapshot (rescheduled or cancelled), and `no_result` if no headline appears within 14 days.
 
 Merge rules:
@@ -106,8 +108,8 @@ Dates are US/Eastern `YYYY-MM-DD` strings. Day arithmetic works on those strings
 | Surface | What it shows |
 |---|---|
 | Stock page (`components/stock/EarningsPanel.tsx`, `StockAnalysis`, `TVChart`) | Next/last lines in the chart header; ⚠ "Earnings before this expiry" chip; amber dot on expiry pills after the next report; "E" chart markers (coloured by beat/miss) with a tooltip; Earnings History table |
-| Watchlists (full table + W Chart, `watchlistShared.tsx`) | Next Earnings / Last Result columns (sortable), Earnings filter (today / this week / 7–30 days / before selected expiry / reported last 7 days), earnings events in the alerts widget |
-| Quadrant + scan-alert ladders (`QuadrantChart`) | Amber ring on dots whose report falls before expiry, tooltip lines, Earnings filter (quadrant), Next Earnings column |
+| Watchlists (full table + W Chart, `watchlistShared.tsx`) | Next Earnings / Last Result columns (sortable), Earnings filter (shared list in `lib/earningsFilter.ts`: today/tomorrow, this/next week, next 7–90 days, this month, custom range, before/after selected expiry, reported last 1–30 days, confirmed/estimated, no date), earnings events in the alerts widget |
+| Quadrant + scan-alert ladders (`QuadrantChart`) | Amber ring on dots whose report falls before expiry, tooltip lines, Earnings filter (same list as watchlists, server-side, plus `exclude`; `earningsFrom`/`earningsTo` for a range), Next Earnings column |
 | Latest scan alerts | Earnings column relative to each alert's expiry |
 | Historical scan alerts | "Earnings in window" — the report that landed between the alert and its expiry, with beat/miss |
 | Performance | Each alert tagged `earningsInWindow`; continuation/reversion split **with vs without** earnings. Alerts older than the earnings data (`getEarningsCoverageStart()`) are *unknown* and excluded, so "no data" isn't mistaken for "no report". |
