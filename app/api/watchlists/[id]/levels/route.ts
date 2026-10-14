@@ -48,6 +48,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       closestPrice: closest?.price ?? null,
       distance: closest?.distance ?? null,
       distancePercent: closest ? closest.value * 100 : null,
+      // Per row, because LevelCell (watchlistShared.tsx) reads them off the row
+      // to tell "withheld" (Delayed badge) from "no data".
+      levelAccess: gate.meta.levelAccess,
+      requiredFeature: gate.meta.requiredFeature,
     };
   });
 
