@@ -1,4 +1,4 @@
-# Quick Start Guide - Neon Trade
+# Quick Start Guide - StocksTrendz
 
 ## 🎉 Project Successfully Implemented!
 

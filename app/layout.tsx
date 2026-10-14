@@ -6,7 +6,7 @@ import ActivityTracker from "@/components/providers/ActivityTracker";
 import { getCurrentUserContext } from "@/lib/appUsers";
 
 export const metadata: Metadata = {
-  title: "Neon Trade - Stock Analysis Platform",
+  title: "StocksTrendz - Stock Analysis Platform",
   description: "Advanced stock analysis with K-line charts and quadrant visualization",
   icons: {
     icon: "/favicon.svg",

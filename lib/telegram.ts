@@ -101,7 +101,7 @@ export async function consumeLinkCode(code: string): Promise<string | null> {
  * Links a chat to a user. Returns false instead of throwing if that chat is
  * already linked to a *different* user — `telegram_chat_id` is unique per
  * `app_user_profiles_telegram_chat_id_uq`, so one Telegram account can only
- * ever back one Neon Trade user.
+ * ever back one StocksTrendz user.
  */
 export async function linkTelegramChat(userId: string, chatId: string): Promise<boolean> {
   try {

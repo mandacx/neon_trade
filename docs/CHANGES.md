@@ -7,6 +7,45 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-14 — Rebrand: Neon Trade -> StocksTrendz
+
+Requested: update all branding to StocksTrendz, with a new logo and website as applicable.
+
+### What changed
+
+- **Display name** "Neon Trade" -> "StocksTrendz": page title (`app/layout.tsx`), header logo alt
+  (`components/layout/Header.tsx`), login heading, guide page (2 places), Telegram bot replies
+  (`app/api/telegram/webhook/route.ts`), a `lib/telegram.ts` comment, the e2e selector
+  (`tests/e2e/responsive.spec.ts`), `README.md`, `QUICK_START.md`, `PROJECT_MASTER_PLAN.md`.
+- **New logo**: `public/logo.svg` (rising bars + trend arrow icon, "StocksTrendz" wordmark, same
+  blue->green gradient) and `public/favicon.svg`. Logo viewBox is now 224x48, so the header image is
+  161x34 (was 140x34).
+- **npm package name** `neon_trade` -> `stockstrendz` (`package.json`, root entries of `package-lock.json`).
+
+### Deliberately NOT changed
+
+- **Domain `us.niftytrendz.com`** (crons in `railway/*/Dockerfile`, `CLAUDE.md`, `docs/earnings.md`) and
+  **`support@neontrade.app`** (`app/upgrade/page.tsx`): live infrastructure / mail; no new domain or
+  address was given. Change them together with DNS, Vercel domain and the Railway Dockerfiles.
+- **Railway project `neon-trade-crons`** and `railway/package.json` name: renaming through
+  `railway config apply` may create a new project rather than rename; do it deliberately.
+- **Neon** (the database vendor), `neon_auth`, the sister `neon_nifty` app, `nt_*` table prefix,
+  `nn_sid` cookie, and the repo/folder name `neon_trade` (GitHub repo, `cd neon_trade`, tree listings).
+- Telegram bot display name/username are set in BotFather, not in code.
+
+### Verified
+
+- `npx tsc --noEmit` passes; no "Neon Trade" text remains outside this file's history.
+- New logo rendered to PNG (sharp) and checked visually; the wordmark rendered with a fallback font
+  because Inter is not installed locally.
+
+### Not verified
+
+- No browser check of the header at real sizes (360-1880 px) or the favicon in a tab; e2e tests not run.
+- The tab title keeps the old tagline "Stock Analysis Platform".
+
+---
+
 ## 2026-10-13 — Index charts (SPX) via Tradier fallback
 
 Reported: the SPX stock chart showed nothing.

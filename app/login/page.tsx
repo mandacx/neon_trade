@@ -116,7 +116,7 @@ function LoginPageInner() {
         <div className="container mx-auto px-4 py-5 sm:py-10">
           <div className="w-full max-w-sm mx-auto">
             <h1 className="text-xl font-bold text-gray-900 text-center mb-1">
-              {mode === 'otp' ? 'Verify your email' : 'Sign in to Neon Trade'}
+              {mode === 'otp' ? 'Verify your email' : 'Sign in to StocksTrendz'}
             </h1>
             <p className="text-xs text-gray-400 text-center mb-4 sm:mb-6">
               {mode === 'otp' ? `We sent a 6-digit code to ${email}` : 'Email + password, with a one-time code to verify your address.'}

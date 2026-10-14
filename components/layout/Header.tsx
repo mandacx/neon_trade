@@ -74,7 +74,7 @@ export default function Header() {
         <div className="flex items-center h-14 gap-2 sm:gap-4">
           {/* Logo — links home */}
           <Link href="/" className="flex items-center shrink-0 min-w-0">
-            <Image src="/logo.svg" alt="Neon Trade" width={140} height={34} priority />
+            <Image src="/logo.svg" alt="StocksTrendz" width={161} height={34} priority />
           </Link>
 
           {/* Spacer */}

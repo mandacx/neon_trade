@@ -173,7 +173,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
         const signIn = page.locator('header button:visible', { hasText: /^Sign in$/ }).first();
         await expect(signIn).toBeVisible();
         await inViewportWidth(page, signIn, 'Sign in button');
-        await expect(page.locator('header img[alt="Neon Trade"]')).toBeInViewport();
+        await expect(page.locator('header img[alt="StocksTrendz"]')).toBeInViewport();
         await noHorizontalScroll(page);
       });
     });

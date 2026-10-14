@@ -40,7 +40,7 @@ export default function GuidePage() {
         <div className="container mx-auto px-4 py-10 max-w-3xl">
           <h1 className="text-xl font-bold text-gray-900">How to read price levels</h1>
           <p className="text-sm text-gray-500 mt-2">
-            Every symbol on Neon Trade carries five (or seven, on the stock chart) price levels derived from
+            Every symbol on StocksTrendz carries five (or seven, on the stock chart) price levels derived from
             Put and Call option positioning near the current expiry. They act as reference zones —
             support underneath, resistance overhead — around which price tends to react.
           </p>
@@ -113,7 +113,7 @@ export default function GuidePage() {
           <footer className="mt-10 pt-4 border-t border-gray-200 text-[10px] text-gray-400 leading-relaxed">
             <strong>Disclaimer:</strong> This page is for educational and informational purposes only and does not
             constitute investment advice, a recommendation, or a solicitation to buy or sell any security or
-            derivative instrument. Neon Trade is not a registered investment adviser or broker-dealer and does not
+            derivative instrument. StocksTrendz is not a registered investment adviser or broker-dealer and does not
             provide personalized investment advice. Price levels, scan alerts, and performance statistics shown on
             this platform are derived from historical and intraday market data and do not guarantee any future
             outcome. Trading and investing in securities — especially derivatives and options-derived signals —

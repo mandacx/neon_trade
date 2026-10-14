@@ -1,4 +1,4 @@
-# Neon Trade - Stock Analysis Platform
+# StocksTrendz - Stock Analysis Platform
 
 A modern stock analysis platform featuring interactive K-line charts with put/call level indicators and 5-quadrant visualization for identifying trading opportunities.
 

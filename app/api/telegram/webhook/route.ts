@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
 
   const code = match[1]?.toUpperCase();
   if (!code) {
-    await sendTelegramMessage(chatId, "Hi! To link your Neon Trade account, open your Profile page and tap “Link Telegram” — it'll give you a link back here.");
+    await sendTelegramMessage(chatId, "Hi! To link your StocksTrendz account, open your Profile page and tap “Link Telegram” — it'll give you a link back here.");
     return NextResponse.json({ ok: true });
   }
 
@@ -45,9 +45,9 @@ export async function POST(request: NextRequest) {
 
   const linked = await linkTelegramChat(userId, chatId);
   if (!linked) {
-    await sendTelegramMessage(chatId, "This Telegram account is already linked to a different Neon Trade account. Unlink it there first, or use a different Telegram account.");
+    await sendTelegramMessage(chatId, "This Telegram account is already linked to a different StocksTrendz account. Unlink it there first, or use a different Telegram account.");
     return NextResponse.json({ ok: true });
   }
-  await sendTelegramMessage(chatId, "✅ Linked! Pick a watchlist to get alerts for from your Profile page on Neon Trade.");
+  await sendTelegramMessage(chatId, "✅ Linked! Pick a watchlist to get alerts for from your Profile page on StocksTrendz.");
   return NextResponse.json({ ok: true });
 }

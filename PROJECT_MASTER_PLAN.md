@@ -1,6 +1,6 @@
 # Stock Analysis Website - Master Reference
 
-**Project Name:** Neon Trade  
+**Project Name:** StocksTrendz  
 **Last Updated:** January 7, 2026  
 **Status:** Implementation Complete - Active Development
 
