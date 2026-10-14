@@ -7,6 +7,80 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-14 — Fix: "Delayed" badge missing on watchlists levels
+
+### Cause (verified in code)
+
+`app/api/watchlists/[id]/levels/route.ts` put `levelAccess` / `requiredFeature` only in the top-level
+`data` (via `...gate.meta`), while both consumers (`app/watchlists/page.tsx`, `app/watchlists/view/page.tsx`)
+use only `data.rows` and `LevelCell` reads `level.levelAccess` / `level.requiredFeature` off each row.
+So for a viewer without the live-levels feature, `levelAccess` was `undefined` and the cell rendered "—"
+instead of the amber "Delayed" upgrade link.
+
+### What changed
+
+- The route now adds `levelAccess` and `requiredFeature` to every row (the top-level fields are kept).
+
+### Verified / not verified
+
+- `npx tsc --noEmit` and `npm run build` pass.
+- *Not verified:* no browser check as a viewer without the levels feature; the route was not called over HTTP.
+
+---
+
+## 2026-10-14 — Earnings page, and LTP / change on the home earnings cards
+
+Requested: add LTP, change $ and % to the home earnings "modals"; a new earnings-only page with filters
+and extra detail to analyse results and growth for the next/past 1, 3, 5, 7, 10, 15, 30, 60, 90 days and
+custom dates, one ticker per line, row click opens the stock chart in a new tab; plus levels for the
+nearest monthly expiry (rebased on LTP, as on the watchlists page) for every stock with price levels.
+*Interpretations (unverified with the user):* "modals" = the "Earnings This Week" / "Just Reported" cards on
+the home page (there is no modal there); "growth" = price reaction to the report and the move since it.
+
+### What changed
+
+| Area | Files |
+|---|---|
+| Home cards: each row shows LTP, change $ and change %; "View all" links | `app/api/home/earnings/route.ts` (Alpaca snapshots for the ~20 shown symbols), `app/page.tsx` |
+| Earnings page `/earnings` (Pro, `earnings` feature) | `app/earnings/page.tsx`, `app/earnings/layout.tsx`, `middleware.ts` (matcher), `components/layout/Header.tsx` (desktop + mobile link) |
+| List API | `app/api/earnings/list/route.ts` |
+| Levels API (all tracked symbols at one monthly expiry) | `app/api/earnings/levels/route.ts` |
+| Range reader | `getEarningsRange()` in `lib/earnings.ts`, `EarningsRangeRow` in `types/earnings.ts` |
+| Price reaction (pure) | `lib/earningsReaction.ts` |
+| Alpaca helpers | `snapshotQuote`, `getSnapshotsChunked`, `getDailyBarsMulti` in `lib/alpaca.ts` |
+
+Design and definitions: `docs/earnings.md` ("Earnings page"); the `CLAUDE.md` route list is updated.
+
+### Verified
+
+- `npx tsc --noEmit` and `npm run build` pass; eslint reports 0 errors on the touched files.
+- Against the live DB and Alpaca (the real lib functions, no HTTP layer): `getEarningsRange` for upcoming 7d
+  (57 rows: 51 upcoming + 6 reported today), reported 7d (15) and a 120-day span (1,031); snapshots, multi-symbol
+  daily bars and the reaction maths on real reports (ASML, PGR, STT, MS, FAST: the reaction equals the
+  close-to-close move computed by hand from the bars; every past event got a quote and a reaction);
+  levels at the next monthly expiry for 633/633 tracked symbols, and rebasing on LTP.
+- Heaviest window (90 days each way): 1,098 events, 595 symbols, 37,597 bars in about 11.7 s.
+- Production-server smoke test: `/earnings` redirects to `/login?redirect=%2Fearnings`; the three earnings
+  API routes return 401 without a session.
+
+### Not verified
+
+- **No browser check** of the page or the home cards (layout, filters, sorting, the new-tab click, the
+  `?mode=reported` deep link, 360-1880 px). The routes were not called over HTTP as a signed-in Pro user.
+- The Header now has 8 buttons at `xl`; its width was not checked.
+- Reaction uses Alpaca IEX daily closes; the DB's `eod_usmkts_price` close was not used because the
+  trade_date offset noticed for SPX (see the 2026-10-13 entry) is unresolved. Today's bar is live.
+- Upcoming rows show an EPS estimate only (the calendar has no sales estimate).
+
+### Observations / follow-ups
+
+- No caching on the list route; a 60-90 day window takes about 12 s. A short server cache keyed by window would help.
+- `/api/watchlists/[id]/levels` did not return per-row `levelAccess`, but `LevelCell` reads it, so viewers
+  without live levels saw "—" on watchlists instead of the "Delayed" badge. **Fixed in the next entry.**
+- The rebrand left `niftytrendz.com` and `support@neontrade.app` as they were (see the rebrand entry).
+
+---
+
 ## 2026-10-14 — Remove "K-line" wording from docs
 
 Requested: drop references to K-line charts from the documentation, since no K-line library is used.

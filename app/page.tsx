@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import Header from '@/components/layout/Header';
 import ScanAlertsTicker from '@/components/ui/ScanAlertsTicker';
@@ -10,7 +11,12 @@ import { FEATURE_EARNINGS, hasFeature } from '@/lib/features';
 import { fmtShortDate, fmtNextDate, earningsTimeShort, daysUntilLabel } from '@/components/watchlists/watchlistShared';
 import type { EarningsBadge, EarningsEvent } from '@/types/earnings';
 
-type HomeEarningsEvent = EarningsEvent & { name: string | null };
+type HomeEarningsEvent = EarningsEvent & {
+  name: string | null;
+  lastPrice: number | null;
+  change: number | null;
+  changePercent: number | null;
+};
 interface HomeEarnings {
   upcoming: HomeEarningsEvent[];
   upcomingTotal: number;
@@ -191,6 +197,14 @@ function EarningsEventRow({ e, onClick }: { e: HomeEarningsEvent; onClick: () =>
       <div className="min-w-0 flex-1">
         <div className="font-bold text-gray-800 text-sm">{e.symbol}</div>
         {e.name && <div className="text-[10px] text-gray-400 truncate" title={e.name}>{e.name}</div>}
+      </div>
+      <div className="text-right shrink-0 w-[72px]">
+        <div className="text-xs font-semibold text-gray-800 tabular-nums">{e.lastPrice != null ? `$${e.lastPrice.toFixed(2)}` : '—'}</div>
+        {e.change != null && e.changePercent != null ? (
+          <div className={`text-[10px] font-semibold tabular-nums ${e.change > 0 ? 'text-green-600' : e.change < 0 ? 'text-red-600' : 'text-gray-500'}`}>
+            {e.change >= 0 ? '+' : '-'}${Math.abs(e.change).toFixed(2)} · {e.changePercent >= 0 ? '+' : ''}{e.changePercent.toFixed(2)}%
+          </div>
+        ) : <div className="text-[10px] text-gray-300">—</div>}
       </div>
       {e.kind === 'upcoming' ? (
         <div className="text-right shrink-0">
@@ -378,22 +392,28 @@ export default function Home() {
           {homeEarnings && (homeEarnings.upcoming.length > 0 || homeEarnings.reported.length > 0) && (
             <div className="grid md:grid-cols-2 gap-5">
               <section className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-                <div className="px-4 py-3 border-b border-gray-100">
-                  <h2 className="font-bold text-gray-800 text-sm">Earnings This Week</h2>
-                  <div className="text-[10px] text-gray-400">
-                    Next 7 days · largest companies first{homeEarnings.upcomingTotal > homeEarnings.upcoming.length && ` · ${homeEarnings.upcomingTotal} reporting in total`}
+                <div className="px-4 py-3 border-b border-gray-100 flex items-start justify-between gap-2">
+                  <div>
+                    <h2 className="font-bold text-gray-800 text-sm">Earnings This Week</h2>
+                    <div className="text-[10px] text-gray-400">
+                      Next 7 days · largest companies first{homeEarnings.upcomingTotal > homeEarnings.upcoming.length && ` · ${homeEarnings.upcomingTotal} reporting in total`}
+                    </div>
                   </div>
+                  <Link href="/earnings" className="text-[11px] font-semibold text-blue-600 hover:underline shrink-0">View all →</Link>
                 </div>
                 {homeEarnings.upcoming.length > 0
                   ? homeEarnings.upcoming.map(e => <EarningsEventRow key={`u-${e.symbol}-${e.date}`} e={e} onClick={() => router.push(`/stock/${e.symbol}`)} />)
                   : <div className="px-4 py-6 text-center text-xs text-gray-400">No reports scheduled this week.</div>}
               </section>
               <section className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-                <div className="px-4 py-3 border-b border-gray-100">
-                  <h2 className="font-bold text-gray-800 text-sm">Just Reported</h2>
-                  <div className="text-[10px] text-gray-400">
-                    Last 3 days · EPS vs consensus{homeEarnings.reportedTotal > homeEarnings.reported.length && ` · ${homeEarnings.reportedTotal} reports`}
+                <div className="px-4 py-3 border-b border-gray-100 flex items-start justify-between gap-2">
+                  <div>
+                    <h2 className="font-bold text-gray-800 text-sm">Just Reported</h2>
+                    <div className="text-[10px] text-gray-400">
+                      Last 3 days · EPS vs consensus{homeEarnings.reportedTotal > homeEarnings.reported.length && ` · ${homeEarnings.reportedTotal} reports`}
+                    </div>
                   </div>
+                  <Link href="/earnings?mode=reported" className="text-[11px] font-semibold text-blue-600 hover:underline shrink-0">View all →</Link>
                 </div>
                 {homeEarnings.reported.length > 0
                   ? homeEarnings.reported.map(e => <EarningsEventRow key={`r-${e.symbol}-${e.date}`} e={e} onClick={() => router.push(`/stock/${e.symbol}`)} />)

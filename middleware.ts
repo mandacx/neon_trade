@@ -42,5 +42,6 @@ export const config = {
     '/scan-alerts/historical/:path*',
     '/watchlists/:path*',
     '/performance/:path*',
+    '/earnings/:path*',
   ],
 };

@@ -10,7 +10,7 @@ import SignOutButton from '@/components/auth/SignOutButton';
 import IndicesStrip from '@/components/layout/IndicesStrip';
 import {
   hasFeature, FEATURE_QUADRANT, FEATURE_SCAN_ALERTS_LATEST, FEATURE_SCAN_ALERTS_HISTORY,
-  FEATURE_WATCHLISTS, FEATURE_PERFORMANCE,
+  FEATURE_WATCHLISTS, FEATURE_PERFORMANCE, FEATURE_EARNINGS,
 } from '@/lib/features';
 
 // Small "needs upgrade" flag for nav entries — shown before a click, not just
@@ -51,6 +51,7 @@ export default function Header() {
   const needsScanAlerts = !hasFeature(authCtx.features, FEATURE_SCAN_ALERTS_LATEST) || !hasFeature(authCtx.features, FEATURE_SCAN_ALERTS_HISTORY);
   const needsWatchlists = !hasFeature(authCtx.features, FEATURE_WATCHLISTS);
   const needsPerformance = !hasFeature(authCtx.features, FEATURE_PERFORMANCE);
+  const needsEarnings = !hasFeature(authCtx.features, FEATURE_EARNINGS);
 
   useEffect(() => {
     function onClickOutside(e: MouseEvent) {
@@ -175,6 +176,15 @@ export default function Header() {
             >
               🏆 Performance
               {needsPerformance && <ProBadge />}
+            </button>
+            <button
+              onClick={() => router.push('/earnings')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                pathname?.startsWith('/earnings') ? 'bg-indigo-700 text-white' : 'bg-indigo-600 text-white hover:bg-indigo-700'
+              }`}
+            >
+              🗓️ Earnings
+              {needsEarnings && <ProBadge />}
             </button>
             <button
               onClick={() => router.push('/guide')}
@@ -311,6 +321,13 @@ export default function Header() {
           >
             🏆 Performance
             {needsPerformance && <MobileProBadge />}
+          </button>
+          <button
+            onClick={() => router.push('/earnings')}
+            className="w-full text-left px-3 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-50 rounded-lg"
+          >
+            🗓️ Earnings
+            {needsEarnings && <MobileProBadge />}
           </button>
           <button
             onClick={() => router.push('/guide')}

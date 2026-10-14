@@ -3,6 +3,7 @@ import { requireFeatureApi } from '@/lib/routeGuards';
 import { FEATURE_EARNINGS } from '@/lib/features';
 import { earningsBadge, getEarningsEvents, getEarningsSummary, getTrackedSymbols } from '@/lib/earnings';
 import { getSecuritiesMeta } from '@/lib/securitiesFilters';
+import { getSnapshotsMulti, snapshotQuote } from '@/lib/alpaca';
 import type { EarningsBadge, EarningsEvent } from '@/types/earnings';
 
 export const dynamic = 'force-dynamic';
@@ -16,6 +17,7 @@ const CARD_LIMIT = 10;
  *
  *   upcoming   reports in the next 7 days, biggest companies first
  *   reported   reports in the last 3 days (beat/miss), biggest first
+ *              (both carry lastPrice / change / changePercent from Alpaca snapshots)
  *   badges     ?pairs=SYM:YYYY-MM-DD,… → EarningsBadge per symbol, relative to
  *              that row's expiry (the Top OI tables)
  */
@@ -37,13 +39,19 @@ export async function GET(request: NextRequest) {
   ]);
 
   const cap = (s: string) => Number(secMeta[s]?.market_cap ?? 0);
-  const withName = (e: EarningsEvent) => ({ ...e, name: secMeta[e.symbol]?.name ?? null });
+  const quotes: Record<string, ReturnType<typeof snapshotQuote>> = {};
+  const withName = (e: EarningsEvent) => ({ ...e, name: secMeta[e.symbol]?.name ?? null, ...(quotes[e.symbol] ?? snapshotQuote(undefined)) });
   const byCap = (a: EarningsEvent, b: EarningsEvent) => cap(b.symbol) - cap(a.symbol);
 
   const upcoming = events.filter(e => e.kind === 'upcoming').sort((a, b) => a.daysUntil - b.daysUntil || byCap(a, b));
   const reported = events.filter(e => e.kind === 'reported').sort(byCap);
   // Biggest names first, then shown in date order within the card.
   const topUpcoming = [...upcoming].sort(byCap).slice(0, CARD_LIMIT).sort((a, b) => a.daysUntil - b.daysUntil || byCap(a, b));
+
+  // Live quote (LTP, day change) for just the symbols the two cards will show.
+  const shown = [...topUpcoming, ...reported.slice(0, CARD_LIMIT)];
+  const snapshots = await getSnapshotsMulti(Array.from(new Set(shown.map(e => e.symbol))));
+  for (const e of shown) quotes[e.symbol] = snapshotQuote(snapshots[e.symbol]);
 
   const badges: Record<string, EarningsBadge | null> = {};
   if (summaries) {

@@ -21,7 +21,7 @@
  */
 import { sql } from '@/lib/db';
 import { parseEarningsHeadline, symbolsForResult, easternDateAndSession } from '@/lib/earningsParse';
-import type { EarningsBadge, EarningsEvent, EarningsOutcome, EarningsResult, EarningsSummary, EarningsTime } from '@/types/earnings';
+import type { EarningsBadge, EarningsEvent, EarningsOutcome, EarningsRangeRow, EarningsResult, EarningsSummary, EarningsTime } from '@/types/earnings';
 
 const AV_URL = 'https://www.alphavantage.co/query';
 const AV_PROVIDER = 'alphavantage';
@@ -693,6 +693,68 @@ export async function getEarningsEvents(symbols: string[], opts: { aheadDays?: n
     );
   } catch (err) {
     console.error('[earnings] events read failed:', err instanceof Error ? err.message : err);
+    return [];
+  }
+}
+
+/**
+ * Every upcoming date, stored result and passed-but-unresolved date for the
+ * given symbols whose date falls in [from, to] (US/Eastern 'YYYY-MM-DD').
+ * Upcoming rows come from the calendar (status `scheduled`, date >= today),
+ * reported rows from nt_earnings (date <= today), pending rows from calendar
+ * rows still `pending_results`. Newest report first among past rows.
+ */
+export async function getEarningsRange(from: string, to: string, symbols: string[]): Promise<EarningsRangeRow[]> {
+  const upper = Array.from(new Set(symbols.map(s => s.toUpperCase())));
+  if (upper.length === 0 || from > to) return [];
+  const today = todayET();
+  const pastTo = to < today ? to : today;
+  const futureFrom = from > today ? from : today;
+  try {
+    const [upcoming, reported, pending] = await Promise.all([
+      futureFrom <= to
+        ? sql`
+            SELECT symbol, report_date::text AS report_date, time_of_day, eps_estimate
+            FROM public.nt_earnings_calendar
+            WHERE symbol = ANY(${upper}) AND status = 'scheduled' AND report_date BETWEEN ${futureFrom}::date AND ${to}::date`
+        : Promise.resolve([]),
+      from <= pastTo
+        ? sql(
+            `SELECT symbol, ${RESULT_COLUMNS} FROM public.nt_earnings
+             WHERE symbol = ANY($1) AND reported_date BETWEEN $2::date AND $3::date`,
+            [upper, from, pastTo]
+          )
+        : Promise.resolve([]),
+      from <= pastTo
+        ? sql`
+            SELECT symbol, report_date::text AS report_date, time_of_day
+            FROM public.nt_earnings_calendar
+            WHERE symbol = ANY(${upper}) AND status = 'pending_results' AND report_date BETWEEN ${from}::date AND ${pastTo}::date`
+        : Promise.resolve([]),
+    ]);
+    const blank = { period: null, epsActual: null, epsSurprisePct: null, epsOutcome: null, salesEstimate: null, salesActual: null, salesSurprisePct: null, salesOutcome: null };
+    const rows: EarningsRangeRow[] = [
+      ...(upcoming as any[]).map(r => ({
+        ...blank, symbol: r.symbol, kind: 'upcoming' as const, date: r.report_date, time: (r.time_of_day ?? null) as EarningsTime,
+        estimated: !r.time_of_day, daysUntil: daysBetween(today, r.report_date), epsEstimate: num(r.eps_estimate),
+      })),
+      ...(reported as any[]).map(r => {
+        const res = toResult(r);
+        return {
+          symbol: r.symbol as string, kind: 'reported' as const, date: res.date, time: res.time, estimated: false,
+          daysUntil: daysBetween(today, res.date), period: res.period, epsEstimate: res.epsEstimate, epsActual: res.epsActual,
+          epsSurprisePct: res.epsSurprisePct, epsOutcome: res.epsOutcome, salesEstimate: res.salesEstimate, salesActual: res.salesActual,
+          salesSurprisePct: surprisePct(res.salesActual, res.salesEstimate), salesOutcome: res.salesOutcome,
+        };
+      }),
+      ...(pending as any[]).map(r => ({
+        ...blank, symbol: r.symbol, kind: 'pending' as const, date: r.report_date, time: (r.time_of_day ?? null) as EarningsTime,
+        estimated: false, daysUntil: daysBetween(today, r.report_date), epsEstimate: null,
+      })),
+    ];
+    return rows.sort((a, b) => a.date.localeCompare(b.date) || a.symbol.localeCompare(b.symbol));
+  } catch (err) {
+    console.error('[earnings] range read failed:', err instanceof Error ? err.message : err);
     return [];
   }
 }

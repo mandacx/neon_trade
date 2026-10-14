@@ -69,3 +69,24 @@ export interface EarningsEvent {
   epsSurprisePct: number | null;
   epsOutcome: EarningsOutcome | null;
 }
+
+/** One line of the Earnings page: an upcoming date, a stored result, or a passed date still awaiting its result. */
+export interface EarningsRangeRow {
+  symbol: string;
+  /** `pending`: the scheduled date has passed but no results headline is stored yet. */
+  kind: 'upcoming' | 'reported' | 'pending';
+  date: string;
+  time: EarningsTime;
+  /** Upcoming only: the company hasn't confirmed the date. */
+  estimated: boolean;
+  daysUntil: number; // negative for past
+  period: string | null;
+  epsEstimate: number | null;
+  epsActual: number | null;
+  epsSurprisePct: number | null;
+  epsOutcome: EarningsOutcome | null;
+  salesEstimate: number | null;
+  salesActual: number | null;
+  salesSurprisePct: number | null;
+  salesOutcome: EarningsOutcome | null;
+}

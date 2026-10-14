@@ -160,6 +160,65 @@ export async function getSnapshotsMulti(symbols: string[]): Promise<Record<strin
   }
 }
 
+/** Last price + day change from a snapshot — same derivation the watchlist quotes route uses. */
+export function snapshotQuote(snap: AlpacaSnapshot | undefined): { lastPrice: number | null; change: number | null; changePercent: number | null } {
+  const prevClose = snap?.prevDailyBar?.c ?? null;
+  const lastPrice = snap?.dailyBar?.c ?? snap?.latestTrade?.p ?? null;
+  const change = lastPrice !== null && prevClose !== null ? lastPrice - prevClose : null;
+  const changePercent = change !== null && prevClose ? (change / prevClose) * 100 : null;
+  return { lastPrice, change, changePercent };
+}
+
+/** Run `fn` over `items` in groups of `size`, at most `parallel` groups at a time. */
+async function inChunks<T, R>(items: T[], size: number, parallel: number, fn: (chunk: T[]) => Promise<R>): Promise<R[]> {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) chunks.push(items.slice(i, i + size));
+  const out: R[] = [];
+  for (let i = 0; i < chunks.length; i += parallel) {
+    out.push(...(await Promise.all(chunks.slice(i, i + parallel).map(fn))));
+  }
+  return out;
+}
+
+/** getSnapshotsMulti for large symbol sets (the earnings page can need ~600), chunked to keep the URL short. */
+export async function getSnapshotsChunked(symbols: string[]): Promise<Record<string, AlpacaSnapshot>> {
+  const parts = await inChunks(symbols, 150, 4, getSnapshotsMulti);
+  return Object.assign({}, ...parts);
+}
+
+export interface DailyClose { date: string; close: number }
+
+/**
+ * Split-adjusted daily closes for many symbols in one go (Alpaca multi-symbol
+ * bars, paged). `date` is the bar's US/Eastern session date (daily bars are
+ * stamped at ET midnight, so the UTC date part is the session date). A failed
+ * chunk is skipped, so callers get partial data instead of an error.
+ */
+export async function getDailyBarsMulti(symbols: string[], start: string, end: string): Promise<Record<string, DailyClose[]>> {
+  const out: Record<string, DailyClose[]> = {};
+  await inChunks(symbols.map(s => s.toUpperCase()), 100, 4, async chunk => {
+    try {
+      let pageToken: string | undefined;
+      for (let page = 0; page < 10; page++) {
+        const params: Record<string, string | number> = {
+          symbols: chunk.join(','), timeframe: '1Day', adjustment: 'split', feed: 'iex', limit: 10000, start, end,
+        };
+        if (pageToken) params.page_token = pageToken;
+        const response = await alpacaClient.get<AlpacaHistoryResponse>('/v2/stocks/bars', { params });
+        for (const [sym, bars] of Object.entries(response.data?.bars ?? {})) {
+          (out[sym] ??= []).push(...bars.map(b => ({ date: b.t.slice(0, 10), close: b.c })));
+        }
+        pageToken = response.data?.next_page_token;
+        if (!pageToken) break;
+      }
+    } catch (error) {
+      console.error('Error fetching daily bars from Alpaca:', axios.isAxiosError(error) ? error.response?.status : error);
+    }
+  });
+  for (const bars of Object.values(out)) bars.sort((a, b) => a.date.localeCompare(b.date));
+  return out;
+}
+
 export type ChartInterval = '1min' | '5min' | '15min' | '30min' | '1hour' | 'daily' | 'weekly' | 'monthly';
 
 /**

@@ -113,8 +113,24 @@ Dates are US/Eastern `YYYY-MM-DD` strings. Day arithmetic works on those strings
 | Latest scan alerts | Earnings column relative to each alert's expiry |
 | Historical scan alerts | "Earnings in window" — the report that landed between the alert and its expiry, with beat/miss |
 | Performance | Each alert tagged `earningsInWindow`; continuation/reversion split **with vs without** earnings. Alerts older than the earnings data (`getEarningsCoverageStart()`) are *unknown* and excluded, so "no data" isn't mistaken for "no report". |
-| Home (`/api/home/earnings`) | "Earnings This Week" and "Just Reported" cards; ER flag on Top OI rows. This is a **separate gated route**, because `/api/home/data` is public and CDN-cached for every visitor. |
+| Earnings page (`app/earnings/page.tsx`, `/api/earnings/list`, `/api/earnings/levels`) | One line per report for every stock with price levels: upcoming / reported / custom window (1, 3, 5, 7, 10, 15, 30, 60, 90 days or From–To), EPS and sales estimate / actual / surprise, LTP and day change, price reaction and move since the report, and the closest level at a chosen monthly expiry (rebased on LTP, like watchlists). A row click opens `/stock/<symbol>` in a new tab. See "Earnings page" below. |
+| Home (`/api/home/earnings`) | "Earnings This Week" and "Just Reported" cards, each row with LTP and day change ($ and %) from Alpaca snapshots, plus "View all" links to the Earnings page; ER flag on Top OI rows. This is a **separate gated route**, because `/api/home/data` is public and CDN-cached for every visitor. |
 | Telegram (when re-enabled) | ` · ER Oct 28 before exp` suffix on alert lines, for subscribers who have the feature |
+
+### Earnings page
+
+Pro (`earnings`), gated like the rest: `app/earnings/layout.tsx` (`requireFeaturePage`), `/earnings` in the middleware matcher, and both routes use `requireFeatureApi(FEATURE_EARNINGS)`. There is an "Earnings" link in the Header.
+
+- **`GET /api/earnings/list`**: `?mode=upcoming&days=N` (today to +N), `?mode=reported&days=N` (-N to today), `?mode=custom&from=&to=` (any span, max 400 days, both kinds). `N` is one of 1, 3, 5, 7, 10, 15, 30, 60, 90; anything else is a 400. Rows come from `getEarningsRange()` (`lib/earnings.ts`) over the tracked universe, as `upcoming` (calendar, `scheduled`), `reported` (`nt_earnings`) or `pending` (date passed, `pending_results`, no result yet). Each row also carries securities metadata, the live quote (`snapshotQuote`, the same derivation as the watchlist quotes route) and, for reports already out, the price reaction.
+- **Price reaction** (`lib/earningsReaction.ts`, pure) uses split-adjusted daily closes (Alpaca multi-symbol bars, IEX feed):
+  - before the open / intraday: prior close to report-day close;
+  - after the close: report-day close to next close;
+  - session unknown: prior close to the close after the report day.
+  - `sincePct` is the move from that first (pre-report) close to the live price. Either value is `null` when a needed bar doesn't exist yet, for example an after-close report from today has no next close.
+- **`GET /api/earnings/levels?expiry=`**: levels for every tracked symbol at one monthly (3rd-Friday) expiry, plus the list of monthly expiries (default: the earliest upcoming one). Same data and `levelGate()` as the watchlist levels route; rows carry `levelAccess` / `requiredFeature`, so viewers without live levels get the "Delayed" badge. The page rebases the levels onto each row's LTP (`rebaseToLtp`). It is a separate route so changing the expiry doesn't refetch quotes and bars.
+- **Filters** (client-side): search, sector, market-cap tier, EPS result (beat / miss / in-line / pending), sales result, session, confirmed / estimated date, today's gainers / losers, reaction up / down, closest level, near-a-level slider, "reports before the selected expiry". The summary strip (count, EPS beat rate, average reaction, share that rose, average since report) is computed over the filtered rows.
+- **Cost:** the widest window (90 days each way) is about 1,100 rows and took roughly 12 seconds (595 snapshots plus 37,600 bars). Narrow windows are quick. There is no caching yet.
+- A same-day reaction is live, because the current day's bar is in progress during market hours.
 
 **Gating:** every route returns earnings data only when `hasFeature(ctx.features, FEATURE_EARNINGS)`. The stock details route sends non-entitled viewers `earningsLocked: true`, so the header can show an upgrade link.
 
