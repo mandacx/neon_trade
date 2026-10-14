@@ -23,7 +23,7 @@
 
 ## Project Overview
 
-A modern stock analysis platform that combines real-time market data from Alpaca API with advanced options analytics stored in Neon DB. The platform features interactive K-line charts and a unique 5-quadrant visualization to identify stocks near critical price levels.
+A modern stock analysis platform that combines real-time market data from Alpaca API with advanced options analytics stored in Neon DB. The platform features interactive candlestick charts and a unique 5-quadrant visualization to identify stocks near critical price levels.
 
 ### Key Objectives
 
@@ -117,7 +117,7 @@ A modern stock analysis platform that combines real-time market data from Alpaca
   "language": "TypeScript",
   "styling": "Tailwind CSS",
   "charts": {
-    "kline": "lightweight-charts 4.2.2",
+    "candlestick": "lightweight-charts 4.2.2",
     "quadrant": "recharts 2.15.0"
   },
   "state": "React hooks (useState, useEffect, useRef)",
@@ -414,11 +414,11 @@ function findClosestLevel(levels: LevelCalculation[]): LevelCalculation {
 
 ---
 
-### Phase 3: K-Line Chart Component (Week 3)
+### Phase 3: Candlestick Chart Component (Week 3)
 
 **Tasks:**
 - [ ] Set up lightweight-charts library
-- [ ] Create KLineChart component
+- [ ] Create TVChart component
 - [ ] Integrate Tradier OHLC data
 - [ ] Add volume bars
 - [ ] Implement 5 level lines
@@ -429,7 +429,7 @@ function findClosestLevel(levels: LevelCalculation[]): LevelCalculation {
 - [ ] Responsive design
 
 **Deliverables:**
-- Fully functional K-line chart
+- Fully functional candlestick chart
 - Level indicators working
 - Interactive features complete
 
@@ -652,7 +652,7 @@ Get all stocks with quadrant positions.
 - Navigation to main features
 
 #### `app/stock/[symbol]/page.tsx` - Stock Detail
-- K-line chart with levels
+- Candlestick chart with levels
 - Stock information card
 - Levels table
 - Historical data
@@ -667,22 +667,20 @@ Get all stocks with quadrant positions.
 
 ### Components
 
-#### `components/KLineChart.tsx`
+#### `components/charts/TVChart.tsx`
 
-> **As built:** this shipped as `components/charts/TVChart.tsx`, on
-> `lightweight-charts` rather than the `klinecharts` library the name suggests.
-> The sketch below is the original plan, kept for history — the real props are
-> considerably wider (historical levels, OI series, scan-alert markers).
+> The sketch below is the original plan; the real props are considerably wider
+> (historical levels, OI series, scan-alert markers).
 
 ```typescript
-interface KLineChartProps {
+interface TVChartProps {
   symbol: string;
   ohlcData: OHLCData[];
   levels: LevelData;
   height?: number;
 }
 
-export default function KLineChart({ symbol, ohlcData, levels, height = 400 }: KLineChartProps) {
+export default function TVChart({ symbol, ohlcData, levels, height = 400 }: TVChartProps) {
   // Implementation
 }
 ```
@@ -797,7 +795,7 @@ neon_trade/
 │
 ├── components/
 │   ├── charts/
-│   │   ├── KLineChart.tsx        # K-line chart component (shipped as TVChart.tsx)
+│   │   ├── TVChart.tsx           # Candlestick chart component
 │   │   ├── QuadrantChart.tsx     # Quadrant chart component
 │   │   └── LevelIndicators.tsx   # Level display component
 │   │

@@ -1,10 +1,10 @@
 # StocksTrendz - Stock Analysis Platform
 
-A modern stock analysis platform featuring interactive K-line charts with put/call level indicators and 5-quadrant visualization for identifying trading opportunities.
+A modern stock analysis platform featuring interactive candlestick charts with put/call level indicators and 5-quadrant visualization for identifying trading opportunities.
 
 ## Features
 
-- **K-Line Charts**: Interactive candlestick charts with real-time OHLC data from Alpaca API
+- **Candlestick Charts**: Interactive candlestick charts with real-time OHLC data from Alpaca API
 - **Dynamic Tooltips**: Shows Open, High, Low, Close prices with color-coded display
 - **Level Indicators**: Visual display of 5 price levels (put_low, put_int, put_call_int, call_int, call_high)
 - **Date-Specific Levels**: Historical level values shown for each trading date based on expiry selection

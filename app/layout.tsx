@@ -7,7 +7,7 @@ import { getCurrentUserContext } from "@/lib/appUsers";
 
 export const metadata: Metadata = {
   title: "StocksTrendz - Stock Analysis Platform",
-  description: "Advanced stock analysis with K-line charts and quadrant visualization",
+  description: "Advanced stock analysis with candlestick charts and quadrant visualization",
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",

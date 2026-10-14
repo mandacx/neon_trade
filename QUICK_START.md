@@ -119,7 +119,7 @@ Result: AAPL is 2.94% above the `call_int` level.
 
 ## 🎨 Features Overview
 
-### TVChart (K-Line Chart)
+### TVChart (Candlestick Chart)
 - **Candlestick chart** from Alpaca API with dynamic date ranges
 - **Volume bars** below the main chart
 - **5 colored horizontal lines** for price levels

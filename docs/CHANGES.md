@@ -7,6 +7,31 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-14 — Remove "K-line" wording from docs
+
+Requested: drop references to K-line charts from the documentation, since no K-line library is used.
+
+### Verified
+
+- No code imports `klinecharts` / `KLineChart`; `klinecharts` is not in `package.json`. The stock
+  chart is `components/charts/TVChart.tsx` on `lightweight-charts`.
+- So `CLAUDE.md`'s claim that `klinecharts`/`@klinecharts/pro` are "also present as deps" was stale.
+
+### What changed
+
+- "K-line chart(s)" -> "candlestick chart(s)" in `README.md`, `CLAUDE.md`, `QUICK_START.md`,
+  `PROJECT_MASTER_PLAN.md` and the site meta description (`app/layout.tsx`).
+- `CLAUDE.md`: removed the `klinecharts`/`@klinecharts/pro` dependency mention.
+- `PROJECT_MASTER_PLAN.md`: the planned `KLineChart` component is now `TVChart` (Phase 3 task, component
+  sketch, file tree, `charts` stack key); the "shipped as TVChart" note was trimmed.
+
+### Not verified
+
+- `package-lock.json` also has 0 `klinecharts` matches. `tsc`/build not re-run (only docs text and one meta string changed).
+- Older entries in this file are history and were not edited.
+
+---
+
 ## 2026-10-14 — Rebrand: Neon Trade -> StocksTrendz
 
 Requested: update all branding to StocksTrendz, with a new logo and website as applicable.

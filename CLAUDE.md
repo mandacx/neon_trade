@@ -49,7 +49,7 @@ Service settings (schedules, restart policy, Dockerfile builds) are infrastructu
 
 ## Architecture
 
-**Stack**: Next.js 15 (App Router), React 19, TypeScript, Tailwind CSS. Chart libraries: `lightweight-charts` (TVChart candlesticks), `recharts` (quadrant scatter plot), `klinecharts`/`@klinecharts/pro` (also present as deps).
+**Stack**: Next.js 15 (App Router), React 19, TypeScript, Tailwind CSS. Chart libraries: `lightweight-charts` (TVChart candlesticks), `recharts` (quadrant scatter plot).
 
 ### Data model — the "levels" concept
 
@@ -86,7 +86,7 @@ Column naming is inconsistent between the DB (`snake_case`) and the `StockData` 
 ### Route structure
 
 - `app/page.tsx` — home dashboard (top OI stocks/ETFs, sector breakdown, top movers — the market indices moved out of this page into the shared Header's `IndicesStrip`), backed by `app/api/home/data/route.ts` which fans out to Neon (`securities`, `eod_usmkts_price`) and Alpaca (index quotes, mover bars) in parallel.
-- `app/stock/[symbol]/page.tsx` — thin wrapper around `components/stock/StockAnalysis.tsx`, which holds the whole stock page (single-stock K-line chart with level overlays; the selected expiry changes which levels are shown). See "Stock chart layout" below. Backed by `app/api/stocks/[symbol]/*` routes (details, `ohlc` from Alpaca, `levels` with historical range support, `expiry-dates`, `oi`).
+- `app/stock/[symbol]/page.tsx` — thin wrapper around `components/stock/StockAnalysis.tsx`, which holds the whole stock page (single-stock candlestick chart with level overlays; the selected expiry changes which levels are shown). See "Stock chart layout" below. Backed by `app/api/stocks/[symbol]/*` routes (details, `ohlc` from Alpaca, `levels` with historical range support, `expiry-dates`, `oi`).
 - `app/watchlists/page.tsx` — full watchlists management (create/rename/delete lists, quotes table with level/direction/proximity filters, alerts widget). `app/watchlists/view/page.tsx` ("Watchlist W Chart" in the nav) is a split view of the same data: embedded stock chart on the left, compact watchlist table on the right. Both read/write the same watchlists via `app/api/watchlists/*`, so lists created on one show up on the other; shared types/cells/helpers live in `components/watchlists/watchlistShared.tsx`. Both sit under `app/watchlists/layout.tsx`, which gates on the Watchlists feature.
 - `app/quadrant/page.tsx` — scatter/ladder visualization of all stocks positioned by proximity to their closest level, with sector/industry/market-cap/index filters. Backed by `app/api/quadrant/data/route.ts`, which also derives available filter options from the securities present for the selected date (so filter dropdowns never offer an empty result set).
 - `app/diagnostics/page.tsx` + `app/api/{health,test-alpaca,test-db,test-tradier,debug/[symbol]}` — connectivity/debug endpoints for each external dependency, useful for verifying env vars are wired correctly after a deploy.
