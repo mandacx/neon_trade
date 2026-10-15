@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, ReactNode } from 'react';
-import { createChart, IChartApi, ISeriesApi, IPriceLine, CandlestickData, HistogramData, MouseEventParams, SeriesMarker, Time } from 'lightweight-charts';
+import { createChart, IChartApi, ISeriesApi, IPriceLine, CandlestickData, HistogramData, MouseEventParams, SeriesMarker, Time, type AutoscaleInfo } from 'lightweight-charts';
 import { LevelCalculation, ScanAlert } from '@/types/stock';
 import type { EarningsResult } from '@/types/earnings';
 import type { ExtendedQuote } from '@/lib/quote';
@@ -14,6 +14,38 @@ const EARNINGS_OUTCOME_COLOR: Record<NonNullable<EarningsResult['epsOutcome']>, 
   inline: '#6b7280',
 };
 import { getLevelColor, getLevelDisplayName, formatCurrency, formatPercentage, escapeHtml, SCAN_CODE_TO_LEVEL } from '@/lib/utils';
+
+/** Widest candle spacing (px) when fitting the whole history; fewer bars than fill the width stay this narrow. */
+const MAX_BAR_SPACING = 8;
+
+/**
+ * Fit every bar, but never wider than MAX_BAR_SPACING per bar: a short history is
+ * drawn right-aligned at that spacing instead of being stretched into fat candles.
+ * The empty space on the left then triggers the existing load-more of older bars.
+ */
+function fitBarsCapped(chart: IChartApi, barCount: number) {
+  const ts = chart.timeScale();
+  ts.fitContent();
+  if (barCount > 0 && ts.width() / barCount > MAX_BAR_SPACING) {
+    ts.applyOptions({ barSpacing: MAX_BAR_SPACING });
+    ts.scrollToRealTime();
+  }
+}
+
+type GapPoint = { time: any; value: number; color?: string };
+/**
+ * Line points for bars that have a value, given as (bar index, point). Where bars
+ * without a value separate two points, the point before the gap is made
+ * transparent: lightweight-charts 4.x colours a segment by its starting point and
+ * bridges whitespace, so this is what hides the straight line across a data gap
+ * (verified against 4.2.3).
+ */
+function breakAtGaps(points: Array<{ idx: number; time: any; value: number }>): GapPoint[] {
+  return points.map((p, i) => {
+    const next = points[i + 1];
+    return next && next.idx > p.idx + 1 ? { time: p.time, value: p.value, color: 'rgba(0,0,0,0)' } : { time: p.time, value: p.value };
+  });
+}
 
 interface TVChartProps {
   symbol: string;
@@ -148,6 +180,10 @@ export default function TVChart({
   const [selectedPeriod, setSelectedPeriod] = useState<string>('ALL');
   const [showPrice, setShowPrice] = useState(true);
   const [showOI, setShowOI] = useState(true);
+  // Off: the price scale follows the visible candles' high/low only, so a far-away
+  // level (often Put Low / Call High) can't squash the candles. On: levels widen it.
+  const [fitLevels, setFitLevels] = useState(false);
+  const fitLevelsRef = useRef(false);
   const [activeLevelFilter, setActiveLevelFilter] = useState<string | null>(null);
   const [isEnlarged, setIsEnlarged] = useState(false);
   const loadingMoreRef = useRef(false);
@@ -219,6 +255,8 @@ export default function TVChart({
       },
       rightPriceScale: {
         borderColor: '#d1d4dc',
+        // Candles use the top ~76%; volume sits in the bottom 20% (its own scale).
+        scaleMargins: { top: 0.06, bottom: 0.24 },
       },
       leftPriceScale: {
         visible: true,
@@ -286,7 +324,7 @@ export default function TVChart({
     const callOiLine = chart.addLineSeries({
       color: '#ef4444',
       lineWidth: 2,
-      lineType: 2,
+      lineType: 1, // steps: daily values; curved lines loop at data gaps
       title: 'Call OI',
       priceScaleId: 'left',
       priceFormat: { type: 'volume' },
@@ -298,7 +336,7 @@ export default function TVChart({
     const putOiLine = chart.addLineSeries({
       color: '#22c55e',
       lineWidth: 2,
-      lineType: 2,
+      lineType: 1, // steps: daily values; curved lines loop at data gaps
       title: 'Put OI',
       priceScaleId: 'left',
       priceFormat: { type: 'volume' },
@@ -310,7 +348,7 @@ export default function TVChart({
     const oiDiffLine = chart.addLineSeries({
       color: '#f59e0b',
       lineWidth: 2,
-      lineType: 2,
+      lineType: 1, // steps: daily values; curved lines loop at data gaps
       title: 'OI Diff',
       priceScaleId: 'left',
       priceFormat: { type: 'volume' },
@@ -331,12 +369,14 @@ export default function TVChart({
       const s = chart.addLineSeries({
         color: cfg.color,
         lineWidth: 1,
-        lineType: 2,
+        lineType: 1, // steps: daily values; curved lines loop at data gaps
         title: cfg.title,
         priceScaleId: 'right',
         lastValueVisible: true,
         priceLineVisible: false,
         crosshairMarkerVisible: false,
+        // Levels only widen the price scale when "Fit levels" is on.
+        autoscaleInfoProvider: (original: () => AutoscaleInfo | null) => (fitLevelsRef.current ? original() : null),
       });
       newLevelSeries[cfg.name] = s;
     });
@@ -715,7 +755,7 @@ export default function TVChart({
     // handleVisibleTimeRangeChange below) and isn't subject to that batching
     // race, so check it too.
     if (!isLoadingMore && !loadingMoreRef.current && chartRef.current) {
-      chartRef.current.timeScale().fitContent();
+      fitBarsCapped(chartRef.current, processedBars.length);
     }
   }, [processedBars, volumeByTime, isLoading, isLoadingMore, showPrice]);
 
@@ -737,29 +777,33 @@ export default function TVChart({
       oiData.forEach(d => { if (d.time) oiByDay.set(String(d.time), d); });
 
       const oiDiffPoints: HistogramData[] = [];
-      const callOiPoints: { time: any; value: number }[] = [];
-      const putOiPoints: { time: any; value: number }[] = [];
-      const oiDiffLinePoints: { time: any; value: number }[] = [];
+      // Line points keep their bar index so breakAtGaps() can hide the segment
+      // across bars that have no OI (the expiry's history is often sparse).
+      type P = { idx: number; time: any; value: number };
+      const callOiPoints: P[] = [];
+      const putOiPoints: P[] = [];
+      const oiDiffLinePoints: P[] = [];
 
-      processedBars.forEach(bar => {
+      processedBars.forEach((bar, idx) => {
         const dayOi = oiByDay.get(bar.dayKey);
         if (!dayOi) return;
+        const t = bar.time as any;
         if (Number.isFinite(dayOi.oiDiff)) {
           oiDiffPoints.push({
-            time: bar.time as any,
+            time: t,
             value: Math.abs(dayOi.oiDiff),
             color: dayOi.oiDiff > 0 ? 'rgba(34, 197, 94, 0.6)' : 'rgba(239, 68, 68, 0.6)',
           });
-          oiDiffLinePoints.push({ time: bar.time as any, value: dayOi.oiDiff });
+          oiDiffLinePoints.push({ idx, time: t, value: dayOi.oiDiff });
         }
-        if (Number.isFinite(dayOi.callOi)) callOiPoints.push({ time: bar.time as any, value: dayOi.callOi });
-        if (Number.isFinite(dayOi.putOi)) putOiPoints.push({ time: bar.time as any, value: dayOi.putOi });
+        if (Number.isFinite(dayOi.callOi)) callOiPoints.push({ idx, time: t, value: dayOi.callOi });
+        if (Number.isFinite(dayOi.putOi)) putOiPoints.push({ idx, time: t, value: dayOi.putOi });
       });
 
       oiDiffSeriesRef.current.setData(oiDiffPoints);
-      callOiLineRef.current.setData(callOiPoints as any);
-      putOiLineRef.current.setData(putOiPoints as any);
-      oiDiffLineRef.current.setData(oiDiffLinePoints as any);
+      callOiLineRef.current.setData(breakAtGaps(callOiPoints));
+      putOiLineRef.current.setData(breakAtGaps(putOiPoints));
+      oiDiffLineRef.current.setData(breakAtGaps(oiDiffLinePoints));
 
       oiDiffSeriesRef.current.applyOptions({ visible: showOI });
       callOiLineRef.current.applyOptions({ visible: showOI });
@@ -839,25 +883,27 @@ export default function TVChart({
       return;
     }
 
-    const buckets: Record<string, { time: any; value: number }[]> = {
+    const buckets: Record<string, { idx: number; time: any; value: number }[]> = {
       call_high: [], call_int: [], put_call_int: [], put_int: [], put_low: [],
     };
 
-    processedBars.forEach(bar => {
+    processedBars.forEach((bar, idx) => {
       const dayData = historicalLevels.get(bar.dayKey);
       if (!dayData) return;
       dayData.levels.forEach(level => {
         const price = typeof level.price === 'string' ? parseFloat(level.price) : level.price;
         if (buckets[level.name] && Number.isFinite(price) && price > 0) {
-          buckets[level.name].push({ time: bar.time as any, value: price });
+          buckets[level.name].push({ idx, time: bar.time as any, value: price });
         }
       });
     });
 
+    // An expiry's level history is often sparse: break the line across gaps
+    // instead of bridging them with a straight segment.
     Object.entries(buckets).forEach(([name, data]) => {
       const s = refs[name];
       if (!s) return;
-      s.setData(data as any);
+      s.setData(breakAtGaps(data));
     });
   }, [historicalLevels, processedBars]);
 
@@ -984,6 +1030,12 @@ export default function TVChart({
     volumeSeriesRef.current.applyOptions({ visible: showPrice });
   }, [showPrice]);
 
+  // Re-run autoscale when "Fit levels" flips (the provider reads the ref).
+  useEffect(() => {
+    fitLevelsRef.current = fitLevels;
+    chartRef.current?.priceScale('right').applyOptions({ autoScale: true });
+  }, [fitLevels]);
+
   useEffect(() => {
     if (!oiDiffSeriesRef.current || !callOiLineRef.current || !putOiLineRef.current || !oiDiffLineRef.current) return;
 
@@ -1033,7 +1085,7 @@ export default function TVChart({
       }
       case 'ALL':
       default:
-        chartRef.current.timeScale().fitContent();
+        fitBarsCapped(chartRef.current, candleSeriesRef.current?.data().length ?? 0);
         return;
     }
 
@@ -1152,6 +1204,17 @@ export default function TVChart({
                 }`}
               >
                 OI
+              </button>
+              <button
+                onClick={() => setFitLevels(v => !v)}
+                title={fitLevels ? 'Price scale includes every level' : 'Price scale fits the candles; turn on to bring all levels into view'}
+                className={`px-2 py-1 text-[11px] font-medium rounded transition-colors ${
+                  fitLevels
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                }`}
+              >
+                Fit levels
               </button>
             </div>
 

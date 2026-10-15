@@ -7,6 +7,56 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-15 — Stock chart: candles fit the window, narrower candles, level lines break at data gaps
+
+Reported: candle height should improve and candle width should be reduced. Plot candles by each day's range
+compared with the other days, so they fit the window, rather than letting every price level set the scale.
+
+### Cause (verified in code and in a browser)
+
+- **Level lines set the scale.** The five level lines (`call_high` … `put_low`) were line series on the candles'
+  right price scale, so autoscale stretched to include them. On AAPL the candles spanned about $305–345 while
+  the scale ran $240–400 to fit Put Low 251 / Call High 361, leaving the candles about a third of the height.
+- **Volume shared the candle area.** Candles used the default scale margins and overlapped the 20% volume band.
+- **Candle width came from `fitContent()`.** It stretched the initially loaded bars (about two months of daily
+  bars) across the full width, so candles were about 25px wide.
+- **Lines bridged gaps.** An expiry's level/OI history is often sparse. lightweight-charts 4.2.3 draws a straight
+  line across such gaps; whitespace points don't break it (tested in isolation), and the curved style even
+  draws loops at the gap edges.
+
+### What changed (`components/charts/TVChart.tsx`)
+
+- **Scale follows the candles.** Level series get `autoscaleInfoProvider` returning null unless a new
+  **"Fit levels"** toggle (next to Price/OI) is on.
+  - The price scale fits the visible candles' high/low only.
+  - Levels outside that range are off-screen; the level chips below the chart still list them with % distance.
+- **Candle area.** Right price scale margins are `top 0.06, bottom 0.24`, so candles sit above the volume band.
+- **Width cap.** `fitBarsCapped()` replaces `fitContent()` on initial load and on "ALL": at most 8px per bar.
+  - A shorter history is drawn right-aligned at that spacing.
+  - The empty space on the left triggers the existing load-more, which fills it with older bars.
+  - The period buttons (1W, 1M, …) are unchanged.
+- **Lines break at gaps.** `breakAtGaps()` makes the point before a gap transparent, because a segment takes its
+  starting point's colour. Level and OI lines now use the step style instead of curved, since they are daily values.
+
+### Verified
+
+- Playwright, production build, before and after screenshots of `/stock/AAPL`, `/stock/NVDA` (1440px) and
+  `/stock/SPY` (1280px):
+  - Candles fill the chart height and are narrow (load-more brought in history back to March).
+  - Level lines no longer cross the chart.
+  - "Fit levels" widens the scale to include Call High / Put Low.
+  - No page errors.
+- The transparent-segment technique was checked against lightweight-charts 4.2.3 in an isolated page.
+- `tsc` and `npm run build` pass; eslint reports 0 errors on the file.
+
+### Not verified
+
+- The embedded chart on `/watchlists/view` (needs a login) and intraday intervals were not viewed; they use the
+  same code.
+- Mobile widths were not checked.
+
+---
+
 ## 2026-10-15 — Escape closes only the top modal; volume backfill estimate
 
 Requested: fix stacked modals both closing on Escape, and estimate the volume backfill from Sep 1.
