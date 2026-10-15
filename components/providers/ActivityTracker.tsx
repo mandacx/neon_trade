@@ -12,6 +12,19 @@ function send(payload: Record<string, unknown>) {
 }
 
 /**
+ * First few stack frames of an error with the origin stripped
+ * (`/_next/static/chunks/x.js:1:2`), so the admin dashboard can show where it
+ * came from. Chrome frames look like `at fn (url)`, Safari/Firefox like
+ * `fn@url`; the leading "Name: message" line is dropped.
+ */
+function shortStack(err: unknown): string | undefined {
+  const raw = err instanceof Error ? err.stack : undefined;
+  if (!raw) return undefined;
+  const frames = raw.split('\n').map(l => l.trim()).filter(l => /^at |@/.test(l)).slice(0, 6);
+  return frames.length ? frames.map(l => l.replace(/https?:\/\/[^/\s)]+/g, '')).join('\n').slice(0, 1200) : undefined;
+}
+
+/**
  * Arrival ping on each route, an exit beacon with time-on-page when leaving
  * (route change or tab hidden/closed), and window errors. Renders nothing.
  */
@@ -46,8 +59,8 @@ export default function ActivityTracker() {
     const onVisible = () => {
       if (document.visibilityState === 'visible' && !startRef.current) startRef.current = { path: window.location.pathname, at: Date.now() };
     };
-    const onError = (e: ErrorEvent) => send({ type: 'error_client', path: window.location.pathname, message: e.message });
-    const onRejection = (e: PromiseRejectionEvent) => send({ type: 'error_client', path: window.location.pathname, message: String(e.reason) });
+    const onError = (e: ErrorEvent) => send({ type: 'error_client', path: window.location.pathname, message: e.message, stack: shortStack(e.error) });
+    const onRejection = (e: PromiseRejectionEvent) => send({ type: 'error_client', path: window.location.pathname, message: String(e.reason), stack: shortStack(e.reason) });
     document.addEventListener('visibilitychange', onHide);
     document.addEventListener('visibilitychange', onVisible);
     window.addEventListener('error', onError);

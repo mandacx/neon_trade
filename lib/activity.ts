@@ -15,6 +15,8 @@ export interface ActivityEventInput {
   referrer?: string | null;
   durationMs?: number | null;
   message?: string | null;
+  /** A few stack frames, for error events. */
+  stack?: string | null;
   statusCode?: number | null;
   userAgent?: string | null;
 }
@@ -42,6 +44,7 @@ export async function ensureTable(): Promise<void> {
       created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
     )
   `;
+  await sql`ALTER TABLE public.nt_activity_events ADD COLUMN IF NOT EXISTS stack TEXT`;
   await sql`CREATE INDEX IF NOT EXISTS nt_activity_events_created_idx ON public.nt_activity_events (created_at)`;
   await sql`CREATE INDEX IF NOT EXISTS nt_activity_events_user_idx ON public.nt_activity_events (user_id, created_at)`;
   tableReady = true;
@@ -59,9 +62,9 @@ export async function recordActivity(e: ActivityEventInput): Promise<void> {
   const duration = e.durationMs == null ? null : Math.max(0, Math.min(MAX_DURATION_MS, Math.round(e.durationMs)));
   await sql`
     INSERT INTO public.nt_activity_events
-      (session_id, user_id, event_type, path, referrer, duration_ms, message, status_code, user_agent)
+      (session_id, user_id, event_type, path, referrer, duration_ms, message, stack, status_code, user_agent)
     VALUES (${e.sessionId}, ${e.userId}, ${e.eventType}, ${clip(e.path, 300)}, ${clip(e.referrer, 300)},
-            ${duration}, ${clip(e.message, 500)}, ${e.statusCode ?? null}, ${clip(e.userAgent, 300)})
+            ${duration}, ${clip(e.message, 500)}, ${clip(e.stack, 1500)}, ${e.statusCode ?? null}, ${clip(e.userAgent, 300)})
   `;
   // Opportunistic retention prune (~1 in 200 writes) instead of a dedicated cron.
   if (Math.random() < 0.005) {
@@ -77,7 +80,7 @@ export async function claimAnonymousEvents(sessionId: string, userId: string): P
 
 export interface ActiveSessionRow { sessionId: string; userId: string | null; who: string; pageviews: number; lastSeen: string }
 export interface TopPageRow { path: string; views: number; avgSeconds: number | null }
-export interface ErrorRow { userId: string | null; email: string | null; path: string | null; message: string | null; kind: string; createdAt: string }
+export interface ErrorRow { userId: string | null; email: string | null; path: string | null; message: string | null; stack: string | null; kind: string; createdAt: string }
 export interface ActivitySummary {
   activeSessionsToday: number;
   pageViewsToday: number;
@@ -122,7 +125,7 @@ export async function getActivitySummary(limit: number = 100): Promise<ActivityS
         LIMIT ${limit}
       `,
       sql`
-        SELECT e.user_id AS uid, u.email, e.path, e.message, e.event_type, e.created_at::text AS created_at
+        SELECT e.user_id AS uid, u.email, e.path, e.message, e.stack, e.event_type, e.created_at::text AS created_at
         FROM public.nt_activity_events e
         LEFT JOIN neon_auth."user" u ON u.id::text = e.user_id
         WHERE e.created_at >= ${todayStart}::timestamptz AND e.event_type <> 'pageview'
@@ -147,7 +150,7 @@ export async function getActivitySummary(limit: number = 100): Promise<ActivityS
         views: Number(r.views),
         avgSeconds: r.avg_ms == null ? null : Math.round(Number(r.avg_ms) / 1000),
       })),
-      errors: (errs as any[]).map(r => ({ userId: r.uid ?? null, email: r.email ?? null, path: r.path, message: r.message, kind: r.event_type, createdAt: r.created_at })),
+      errors: (errs as any[]).map(r => ({ userId: r.uid ?? null, email: r.email ?? null, path: r.path, message: r.message, stack: r.stack ?? null, kind: r.event_type, createdAt: r.created_at })),
     };
   } catch (err) {
     console.error('activity: summary failed', err);

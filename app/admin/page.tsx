@@ -22,7 +22,7 @@ interface PlanUserRow { userId: string; email: string; planExpiresAt: string | n
 
 interface ActiveSessionRow { sessionId: string; userId: string | null; who: string; pageviews: number; lastSeen: string }
 interface TopPageRow { path: string; views: number; avgSeconds: number | null }
-interface ErrorRow { userId: string | null; email: string | null; path: string | null; message: string | null; kind: string; createdAt: string }
+interface ErrorRow { userId: string | null; email: string | null; path: string | null; message: string | null; stack: string | null; kind: string; createdAt: string }
 interface Activity {
   activeSessionsToday: number;
   pageViewsToday: number;
@@ -358,7 +358,15 @@ export default function AdminDashboardPage() {
               <tr key={i}>
                 <td className="py-1.5 pr-3 font-medium text-gray-700 whitespace-nowrap"><UserCell id={er.userId} label={er.email ?? 'Anonymous'} /></td>
                 <td className="py-1.5 pr-3 text-right text-gray-700 break-all">{er.path ?? '—'}</td>
-                <td className="py-1.5 pr-3 text-right text-red-600 break-words">{er.message ?? er.kind}</td>
+                <td className="py-1.5 pr-3 text-right text-red-600 break-words">
+                  {er.message ?? er.kind}
+                  {er.stack && (
+                    <details className="text-left mt-0.5">
+                      <summary className="text-[10px] text-gray-400 cursor-pointer select-none text-right">stack</summary>
+                      <pre className="text-[10px] text-gray-500 whitespace-pre-wrap break-all font-mono">{er.stack}</pre>
+                    </details>
+                  )}
+                </td>
                 <td className="py-1.5 text-right text-gray-400 whitespace-nowrap">{formatCT(er.createdAt)}</td>
               </tr>
             ))}

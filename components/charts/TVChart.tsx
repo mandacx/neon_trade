@@ -647,6 +647,20 @@ export default function TVChart({
         visibleRangeUnsubscribe();
       }
       levelSeriesRefs.current = {};
+      // Drop every ref to the chart's series BEFORE removing it. React runs the
+      // other effects' cleanups after this one (declaration order), and the
+      // price-line cleanup below calls candleSeriesRef.current.removePriceLine().
+      // On a removed chart that schedules a repaint on its disposed canvas, which
+      // throws "Object is disposed" from a requestAnimationFrame callback every
+      // time the user left a stock page or switched symbol.
+      chartRef.current = null;
+      candleSeriesRef.current = null;
+      volumeSeriesRef.current = null;
+      oiDiffSeriesRef.current = null;
+      callOiLineRef.current = null;
+      putOiLineRef.current = null;
+      oiDiffLineRef.current = null;
+      priceLineRefs.current = [];
       chart.remove();
     };
   }, [height, onLoadMore, isIntraday, symbol]);

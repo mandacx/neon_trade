@@ -7,6 +7,66 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-14 — Fix: "Object is disposed" client errors on the admin dashboard
+
+Reported: errors showing in the admin dashboard's Errors panel.
+
+### What the log held (live `nt_activity_events`, `event_type` = error_*)
+
+74 events since 2026-10-09: 73 are `Object is disposed` (63 `Uncaught Error:` from `window.onerror`, 10 `Error:`
+from `unhandledrejection`), logged on `/`, `/login`, `/admin`, `/quadrant`, `/watchlists/view` and `/stock/*`
+(the logged path is the page the user had just navigated *to*). One is `TypeError: Load failed` (a failed
+fetch in Safari; not actionable). The tracker stores only the message, so there was no stack.
+
+### Cause (reproduced)
+
+Playwright against a local production build: open `/stock/META`, then client-side navigate to `/`. The page
+threw `Error: Object is disposed` from a `lightweight-charts` `requestAnimationFrame` paint (the message comes
+from the library's canvas binding, `fancy-canvas` `DevicePixelContentBoxBinding`, once its canvas is disposed).
+In `TVChart`, the chart-creation effect's cleanup called `chart.remove()` but left `candleSeriesRef` etc.
+pointing at the removed series. React runs cleanups in declaration order, so the price-line effect's cleanup
+then called `candleSeriesRef.current.removePriceLine()` on the removed chart, which schedules a repaint on the
+disposed canvas. `OptionContractChart` already nulled its refs and was not affected.
+
+### What changed
+
+- `components/charts/TVChart.tsx`: the chart effect's cleanup now nulls `chartRef` and every series ref, and
+  empties `priceLineRefs`, before `chart.remove()`.
+
+### Verified
+
+- Before: `/stock/META` -> `/` threw the error (stack in lightweight-charts only, from a rAF callback).
+- After (rebuilt production server, Playwright, Chromium): 0 page errors for stock -> stock (symbol switch),
+  stock -> `/`, and stock -> `/login`. `npm run build` passes.
+
+### Not verified
+
+- The 10 `Error: Object is disposed` rejections (`unhandledrejection`) may come from a different path; nothing
+  here shows they share the cause. Watch whether the count keeps growing after deploy.
+- Only Chromium was run (older log entries include Safari user agents, not checked); the fix is browser-independent
+  but WebKit was not tested. `/watchlists/view` (embedded chart) was not exercised separately.
+- Existing entries stay in the table; the panel counts the last N days, so it clears on its own.
+
+### Also: short stack on error events
+
+So the next error is diagnosable, error events now carry the first 6 stack frames.
+
+- `components/providers/ActivityTracker.tsx`: `shortStack()` (from `e.error` / `e.reason` when they are `Error`s;
+  origin stripped, handles Chrome `at fn (url)` and Safari/Firefox `fn@url`; max 1,200 chars) sent as `stack`.
+- `app/api/track/route.ts`: accepts `stack`. `lib/activity.ts`: new `stack TEXT` column
+  (`ALTER TABLE ... ADD COLUMN IF NOT EXISTS` inside `ensureTable()`, so no separate migration), stored clipped to
+  1,500 chars, returned on `ErrorRow`. `app/admin/page.tsx`: the Errors panel shows a collapsible "stack" under the message.
+- Not shown in the Errors drill-down modal or the user/session history modals (they render plain message text); the
+  column is there if you want it added.
+- Verified: a local production build with a normal Chrome user agent posted an uncaught error and a rejection;
+  both rows stored with their frames, a non-Error rejection (`Promise.reject('text')`) stored `stack` = null, and
+  `getActivitySummary()` returns the field. The three test rows were deleted. The `stack` column now exists in the
+  live database (the local run used `.env.local`, which points at the same Neon DB; the DDL is additive).
+- Not verified: the dashboard panel rendering in a browser (admin session needed). Stack frames from minified
+  production chunks are not source-mapped, so they name chunk files and positions, not functions.
+
+---
+
 ## 2026-10-14 — Fix: "Delayed" badge missing on watchlists levels
 
 ### Cause (verified in code)

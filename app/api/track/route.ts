@@ -15,7 +15,7 @@ export async function POST(request: NextRequest) {
 
     // sendBeacon posts text/plain, so parse the raw body.
     const body = JSON.parse(await request.text()) as {
-      type?: string; path?: string; referrer?: string; durationMs?: number; message?: string;
+      type?: string; path?: string; referrer?: string; durationMs?: number; message?: string; stack?: string;
     };
     if (!body.type || !TYPES.includes(body.type as ActivityEventType) || typeof body.path !== 'string') {
       return new NextResponse(null, { status: 204 });
@@ -33,6 +33,7 @@ export async function POST(request: NextRequest) {
       referrer: typeof body.referrer === 'string' ? body.referrer : null,
       durationMs: typeof body.durationMs === 'number' ? body.durationMs : null,
       message: typeof body.message === 'string' ? body.message : null,
+      stack: typeof body.stack === 'string' ? body.stack : null,
       userAgent: ua,
     });
     if (user && existing) await claimAnonymousEvents(existing, user.id);
