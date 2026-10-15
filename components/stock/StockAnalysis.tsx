@@ -11,8 +11,12 @@ import OptionContractModal from '@/components/stock/OptionContractModal';
 import { EarningsHeaderLines, EarningsExpiryChip, EarningsHistoryTable } from '@/components/stock/EarningsPanel';
 import type { EarningsResult, EarningsSummary } from '@/types/earnings';
 import { LevelCalculation, ScanAlert } from '@/types/stock';
-import { getLevelColor, getLevelDisplayName, formatCurrency, formatPercentage, isUsMarketHours } from '@/lib/utils';
+import { getLevelColor, getLevelDisplayName, formatCurrency, formatPercentage } from '@/lib/utils';
 import { isIntradayInterval } from '@/lib/alpaca';
+import type { ExtendedQuote } from '@/lib/quote';
+import type { MarketSession } from '@/lib/marketSession';
+import { pollDelayMs } from '@/lib/pollDelay';
+import ExtendedMove from '@/components/ui/ExtendedMove';
 import { format, subDays } from 'date-fns';
 
 type SelectableInterval = '1min' | '5min' | '15min' | '30min' | '1hour' | 'daily';
@@ -62,6 +66,7 @@ const OPT_CHAIN_ALL_FROM = '2000-01-01';
 // Alpaca omits prevDailyBar/dailyBar for names that haven't printed, and the
 // route reports null rather than a NaN change in that case.
 interface LiveQuote {
+  /** Live in the regular session; the last regular close outside it. */
   price: number;
   dayOpen: number | null;
   dayHigh: number | null;
@@ -69,6 +74,10 @@ interface LiveQuote {
   prevClose: number | null;
   change: number | null;
   changePercent: number | null;
+  /** Pre-market / after-hours move from the regular close; null when nothing printed. */
+  ext: ExtendedQuote | null;
+  /** Which session it is and when it next changes (drives the polling cadence). */
+  market: { session: MarketSession; nextChangeAt: string | null };
 }
 
 // public.securities metadata, returned alongside `data` by the details route.
@@ -753,24 +762,30 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
     return () => { cancelled = true; };
   }, [embedded, symbol, selectedExpiry, expiryMode, optChainPreset]);
 
-  // Live price — polls Alpaca's latest trade. Fast during market hours for a
-  // genuinely "live" feel, much slower off-hours since the price can't move.
+  // Live price — polls Alpaca's snapshot on the real market schedule: every
+  // 10s in the regular session, every 30s in pre-market / after-hours (the
+  // extended-hours move keeps updating), and when the market is closed it
+  // sleeps until the next session boundary (04:00 ET pre-market, then 09:30)
+  // instead of polling blindly. The server reports the session and the next
+  // change with every quote (lib/marketSession.ts).
   useEffect(() => {
     if (!symbol) return;
     let cancelled = false;
     let timeoutId: ReturnType<typeof setTimeout>;
+    let lastMarket: LiveQuote['market'] | null = null;
 
     function poll() {
       fetch(`/api/stocks/${symbol}/quote`)
         .then(r => r.json())
         .then(res => {
           if (cancelled || !res.success || !res.data) return;
+          lastMarket = res.data.market ?? null;
           setQuote(res.data);
         })
         .catch(() => {})
         .finally(() => {
           if (cancelled) return;
-          timeoutId = setTimeout(poll, isUsMarketHours(new Date()) ? 10_000 : 5 * 60_000);
+          timeoutId = setTimeout(poll, pollDelayMs(lastMarket, { regularMs: 10_000, extendedMs: 30_000 }));
         });
     }
 
@@ -1178,7 +1193,7 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
         <strong>Analysis:</strong>{' '}
         {/* Name the basis explicitly — the distance is measured from the
             live price or the EOD close, and the two disagree intra-day. */}
-        The {basisPrice !== undefined ? 'live' : 'closing'} price of{' '}
+        The {basisPrice !== undefined && quote?.market.session === 'regular' ? 'live' : 'closing'} price of{' '}
         {formatCurrency(basisPrice ?? stockData?.close)} is closest to the{' '}
         <strong className="text-blue-700">{getLevelDisplayName(closestLevelName)}</strong>{' '}
         level at {formatCurrency(closestLvl.price)}, with a distance
@@ -1287,6 +1302,7 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
                     {quote.changePercent != null && ` (${quote.changePercent >= 0 ? '+' : '−'}${Math.abs(quote.changePercent).toFixed(2)}%)`}
                   </span>
                 )}
+                {basisPrice !== undefined && quote?.ext && <ExtendedMove ext={quote.ext} full />}
                 {!embedded && <div className="ml-2">{jumpButtons}</div>}
                 {collapseButton}
               </div>
@@ -1310,6 +1326,8 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
                 selectedExpiry={selectedExpiry}
                 isIntraday={isIntradayInterval(chartInterval)}
                 livePrice={basisPrice}
+                marketSession={basisPrice !== undefined ? quote?.market.session : undefined}
+                extended={basisPrice !== undefined ? quote?.ext : undefined}
                 currentPrice={stockData?.close}
                 dayChange={basisPrice !== undefined ? quote?.change : undefined}
                 dayChangePercent={basisPrice !== undefined ? quote?.changePercent : undefined}

@@ -5,6 +5,8 @@ import { getWatchlistSymbols } from '@/lib/watchlists';
 import { getSecuritiesMeta } from '@/lib/securitiesFilters';
 import { getSnapshotsMulti } from '@/lib/alpaca';
 import { getEarningsSummary } from '@/lib/earnings';
+import { getMarketState } from '@/lib/marketSession';
+import { buildQuote, rowQuote } from '@/lib/quote';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,6 +14,11 @@ export const dynamic = 'force-dynamic';
 // every symbol in one watchlist — the table view's data source. Split from
 // GET /api/watchlists/[id] (which stays fast/DB-only for the symbol list
 // itself) since this one fans out to Alpaca and is meaningfully slower.
+//
+// Session-aware (lib/quote.ts): `lastPrice`/`change` are live in the regular
+// session and the last regular close after it; `ext` carries the pre-market /
+// after-hours move from that close until the next regular session. `market`
+// lets the client poll on the real open/close schedule.
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { ctx, blocked } = await requireFeatureApi(FEATURE_WATCHLISTS);
   if (blocked) return blocked;
@@ -22,36 +29,34 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   // them when this is false.
   const earningsEnabled = hasFeature(ctx.features, FEATURE_EARNINGS);
   if (symbols.length === 0) {
-    return NextResponse.json({ success: true, data: { rows: [], earningsEnabled } });
+    const empty = await getMarketState();
+    return NextResponse.json({ success: true, data: { rows: [], earningsEnabled, market: { session: empty.session, nextChangeAt: empty.nextChangeAt } } });
   }
 
-  const [secMeta, snapshots, earnings] = await Promise.all([
+  const [secMeta, snapshots, earnings, market] = await Promise.all([
     getSecuritiesMeta(symbols),
     getSnapshotsMulti(symbols),
     earningsEnabled ? getEarningsSummary(symbols) : Promise.resolve(null),
+    getMarketState(),
   ]);
 
   const rows = symbols.map(symbol => {
-    const snap = snapshots[symbol];
-    const dailyBar = snap?.dailyBar;
-    const prevClose = snap?.prevDailyBar?.c ?? null;
-    const lastPrice = dailyBar?.c ?? snap?.latestTrade?.p ?? null;
-    const change = lastPrice !== null && prevClose !== null ? lastPrice - prevClose : null;
-    const changePercent = change !== null && prevClose ? (change / prevClose) * 100 : null;
+    const q = buildQuote(snapshots[symbol], market);
 
     return {
       symbol,
       name: secMeta[symbol]?.name ?? symbol,
-      lastPrice,
-      open: dailyBar?.o ?? null,
-      dayHigh: dailyBar?.h ?? null,
-      dayLow: dailyBar?.l ?? null,
-      volume: dailyBar?.v ?? null,
-      change,
-      changePercent,
+      ...rowQuote(q),
+      open: q.dayOpen,
+      dayHigh: q.dayHigh,
+      dayLow: q.dayLow,
+      volume: q.volume,
       ...(earnings ? { earnings: earnings.get(symbol) ?? null } : {}),
     };
   });
 
-  return NextResponse.json({ success: true, data: { rows, earningsEnabled } });
+  return NextResponse.json({
+    success: true,
+    data: { rows, earningsEnabled, market: { session: market.session, nextChangeAt: market.nextChangeAt } },
+  });
 }

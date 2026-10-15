@@ -3,6 +3,7 @@ import { formatCurrency, getLevelColor, getLevelDisplayName } from '@/lib/utils'
 import { rebaseLevels, findClosestLevel } from '@/lib/calculations';
 import type { LevelCalculation } from '@/types/stock';
 import type { EarningsOutcome, EarningsSummary, EarningsTime } from '@/types/earnings';
+import type { ExtendedQuote } from '@/lib/quote';
 import { EARNINGS_FILTER_OPTIONS, earningsFilterMatches, type EarningsFilter } from '@/lib/earningsFilter';
 
 // Types, helpers and table cells shared by the full Watchlists page and the
@@ -21,6 +22,8 @@ export interface QuoteRow {
   changePercent: number | null;
   /** Present only when the viewer has the earnings feature (quotes route). */
   earnings?: EarningsSummary | null;
+  /** Pre-market / after-hours move from the regular close; null/absent when none (lib/quote.ts). */
+  ext?: ExtendedQuote | null;
 }
 export interface LevelRow {
   symbol: string;

@@ -5,13 +5,15 @@ import Header from '@/components/layout/Header';
 import { getLevelDisplayName } from '@/lib/utils';
 import { addDaysET } from '@/lib/earningsFilter';
 import type { EarningsOutcome, EarningsRangeRow } from '@/types/earnings';
+import type { ExtendedQuote } from '@/lib/quote';
+import ExtendedMove from '@/components/ui/ExtendedMove';
 import {
   type LevelRow, type LevelKey, LEVEL_FILTER_OPTIONS, rebaseToLtp, easternToday, fmtExpiry, fmtPrice, fmtEps, fmtSales,
   fmtNextDate, earningsTimeShort, ChangeCell, ChangePercentCell, LevelCell,
 } from '@/components/watchlists/watchlistShared';
 
 type Mode = 'upcoming' | 'reported' | 'custom';
-type SortKey = 'symbol' | 'date' | 'marketCap' | 'epsSurprise' | 'salesSurprise' | 'ltp' | 'change' | 'changePercent' | 'reaction' | 'since' | 'level';
+type SortKey = 'symbol' | 'date' | 'marketCap' | 'epsSurprise' | 'salesSurprise' | 'ltp' | 'change' | 'changePercent' | 'ext' | 'reaction' | 'since' | 'level';
 
 interface Row extends EarningsRangeRow {
   name: string | null;
@@ -22,6 +24,8 @@ interface Row extends EarningsRangeRow {
   lastPrice: number | null;
   change: number | null;
   changePercent: number | null;
+  /** Pre-market / after-hours move from the regular close; null when none. */
+  ext: ExtendedQuote | null;
   /** Close-to-close move around the report (reports already out). */
   reactionPct: number | null;
   /** Move from the pre-report close to the live price. */
@@ -182,6 +186,7 @@ export default function EarningsPage() {
         case 'ltp': return r.lastPrice;
         case 'change': return r.change;
         case 'changePercent': return r.changePercent;
+        case 'ext': return r.ext?.changePercent ?? null;
         case 'reaction': return r.reactionPct;
         case 'since': return r.sincePct;
         case 'level': { const p = levelBySymbol.get(r.symbol)?.distancePercent; return p == null ? null : Math.abs(p); }
@@ -219,6 +224,8 @@ export default function EarningsPage() {
     };
   }, [visible]);
 
+  // Only while some row has a pre-market / after-hours print (between the close and the next open).
+  const showExt = sorted.some(r => r.ext);
   const openChart = (symbol: string) => window.open(`/stock/${encodeURIComponent(symbol)}`, '_blank', 'noopener,noreferrer');
   const periodLabel = mode === 'custom' ? `${from} to ${to}` : `${mode === 'upcoming' ? 'Next' : 'Past'} ${days} day${days === 1 ? '' : 's'}`;
   const th = 'px-3 py-2 text-[11px] font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap';
@@ -425,6 +432,7 @@ export default function EarningsPage() {
                   <th className={`${th} text-right`}><SortHeader label="LTP" k="ltp" sortKey={sortKey} dir={sortDir} onSort={toggleSort} /></th>
                   <th className={`${th} text-right`}><SortHeader label="Chg $" k="change" sortKey={sortKey} dir={sortDir} onSort={toggleSort} /></th>
                   <th className={`${th} text-right`}><SortHeader label="Chg %" k="changePercent" sortKey={sortKey} dir={sortDir} onSort={toggleSort} /></th>
+                  {showExt && <th className={`${th} text-right`}><SortHeader label="Ext. hrs" k="ext" sortKey={sortKey} dir={sortDir} onSort={toggleSort} /></th>}
                   <th className={`${th} text-right`}><SortHeader label="Reaction" k="reaction" sortKey={sortKey} dir={sortDir} onSort={toggleSort} /></th>
                   <th className={`${th} text-right`}><SortHeader label="Since report" k="since" sortKey={sortKey} dir={sortDir} onSort={toggleSort} /></th>
                   <th className={`${th} text-right`}><SortHeader label={expiry ? `Level ${fmtExpiry(expiry)}` : 'Nearest level'} k="level" sortKey={sortKey} dir={sortDir} onSort={toggleSort} /></th>
@@ -461,6 +469,7 @@ export default function EarningsPage() {
                       <td className={`${td} text-right text-xs tabular-nums font-semibold text-gray-800`}>{fmtPrice(r.lastPrice)}</td>
                       <td className={`${td} text-right`}><ChangeCell change={r.change} /></td>
                       <td className={`${td} text-right`}><ChangePercentCell changePercent={r.changePercent} /></td>
+                      {showExt && <td className={`${td} text-right`}>{r.ext ? <ExtendedMove ext={r.ext} /> : <span className="text-xs text-gray-300">—</span>}</td>}
                       <td className={`${td} text-right`} title="Close-to-close move around the report: before the open = prior close to report-day close; after the close = report-day close to next close">
                         <ChangePercentCell changePercent={r.reactionPct} />
                       </td>

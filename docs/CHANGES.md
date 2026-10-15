@@ -7,6 +7,74 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-14 — Session-aware quotes: live / pre-market / after-hours / closed
+
+Requested: update quotes live or after hours according to the market's opening times, and show the
+after-hours change together with the day's closing change until the next market open, on the stock chart and
+other places as applicable.
+
+### What the data gives (verified live, after the close)
+
+- IEX snapshot: `dailyBar` is the **regular session only** (SPY close 769.65 while a 16:47 ET print was 768.84);
+  `latestTrade` includes extended-hours prints (condition code `T`); `prevDailyBar` is the session before.
+- Before this change the stock header used `latestTrade.p` against `prevDailyBar.c`, so after hours the badge
+  blended the after-hours move into the day change, while the watchlist routes used `dailyBar.c`. They disagreed.
+- IEX only sees part of extended-hours volume: SPY, TSLA, META, QQQ had after-hours prints, AAPL/NVDA/MSFT/PGR did
+  not. SIP (consolidated) is refused by this plan (403), so a name with no print simply has no after-hours figure.
+- The Alpaca trading calendar works with the existing keys (`/v2/calendar`, `/v2/clock`) and carries holidays,
+  early closes (13:00) and the extended window (`session_open` 0400 / `session_close` 2000, or 1700 on early closes).
+
+### What changed
+
+| Area | Files |
+|---|---|
+| Market state from the calendar (pre / regular / post / closed, next change); weekday fallback if the call fails | `lib/marketSession.ts` (new) |
+| Snapshot -> quote: regular price + day change, plus `ext` (after-hours / pre-market move from the regular close) | `lib/quote.ts` (new); `snapshotQuote` removed from `lib/alpaca.ts` |
+| Polling cadence from the session (regular 10-30s, pre/post 30-60s, closed: sleep to the next boundary, max 15 min) | `lib/pollDelay.ts` (new) |
+| Routes return `ext` + `market: { session, nextChangeAt }` | `app/api/stocks/[symbol]/quote`, `app/api/watchlists/[id]/quotes`, `app/api/market/indices` (now snapshot-based), `app/api/earnings/list`, `app/api/home/earnings` |
+| Display | `components/ui/ExtendedMove.tsx` (new): stock header, collapsed bar, watchlists (new "Ext. Hrs" column, only while a row has a print), W Chart (same), header indices strip (AH/Pre pill), home earnings cards, earnings page |
+| Stock chart | `components/charts/TVChart.tsx`: "Live" only in the regular session, "At close" otherwise; the extended-hours line under the day change; the last candle follows ticks in the regular session (and the daily candle always), never an intraday bar outside it |
+| Polling | `StockAnalysis` (quote), `app/watchlists/page.tsx` (new: it did not refresh before), `app/watchlists/view/page.tsx`, `IndicesStrip` |
+
+Semantics: **price / change / change %** are always the regular session (live while open, the last close after
+it); **After hours / Pre-market** is shown separately as the last IEX print versus that regular close, from the
+close until the next regular open (overnight, weekends and holidays included), then it disappears.
+
+### Verified
+
+- Session math against the real calendar at fixed instants: 04:00 / 09:29:59 / 09:30 / 16:00 / 20:00 ET
+  boundaries, a Saturday, Thanksgiving, the 2026-11-27 early close (post-market until 17:00) and the first
+  Monday after DST ends; `etDateOf` across midnight.
+- `buildQuote` on the live snapshots: SPY close 769.65, -8.38 (-1.08%), after hours 768.84 -0.81 (-0.11%); META and
+  TSLA likewise; AAPL/PGR no after-hours print. The same snapshot treated as in-session gives the live price and
+  no `ext`.
+- Production build, public routes over HTTP: `/api/stocks/{SPY,TSLA,AAPL}/quote` and `/api/market/indices`
+  return `ext` and `market.session = closed`, `nextChangeAt = 08:00Z` (04:00 ET).
+- Browser (Playwright, Chromium): `/stock/SPY` and `/stock/TSLA` headers show "AT CLOSE", the day change and
+  the "After hours $768.84 -$0.81 (-0.11%) 4:47 PM ET" line; the indices strip shows AH pills; no page errors.
+- Polling cadence with a fake clock: closed = one request, none for 10 minutes, the next at the 15-minute cap;
+  with the quote response mocked to `regular` the page polls every 10 s and shows "Live"; mocked `post`, every
+  ~30 s and no "Live".
+- `tsc`, eslint (0 errors) and `npm run build` pass.
+
+### Not verified
+
+- **Pre-market behaviour of the snapshot.** It was not possible to observe the 04:00-09:30 ET window: whether
+  Alpaca rolls `dailyBar` to the new day on the first pre-market print is unknown. `buildQuote` handles it
+  defensively (if `dailyBar` is dated after the last regular session it uses `prevDailyBar` as the regular
+  close and reports no day change for that name), but that branch is untested.
+- The watchlist pages, home cards and earnings page after hours were not seen in a browser (they need a login
+  or a Pro account); their routes and types are checked, the shared pill is what the screenshots exercised.
+- The 10 s regular-session poll was exercised with a mocked session, not during a live session. The calendar
+  call has not been seen failing (the weekday fallback is untested).
+- Not covered: the home page's top-movers / Top OI (public, CDN-cached route), the quadrant, scan-alert tickers
+  and Telegram; the earnings page quotes are a snapshot at load (no refresh); the stock chart's intraday bars
+  are whatever Alpaca returns (extended-hours bars appear only if IEX had prints).
+- Levels still rebase onto the regular price, not the extended-hours price (deliberate).
+- New optional env var `ALPACA_TRADING_URL` (default `https://paper-api.alpaca.markets`) for the calendar host.
+
+---
+
 ## 2026-10-14 — Fix: "Object is disposed" client errors on the admin dashboard
 
 Reported: errors showing in the admin dashboard's Errors panel.

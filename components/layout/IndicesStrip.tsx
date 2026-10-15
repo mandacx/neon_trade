@@ -2,7 +2,9 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { isUsMarketHours } from '@/lib/utils';
+import ExtendedMove from '@/components/ui/ExtendedMove';
+import { pollDelayMs, type MarketClock } from '@/lib/pollDelay';
+import type { ExtendedQuote } from '@/lib/quote';
 
 interface IndexQuote {
   symbol: string;
@@ -10,6 +12,8 @@ interface IndexQuote {
   price: number | null;
   change: number | null;
   changePercent: number | null;
+  /** Pre-market / after-hours move from the regular close; null when none. */
+  ext?: ExtendedQuote | null;
 }
 
 // Every page renders its own <Header>, so this remounts on each navigation.
@@ -24,6 +28,7 @@ export default function IndicesStrip() {
   useEffect(() => {
     let cancelled = false;
     let timeoutId: ReturnType<typeof setTimeout>;
+    let market: MarketClock | null = null;
 
     function poll() {
       fetch('/api/market/indices')
@@ -31,13 +36,16 @@ export default function IndicesStrip() {
         .then(res => {
           if (cancelled || !res.success) return;
           lastIndices = res.data;
+          market = res.market ?? null;
           setIndices(res.data);
         })
         .catch(() => {})
         .finally(() => {
           if (cancelled) return;
-          // Fast while the market is open; the quotes can't move otherwise.
-          timeoutId = setTimeout(poll, isUsMarketHours(new Date()) ? 30_000 : 5 * 60_000);
+          // On the real market schedule: 30s in the regular session, 60s in
+          // pre-market / after-hours, asleep until the next session boundary
+          // while closed (the route reports the session and the next change).
+          timeoutId = setTimeout(poll, pollDelayMs(market, { regularMs: 30_000, extendedMs: 60_000 }));
         });
     }
 
@@ -60,7 +68,7 @@ export default function IndicesStrip() {
                 key={idx.symbol}
                 href={`/stock/${idx.symbol}`}
                 title={idx.label}
-                className={`${bg} flex-1 min-w-[190px] flex items-baseline justify-center gap-2 border rounded px-2 py-1 text-xs leading-tight hover:shadow-sm transition-shadow`}
+                className={`${bg} flex-1 basis-[190px] min-w-fit flex items-baseline justify-center gap-2 border rounded px-2 py-1 text-xs leading-tight hover:shadow-sm transition-shadow`}
               >
                 <span className="font-bold text-gray-800">{idx.symbol}</span>
                 <span className="font-semibold text-gray-900">{idx.price != null ? idx.price.toFixed(2) : '—'}</span>
@@ -72,6 +80,7 @@ export default function IndicesStrip() {
                 <span className={`font-semibold ${color}`}>
                   {pct != null ? `(${pct > 0 ? '+' : pct < 0 ? '−' : ''}${Math.abs(pct).toFixed(2)}%)` : '—'}
                 </span>
+                {idx.ext && <ExtendedMove ext={idx.ext} />}
               </Link>
             );
           })}

@@ -4,7 +4,9 @@ import { FEATURE_EARNINGS } from '@/lib/features';
 import { getEarningsRange, getTrackedSymbols, todayET } from '@/lib/earnings';
 import { addDaysET } from '@/lib/earningsFilter';
 import { computeReaction } from '@/lib/earningsReaction';
-import { getDailyBarsMulti, getSnapshotsChunked, snapshotQuote } from '@/lib/alpaca';
+import { getDailyBarsMulti, getSnapshotsChunked } from '@/lib/alpaca';
+import { getMarketState } from '@/lib/marketSession';
+import { buildQuote, rowQuote } from '@/lib/quote';
 import { getSecuritiesMeta } from '@/lib/securitiesFilters';
 
 export const dynamic = 'force-dynamic';
@@ -64,14 +66,15 @@ export async function GET(request: NextRequest) {
   const barsStart = past.length > 0 ? addDaysET(past.reduce((min, e) => (e.date < min ? e.date : min), past[0].date), -7) : null;
   const pastSymbols = Array.from(new Set(past.map(e => e.symbol)));
 
-  const [secMeta, snapshots, bars] = await Promise.all([
+  const [secMeta, snapshots, bars, market] = await Promise.all([
     getSecuritiesMeta(symbols),
     getSnapshotsChunked(symbols),
     barsStart ? getDailyBarsMulti(pastSymbols, barsStart, addDaysET(today, 1)) : Promise.resolve({}),
+    getMarketState(),
   ]);
 
   const rows = events.map(e => {
-    const quote = snapshotQuote(snapshots[e.symbol]);
+    const quote = rowQuote(buildQuote(snapshots[e.symbol], market));
     const meta = secMeta[e.symbol];
     const reaction = e.kind === 'upcoming' ? null : computeReaction((bars as Record<string, { date: string; close: number }[]>)[e.symbol], e.date, e.time, quote.lastPrice);
     return {
@@ -88,5 +91,5 @@ export async function GET(request: NextRequest) {
     };
   });
 
-  return NextResponse.json({ success: true, data: { rows, from, to, today, mode } });
+  return NextResponse.json({ success: true, data: { rows, from, to, today, mode, market: { session: market.session, nextChangeAt: market.nextChangeAt } } });
 }

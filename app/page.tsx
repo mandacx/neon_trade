@@ -10,12 +10,15 @@ import { useAuthContext } from '@/components/providers/AuthContextProvider';
 import { FEATURE_EARNINGS, hasFeature } from '@/lib/features';
 import { fmtShortDate, fmtNextDate, earningsTimeShort, daysUntilLabel } from '@/components/watchlists/watchlistShared';
 import type { EarningsBadge, EarningsEvent } from '@/types/earnings';
+import type { ExtendedQuote } from '@/lib/quote';
+import ExtendedMove from '@/components/ui/ExtendedMove';
 
 type HomeEarningsEvent = EarningsEvent & {
   name: string | null;
   lastPrice: number | null;
   change: number | null;
   changePercent: number | null;
+  ext?: ExtendedQuote | null;
 };
 interface HomeEarnings {
   upcoming: HomeEarningsEvent[];
@@ -205,6 +208,7 @@ function EarningsEventRow({ e, onClick }: { e: HomeEarningsEvent; onClick: () =>
             {e.change >= 0 ? '+' : '-'}${Math.abs(e.change).toFixed(2)} · {e.changePercent >= 0 ? '+' : ''}{e.changePercent.toFixed(2)}%
           </div>
         ) : <div className="text-[10px] text-gray-300">—</div>}
+        {e.ext && <div className="mt-0.5"><ExtendedMove ext={e.ext} /></div>}
       </div>
       {e.kind === 'upcoming' ? (
         <div className="text-right shrink-0">

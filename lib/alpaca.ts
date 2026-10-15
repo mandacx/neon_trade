@@ -160,15 +160,6 @@ export async function getSnapshotsMulti(symbols: string[]): Promise<Record<strin
   }
 }
 
-/** Last price + day change from a snapshot — same derivation the watchlist quotes route uses. */
-export function snapshotQuote(snap: AlpacaSnapshot | undefined): { lastPrice: number | null; change: number | null; changePercent: number | null } {
-  const prevClose = snap?.prevDailyBar?.c ?? null;
-  const lastPrice = snap?.dailyBar?.c ?? snap?.latestTrade?.p ?? null;
-  const change = lastPrice !== null && prevClose !== null ? lastPrice - prevClose : null;
-  const changePercent = change !== null && prevClose ? (change / prevClose) * 100 : null;
-  return { lastPrice, change, changePercent };
-}
-
 /** Run `fn` over `items` in groups of `size`, at most `parallel` groups at a time. */
 async function inChunks<T, R>(items: T[], size: number, parallel: number, fn: (chunk: T[]) => Promise<R>): Promise<R[]> {
   const chunks: T[][] = [];

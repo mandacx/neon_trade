@@ -1,7 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import ExtendedMove from '@/components/ui/ExtendedMove';
+import { pollDelayMs, type MarketClock } from '@/lib/pollDelay';
 import Header from '@/components/layout/Header';
 import AddSymbolInput from '@/components/watchlists/AddSymbolInput';
 import AlertsWidget from '@/components/watchlists/AlertsWidget';
@@ -15,7 +17,7 @@ import {
 
 type DirectionFilter = 'all' | 'up' | 'down';
 type ViewMode = 'thin' | 'broad';
-type SortKey = 'symbol' | 'lastPrice' | 'change' | 'changePercent' | 'open' | 'dayLow' | 'dayHigh' | 'volume' | 'level' | 'nextEarnings' | 'lastResult';
+type SortKey = 'symbol' | 'lastPrice' | 'change' | 'changePercent' | 'ext' | 'open' | 'dayLow' | 'dayHigh' | 'volume' | 'level' | 'nextEarnings' | 'lastResult';
 
 type ColumnKey = 'open' | 'dayLow' | 'dayHigh' | 'volume' | 'level' | 'nextEarnings' | 'lastResult';
 // Shown only to viewers with the `earnings` feature (the quotes route says which).
@@ -53,6 +55,7 @@ export default function WatchlistsPage() {
   const [listsLoading, setListsLoading] = useState(true);
   const [selectedId, setSelectedId] = useState('');
   const [rows, setRows] = useState<QuoteRow[] | null>(null);
+  const marketRef = useRef<MarketClock | null>(null);
   const [rowsLoading, setRowsLoading] = useState(false);
   const [levelRows, setLevelRows] = useState<LevelRow[] | null>(null);
   // Monthly (3rd-Friday) expiries available across the data, and the one
@@ -106,6 +109,9 @@ export default function WatchlistsPage() {
     if (earningsEnabled && !earningsMatches(r.earnings, earningsFilter, selectedExpiry || null, { from: earningsFrom, to: earningsTo })) return false;
     return true;
   });
+  // The extended-hours column only exists while some row has an after-hours /
+  // pre-market print, i.e. between the close and the next open.
+  const showExt = (rows ?? []).some(r => r.ext);
   const colOn = (k: ColumnKey) => visibleCols.has(k) && (earningsEnabled || !EARNINGS_COLUMNS.has(k));
 
   function sortValue(r: QuoteRow, key: SortKey): number | string | null {
@@ -114,6 +120,7 @@ export default function WatchlistsPage() {
       case 'lastPrice': return r.lastPrice;
       case 'change': return r.change;
       case 'changePercent': return r.changePercent;
+      case 'ext': return r.ext?.changePercent ?? null;
       case 'open': return r.open;
       case 'dayLow': return r.dayLow;
       case 'dayHigh': return r.dayHigh;
@@ -174,13 +181,26 @@ export default function WatchlistsPage() {
       .catch(() => setMonthlyExpiries([]));
   }, []);
 
-  async function loadRows(id: string) {
-    setRowsLoading(true);
-    const res = await fetch(`/api/watchlists/${id}/quotes`);
-    const json = await res.json();
-    setRowsLoading(false);
-    setRows(json.success ? json.data.rows : []);
-    setEarningsEnabled(!!(json.success && json.data.earningsEnabled));
+  // `silent` = a background refresh: keep the table as is while it loads and
+  // don't blank it if the call fails.
+  async function loadRows(id: string, silent = false) {
+    if (!silent) setRowsLoading(true);
+    try {
+      const res = await fetch(`/api/watchlists/${id}/quotes`);
+      const json = await res.json();
+      if (json.success) {
+        marketRef.current = json.data.market ?? null;
+        setRows(json.data.rows);
+        setEarningsEnabled(!!json.data.earningsEnabled);
+      } else if (!silent) {
+        setRows([]);
+        setEarningsEnabled(false);
+      }
+    } catch {
+      if (!silent) setRows([]);
+    } finally {
+      if (!silent) setRowsLoading(false);
+    }
   }
 
   async function loadLevels(id: string, expiry: string) {
@@ -193,6 +213,24 @@ export default function WatchlistsPage() {
   useEffect(() => {
     if (selectedId) loadRows(selectedId);
     setSelectedSymbol(null);
+  }, [selectedId]);
+
+  // Keep quotes current on the real market schedule: every 30s in the regular
+  // session, every 60s in pre-market / after-hours, and asleep until the next
+  // session boundary while the market is closed (the server sends the session
+  // and the next change with each response).
+  useEffect(() => {
+    if (!selectedId) return;
+    let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout>;
+    function schedule() {
+      timeoutId = setTimeout(async () => {
+        await loadRows(selectedId, true);
+        if (!cancelled) schedule();
+      }, pollDelayMs(marketRef.current, { regularMs: 30_000, extendedMs: 60_000 }));
+    }
+    schedule();
+    return () => { cancelled = true; clearTimeout(timeoutId); };
   }, [selectedId]);
 
   // Gated on monthlyExpiries !== null (not just selectedExpiry) so this
@@ -520,6 +558,7 @@ export default function WatchlistsPage() {
                   <th className={`${cellPad} text-right`}><SortHeader label="Last Price" align="right" active={sortKey === 'lastPrice'} dir={sortDir} onClick={() => toggleSort('lastPrice')} /></th>
                   <th className={`${cellPad} text-right`}><SortHeader label="Change" align="right" active={sortKey === 'change'} dir={sortDir} onClick={() => toggleSort('change')} /></th>
                   <th className={`${cellPad} text-right`}><SortHeader label="Change %" align="right" active={sortKey === 'changePercent'} dir={sortDir} onClick={() => toggleSort('changePercent')} /></th>
+                  {showExt && <th className={`${cellPad} text-right`}><SortHeader label="Ext. Hrs" align="right" active={sortKey === 'ext'} dir={sortDir} onClick={() => toggleSort('ext')} /></th>}
                   {colOn('open') && <th className={`${cellPad} text-right`}><SortHeader label="Open" align="right" active={sortKey === 'open'} dir={sortDir} onClick={() => toggleSort('open')} /></th>}
                   {colOn('dayLow') && <th className={`${cellPad} text-right`}><SortHeader label="Day Low" align="right" active={sortKey === 'dayLow'} dir={sortDir} onClick={() => toggleSort('dayLow')} /></th>}
                   {colOn('dayHigh') && <th className={`${cellPad} text-right`}><SortHeader label="Day High" align="right" active={sortKey === 'dayHigh'} dir={sortDir} onClick={() => toggleSort('dayHigh')} /></th>}
@@ -569,6 +608,7 @@ export default function WatchlistsPage() {
                         <ChangePercentCell changePercent={r.changePercent} />
                       </Link>
                     </td>
+                    {showExt && <td className={`${cellPad} text-right`}>{r.ext ? <ExtendedMove ext={r.ext} /> : <span className="text-xs text-gray-300">—</span>}</td>}
                     {colOn('open') && <td className={`${cellPad} text-right text-gray-600 tabular-nums`}>{fmtPrice(r.open)}</td>}
                     {colOn('dayLow') && <td className={`${cellPad} text-right text-gray-600 tabular-nums`}>{fmtPrice(r.dayLow)}</td>}
                     {colOn('dayHigh') && <td className={`${cellPad} text-right text-gray-600 tabular-nums`}>{fmtPrice(r.dayHigh)}</td>}

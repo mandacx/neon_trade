@@ -3,7 +3,9 @@ import { requireFeatureApi } from '@/lib/routeGuards';
 import { FEATURE_EARNINGS } from '@/lib/features';
 import { earningsBadge, getEarningsEvents, getEarningsSummary, getTrackedSymbols } from '@/lib/earnings';
 import { getSecuritiesMeta } from '@/lib/securitiesFilters';
-import { getSnapshotsMulti, snapshotQuote } from '@/lib/alpaca';
+import { getSnapshotsMulti } from '@/lib/alpaca';
+import { getMarketState } from '@/lib/marketSession';
+import { buildQuote, rowQuote } from '@/lib/quote';
 import type { EarningsBadge, EarningsEvent } from '@/types/earnings';
 
 export const dynamic = 'force-dynamic';
@@ -39,8 +41,8 @@ export async function GET(request: NextRequest) {
   ]);
 
   const cap = (s: string) => Number(secMeta[s]?.market_cap ?? 0);
-  const quotes: Record<string, ReturnType<typeof snapshotQuote>> = {};
-  const withName = (e: EarningsEvent) => ({ ...e, name: secMeta[e.symbol]?.name ?? null, ...(quotes[e.symbol] ?? snapshotQuote(undefined)) });
+  const quotes: Record<string, ReturnType<typeof rowQuote>> = {};
+  const withName = (e: EarningsEvent) => ({ ...e, name: secMeta[e.symbol]?.name ?? null, ...(quotes[e.symbol] ?? { lastPrice: null, change: null, changePercent: null, ext: null }) });
   const byCap = (a: EarningsEvent, b: EarningsEvent) => cap(b.symbol) - cap(a.symbol);
 
   const upcoming = events.filter(e => e.kind === 'upcoming').sort((a, b) => a.daysUntil - b.daysUntil || byCap(a, b));
@@ -50,8 +52,8 @@ export async function GET(request: NextRequest) {
 
   // Live quote (LTP, day change) for just the symbols the two cards will show.
   const shown = [...topUpcoming, ...reported.slice(0, CARD_LIMIT)];
-  const snapshots = await getSnapshotsMulti(Array.from(new Set(shown.map(e => e.symbol))));
-  for (const e of shown) quotes[e.symbol] = snapshotQuote(snapshots[e.symbol]);
+  const [snapshots, market] = await Promise.all([getSnapshotsMulti(Array.from(new Set(shown.map(e => e.symbol)))), getMarketState()]);
+  for (const e of shown) quotes[e.symbol] = rowQuote(buildQuote(snapshots[e.symbol], market));
 
   const badges: Record<string, EarningsBadge | null> = {};
   if (summaries) {

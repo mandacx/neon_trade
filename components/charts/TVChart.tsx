@@ -4,6 +4,9 @@ import { useEffect, useMemo, useRef, useState, ReactNode } from 'react';
 import { createChart, IChartApi, ISeriesApi, IPriceLine, CandlestickData, HistogramData, MouseEventParams, SeriesMarker, Time } from 'lightweight-charts';
 import { LevelCalculation, ScanAlert } from '@/types/stock';
 import type { EarningsResult } from '@/types/earnings';
+import type { ExtendedQuote } from '@/lib/quote';
+import type { MarketSession } from '@/lib/marketSession';
+import ExtendedMove from '@/components/ui/ExtendedMove';
 
 const EARNINGS_OUTCOME_COLOR: Record<NonNullable<EarningsResult['epsOutcome']>, string> = {
   beat: '#16a34a',
@@ -48,7 +51,12 @@ interface TVChartProps {
   earningsEvents?: EarningsResult[];
   selectedExpiry?: string;
   isIntraday?: boolean;
+  /** Live in the regular session; the last regular close outside it. */
   livePrice?: number;
+  /** Drives the Live / At close tag and whether the last candle follows ticks. */
+  marketSession?: MarketSession;
+  /** Pre-market / after-hours move from the regular close (shown under the day change). */
+  extended?: ExtendedQuote | null;
   currentPrice?: number;
   // Today's move and range, shown under the price. Any field may be null —
   // Alpaca omits the previous/daily bar for names that haven't printed, and
@@ -99,6 +107,8 @@ export default function TVChart({
   selectedExpiry,
   isIntraday = false,
   livePrice,
+  marketSession,
+  extended,
   currentPrice,
   headerExtra,
   topAside,
@@ -938,6 +948,10 @@ export default function TVChart({
   // it with a real bar.
   useEffect(() => {
     if (livePrice === undefined || !Number.isFinite(livePrice) || !candleSeriesRef.current || isLoading) return;
+    // Outside the regular session `livePrice` is the regular close. That is right
+    // for the daily candle, but the last intraday bar may be an extended-hours
+    // bar, which a regular-session price must not overwrite.
+    if (marketSession !== 'regular' && isIntraday) return;
     const seriesData = candleSeriesRef.current.data();
     if (!seriesData || seriesData.length === 0) return;
     const last = seriesData[seriesData.length - 1] as CandlestickData;
@@ -952,7 +966,7 @@ export default function TVChart({
     } catch (err) {
       console.error('Error live-updating candle:', err);
     }
-  }, [livePrice, isLoading]);
+  }, [livePrice, isLoading, marketSession, isIntraday]);
 
   // Level filter toggle: show only selected level, or all if none selected
   useEffect(() => {
@@ -1050,12 +1064,16 @@ export default function TVChart({
               {displayPrice !== undefined && (
                 <span className="text-lg text-gray-600">{formatCurrency(displayPrice)}</span>
               )}
-              {livePrice !== undefined && (
+              {livePrice !== undefined && (marketSession === 'regular' ? (
                 <span className="inline-flex items-center gap-1 text-[10px] font-bold text-green-600 uppercase tracking-wide">
                   <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
                   Live
                 </span>
-              )}
+              ) : (
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide" title="Last regular-session close; extended-hours move shown below">
+                  At close
+                </span>
+              ))}
               {companyName && <span className="text-xs text-gray-500 truncate">{companyName}</span>}
             </div>
 
@@ -1079,6 +1097,12 @@ export default function TVChart({
                     Day Range: {formatCurrency(dayLow)} – {formatCurrency(dayHigh)}
                   </span>
                 )}
+              </div>
+            )}
+
+            {extended && (
+              <div className="mt-0.5">
+                <ExtendedMove ext={extended} full />
               </div>
             )}
 

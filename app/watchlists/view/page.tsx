@@ -4,19 +4,22 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Header from '@/components/layout/Header';
 import StockAnalysis from '@/components/stock/StockAnalysis';
 import AddSymbolInput from '@/components/watchlists/AddSymbolInput';
-import { getLevelDisplayName, isUsMarketHours } from '@/lib/utils';
+import { getLevelDisplayName } from '@/lib/utils';
+import ExtendedMove from '@/components/ui/ExtendedMove';
+import { pollDelayMs, type MarketClock } from '@/lib/pollDelay';
 import {
   type WatchlistSummary, type QuoteRow, type LevelRow, type LevelKey, LEVEL_FILTER_OPTIONS,
   rebaseToLtp, fmtExpiry, fmtPrice, ChangeCell, ChangePercentCell, ChangeDot, LevelCell,
   type EarningsFilter, EARNINGS_FILTER_OPTIONS, EXPIRY_EARNINGS_FILTERS, EarningsRangeInputs, earningsMatches, nextEarningsSortValue, NextEarningsCell,
 } from '@/components/watchlists/watchlistShared';
 
-type SortKey = 'symbol' | 'lastPrice' | 'change' | 'changePercent' | 'level' | 'earnings';
+type SortKey = 'symbol' | 'lastPrice' | 'change' | 'changePercent' | 'ext' | 'level' | 'earnings';
 
 // Starting widths (px) sized so all six columns fit the 460px panel with no
 // horizontal scrollbar; the user can drag any header edge to rebalance them.
-// (The earnings column only shows for viewers with the earnings feature.)
-const DEFAULT_COL_WIDTHS: Record<SortKey, number> = { symbol: 62, lastPrice: 68, change: 70, changePercent: 62, level: 120, earnings: 54 };
+// (The earnings column only shows for viewers with the earnings feature, and the
+// extended-hours column only while some row has a pre-market / after-hours print.)
+const DEFAULT_COL_WIDTHS: Record<SortKey, number> = { symbol: 62, lastPrice: 68, change: 70, changePercent: 62, ext: 62, level: 120, earnings: 54 };
 const REMOVE_COL_WIDTH = 28;
 const MIN_COL_WIDTH = 44;
 const COL_WIDTHS_STORAGE_KEY = 'watchlistWChart.colWidths';
@@ -67,6 +70,7 @@ export default function WatchlistViewPage() {
   const [listsLoading, setListsLoading] = useState(true);
   const [selectedId, setSelectedId] = useState('');
   const [rows, setRows] = useState<QuoteRow[] | null>(null);
+  const marketRef = useRef<MarketClock | null>(null);
   const [rowsLoading, setRowsLoading] = useState(false);
   const [levelRows, setLevelRows] = useState<LevelRow[] | null>(null);
   const [monthlyExpiries, setMonthlyExpiries] = useState<string[] | null>(null);
@@ -112,6 +116,7 @@ export default function WatchlistViewPage() {
         case 'lastPrice': return r.lastPrice;
         case 'change': return r.change;
         case 'changePercent': return r.changePercent;
+        case 'ext': return r.ext?.changePercent ?? null;
         case 'level': {
           const pct = levelBySymbol.get(r.symbol)?.distancePercent;
           return pct == null ? null : Math.abs(pct);
@@ -218,6 +223,7 @@ export default function WatchlistViewPage() {
       const res = await fetch(`/api/watchlists/${id}/quotes`);
       const json = await res.json();
       if (json.success) {
+        marketRef.current = json.data.market ?? null;
         setRows(json.data.rows);
         setEarningsEnabled(!!json.data.earningsEnabled);
       }
@@ -247,7 +253,9 @@ export default function WatchlistViewPage() {
     if (selectedId && monthlyExpiries !== null) loadLevels(selectedId, selectedExpiry);
   }, [selectedId, selectedExpiry, monthlyExpiries, loadLevels]);
 
-  // Keep prices live: fast while the market is open, slow otherwise.
+  // Keep prices live on the real market schedule: 30s in the regular session,
+  // 60s in pre-market / after-hours, asleep until the next session boundary
+  // while closed (the quotes route sends the session and the next change).
   useEffect(() => {
     if (!selectedId) return;
     let timeoutId: ReturnType<typeof setTimeout>;
@@ -256,7 +264,7 @@ export default function WatchlistViewPage() {
       timeoutId = setTimeout(async () => {
         await loadRows(selectedId, true);
         if (!cancelled) schedule();
-      }, isUsMarketHours(new Date()) ? 30_000 : 5 * 60_000);
+      }, pollDelayMs(marketRef.current, { regularMs: 30_000, extendedMs: 60_000 }));
     }
     schedule();
     return () => { cancelled = true; clearTimeout(timeoutId); };
@@ -372,7 +380,8 @@ export default function WatchlistViewPage() {
 
 
   const th = 'px-2 py-1.5';
-  const COLUMN_ORDER: SortKey[] = ['symbol', 'lastPrice', 'change', 'changePercent', 'level', ...(earningsEnabled ? ['earnings' as const] : [])];
+  const showExt = (rows ?? []).some(r => r.ext);
+  const COLUMN_ORDER: SortKey[] = ['symbol', 'lastPrice', 'change', 'changePercent', ...(showExt ? ['ext' as const] : []), 'level', ...(earningsEnabled ? ['earnings' as const] : [])];
   const colSpan = COLUMN_ORDER.length + (canEdit ? 1 : 0);
   const tableWidth = COLUMN_ORDER.reduce((sum, k) => sum + colWidths[k], 0) + (canEdit ? REMOVE_COL_WIDTH : 0);
 
@@ -505,6 +514,7 @@ export default function WatchlistViewPage() {
                     <th className={`${th} text-right relative`}><SortHeader label="Last Price" align="right" active={sortKey === 'lastPrice'} dir={sortDir} onClick={() => toggleSort('lastPrice')} />{resizeHandle('lastPrice')}</th>
                     <th className={`${th} text-right relative`}><SortHeader label="Change" align="right" active={sortKey === 'change'} dir={sortDir} onClick={() => toggleSort('change')} />{resizeHandle('change')}</th>
                     <th className={`${th} text-right relative`}><SortHeader label="Chg %" align="right" active={sortKey === 'changePercent'} dir={sortDir} onClick={() => toggleSort('changePercent')} />{resizeHandle('changePercent')}</th>
+                    {showExt && <th className={`${th} text-right relative`}><SortHeader label="Ext." align="right" active={sortKey === 'ext'} dir={sortDir} onClick={() => toggleSort('ext')} />{resizeHandle('ext')}</th>}
                     <th className={`${th} text-right relative`}><SortHeader label="Nearest Level" align="right" active={sortKey === 'level'} dir={sortDir} onClick={() => toggleSort('level')} />{resizeHandle('level')}</th>
                     {earningsEnabled && <th className={`${th} text-right relative`}><SortHeader label="Earn" align="right" active={sortKey === 'earnings'} dir={sortDir} onClick={() => toggleSort('earnings')} />{resizeHandle('earnings')}</th>}
                     {canEdit && <th className={th}></th>}
@@ -530,6 +540,7 @@ export default function WatchlistViewPage() {
                         <td className={`${th} text-right font-semibold text-gray-800 tabular-nums overflow-hidden`}>{fmtPrice(r.lastPrice)}</td>
                         <td className={`${th} text-right overflow-hidden`}><ChangeCell change={r.change} /></td>
                         <td className={`${th} text-right overflow-hidden`}><ChangePercentCell changePercent={r.changePercent} /></td>
+                        {showExt && <td className={`${th} text-right overflow-hidden`}>{r.ext ? <ExtendedMove ext={r.ext} /> : <span className="text-gray-300">—</span>}</td>}
                         <td className={`${th} overflow-hidden`}><LevelCell level={levelBySymbol.get(r.symbol)} compact /></td>
                         {earningsEnabled && <td className={`${th} text-right overflow-hidden`}><NextEarningsCell earnings={r.earnings} compact /></td>}
                         {canEdit && (

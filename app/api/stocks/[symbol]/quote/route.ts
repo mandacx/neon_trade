@@ -1,14 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSnapshotsMulti } from '@/lib/alpaca';
+import { getMarketState } from '@/lib/marketSession';
+import { buildQuote } from '@/lib/quote';
 
-// Latest traded price plus today's range and change, for the stock header's
-// live badge and the live chart candle. Uses /v2/stocks/snapshots rather than
-// trades/latest because one snapshot call carries latestTrade + dailyBar +
-// prevDailyBar together — the day range and change come free instead of
-// costing extra round trips on a 10s poll.
+export const dynamic = 'force-dynamic';
+
+// The stock header's live badge and the live chart candle. Uses
+// /v2/stocks/snapshots rather than trades/latest because one snapshot call
+// carries latestTrade + dailyBar + prevDailyBar together.
 //
-// Alpaca still returns the last known trade/bar outside market hours, so this
-// degrades to "last session" rather than erroring off-session.
+// Session-aware (lib/quote.ts): during regular hours `price`/`change` are live
+// against the previous close; outside them `price`/`change` are the last
+// regular session's close and day change, and `ext` is the pre-market /
+// after-hours move from that close (null if nothing printed). `market` tells
+// the client which session it is and when it next changes, so polling can
+// follow the real open/close times.
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ symbol: string }> }
@@ -21,36 +27,30 @@ export async function GET(
     }
 
     const upper = symbol.toUpperCase();
-    const snapshot = (await getSnapshotsMulti([upper]))[upper];
-
-    // latestTrade is missing for names that haven't printed yet today — fall
-    // back to the daily bar's close so the badge still shows a real price.
-    const price = snapshot?.latestTrade?.p ?? snapshot?.dailyBar?.c;
-    if (!snapshot || price === undefined) {
+    const [snapshots, market] = await Promise.all([getSnapshotsMulti([upper]), getMarketState()]);
+    const snapshot = snapshots[upper];
+    const q = buildQuote(snapshot, market);
+    if (!snapshot || q.price === null) {
       return NextResponse.json({ success: true, data: null });
     }
-
-    const prevClose = snapshot.prevDailyBar?.c;
-    // Guard the divide: no (or zero) previous close means there's no basis for
-    // a change figure, so report null rather than NaN/Infinity.
-    const change = prevClose === undefined ? null : price - prevClose;
-    const changePercent = prevClose ? ((price - prevClose) / prevClose) * 100 : null;
 
     return NextResponse.json({
       success: true,
       data: {
         symbol: upper,
-        price,
+        price: q.price,
         size: snapshot.latestTrade?.s ?? null,
         timestamp: snapshot.latestTrade?.t
           ? Math.floor(new Date(snapshot.latestTrade.t).getTime() / 1000)
           : null,
-        dayOpen: snapshot.dailyBar?.o ?? null,
-        dayHigh: snapshot.dailyBar?.h ?? null,
-        dayLow: snapshot.dailyBar?.l ?? null,
-        prevClose: prevClose ?? null,
-        change,
-        changePercent,
+        dayOpen: q.dayOpen,
+        dayHigh: q.dayHigh,
+        dayLow: q.dayLow,
+        prevClose: q.prevClose,
+        change: q.change,
+        changePercent: q.changePercent,
+        ext: q.ext,
+        market: { session: market.session, nextChangeAt: market.nextChangeAt, approximate: market.approximate },
       },
     });
   } catch (error) {
