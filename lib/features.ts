@@ -22,6 +22,8 @@ export const FEATURE_PERFORMANCE = 'performance';
 export const FEATURE_TELEGRAM_ALERTS = 'telegram_alerts';
 /** Earnings dates & results (lib/earnings.ts): stock page, watchlists. */
 export const FEATURE_EARNINGS = 'earnings';
+/** Options OI tracker page and private tracked option positions (lib/oiTracker.ts). */
+export const FEATURE_OI_TRACKER = 'oi_tracker';
 
 /** True if `features` (a plan's feature-code list) includes `code`. */
 export function hasFeature(features: string[] | undefined | null, code: string): boolean {
@@ -42,6 +44,7 @@ export const ALL_FEATURES: Array<{ code: string; label: string }> = [
   { code: FEATURE_PERFORMANCE, label: 'Performance Tracking' },
   { code: FEATURE_TELEGRAM_ALERTS, label: 'Telegram Alerts' },
   { code: FEATURE_EARNINGS, label: 'Earnings Dates & Results' },
+  { code: FEATURE_OI_TRACKER, label: 'Options OI Tracker' },
 ];
 
 // Route gating lives in exactly two places: middleware.ts (login) and the

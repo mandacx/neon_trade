@@ -43,6 +43,8 @@ TABLES=(
   nt_telegram_alert_subscriptions
   nt_telegram_alert_cursors
   nt_rate_limit_hits
+  nt_opt_daily_bars
+  nt_oi_tracked
 )
 
 PARALLEL_JOBS="${PARALLEL_JOBS:-4}"

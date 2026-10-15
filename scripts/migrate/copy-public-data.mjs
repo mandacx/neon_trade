@@ -39,6 +39,8 @@ const APP_TABLES = [
   'nt_telegram_alert_subscriptions',
   'nt_telegram_alert_cursors',
   'nt_rate_limit_hits',
+  'nt_opt_daily_bars',
+  'nt_oi_tracked',
 ];
 
 const GROUPS = { market: MARKET_TABLES, app: APP_TABLES, all: [...MARKET_TABLES, ...APP_TABLES] };

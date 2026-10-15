@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isAuthorizedCron } from '@/lib/cronAuth';
 import { catchUpMarketCatalog } from '@/lib/marketCatalog';
+import { captureOptionBars } from '@/lib/optionVolume';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -31,6 +32,10 @@ function centralNow(date: Date) {
  * America/Chicago weekday window is enforced here, so the schedule never
  * needs editing at a DST change. `?force=true` skips the window check for a
  * manual run.
+ *
+ * After the catalog, the same run captures option volume for the latest
+ * options load (lib/optionVolume.ts; resumable, so a day that doesn't fit in
+ * one run finishes on the next).
  */
 export async function GET(request: NextRequest) {
   if (!isAuthorizedCron(request)) {
@@ -45,10 +50,19 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ success: true, data: { skipped: 'outside 8:30-11:30 CT weekday window' } });
   }
 
+  const started = Date.now();
   try {
     const results = await catchUpMarketCatalog(now.day);
     console.log('[cron/market-catalog]', JSON.stringify(results));
-    return NextResponse.json({ success: true, data: results });
+    let optionVolume: unknown;
+    try {
+      optionVolume = await captureOptionBars({ deadline: started + 50_000 });
+      console.log('[cron/market-catalog] option volume', JSON.stringify(optionVolume));
+    } catch (error) {
+      console.error('[cron/market-catalog] option volume capture failed', error);
+      optionVolume = { error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+    return NextResponse.json({ success: true, data: results, optionVolume });
   } catch (error) {
     console.error('[cron/market-catalog] catch-up failed', error);
     return NextResponse.json(

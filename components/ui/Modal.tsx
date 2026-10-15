@@ -1,6 +1,11 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
+
+// Open modals, oldest first. Escape closes only the top one, so a modal opened
+// from inside another (e.g. a contract chart over the stock OI modal) doesn't
+// take its parent down with it.
+const openStack: symbol[] = [];
 
 export default function Modal({ title, onClose, children, widthClassName = 'max-w-4xl' }: {
   title: React.ReactNode;
@@ -8,13 +13,23 @@ export default function Modal({ title, onClose, children, widthClassName = 'max-
   children: React.ReactNode;
   widthClassName?: string;
 }) {
+  const id = useRef(Symbol('modal'));
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
+    const me = id.current;
+    openStack.push(me);
     function onKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape' && openStack[openStack.length - 1] === me) onCloseRef.current();
     }
     document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [onClose]);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      const i = openStack.lastIndexOf(me);
+      if (i >= 0) openStack.splice(i, 1);
+    };
+  }, []);
 
   return (
     <div

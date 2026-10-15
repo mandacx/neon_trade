@@ -135,3 +135,47 @@ export async function getMarketState(now: Date = new Date()): Promise<MarketStat
   const { days, approximate } = await loadCalendar(now.getTime());
   return stateFromCalendar(days, now.getTime(), approximate);
 }
+
+const rangeCache = new Map<string, { days: string[]; at: number }>();
+
+/**
+ * Trading dates ('YYYY-MM-DD', ascending) between `start` and `end` inclusive,
+ * from the Alpaca calendar for that exact range (so it also works for old
+ * dates, unlike the rolling window above). Falls back to weekdays if the call
+ * fails; that fallback ignores holidays.
+ */
+export async function tradingDaysBetween(start: string, end: string): Promise<string[]> {
+  const key = `${start}|${end}`;
+  const hit = rangeCache.get(key);
+  if (hit && Date.now() - hit.at < CALENDAR_TTL_MS) return hit.days;
+  let days: string[];
+  try {
+    const k = process.env.ALPACA_API_KEY;
+    const s = process.env.ALPACA_SECRET_KEY;
+    if (!k || !s) throw new Error('Alpaca keys not set');
+    const res = await fetch(`${TRADING_URL}/v2/calendar?start=${start}&end=${end}`, {
+      headers: { 'APCA-API-KEY-ID': k, 'APCA-API-SECRET-KEY': s }, cache: 'no-store', signal: AbortSignal.timeout(4000),
+    });
+    if (!res.ok) throw new Error(`calendar HTTP ${res.status}`);
+    days = ((await res.json()) as Array<{ date: string }>).map(r => r.date).sort();
+  } catch (err) {
+    console.error('[marketSession] calendar range unavailable, using weekdays:', err instanceof Error ? err.message : err);
+    days = [];
+    for (let t = Date.parse(`${start}T12:00:00Z`); t <= Date.parse(`${end}T12:00:00Z`); t += DAY_MS) {
+      const dow = new Date(t).getUTCDay();
+      if (dow !== 0 && dow !== 6) days.push(new Date(t).toISOString().slice(0, 10));
+    }
+    return days; // not cached, so the next call retries the calendar
+  }
+  if (rangeCache.size > 200) rangeCache.clear();
+  rangeCache.set(key, { days, at: Date.now() });
+  return days;
+}
+
+/** The trading day before `date` ('YYYY-MM-DD'), or null if none in the prior two weeks. */
+export async function previousTradingDay(date: string): Promise<string | null> {
+  const end = new Date(Date.parse(`${date}T12:00:00Z`) - DAY_MS).toISOString().slice(0, 10);
+  const start = new Date(Date.parse(`${date}T12:00:00Z`) - 14 * DAY_MS).toISOString().slice(0, 10);
+  const days = await tradingDaysBetween(start, end);
+  return days.length ? days[days.length - 1] : null;
+}

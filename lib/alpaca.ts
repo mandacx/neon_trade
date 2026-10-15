@@ -316,3 +316,91 @@ export async function getOptionTodaySnapshotBar(
     return null;
   }
 }
+
+/**
+ * Daily (or other timeframe) bars for many option contracts (OCC symbols) at
+ * once. Verified: /v1beta1/options/bars accepts 200 symbols per request
+ * (about 2.7s each when not cached; rate limit 200 requests/min). Like
+ * getOptionBars, a range that includes the current trading day is refused on
+ * this subscription, so callers pass completed sessions only. A failed chunk
+ * is logged and skipped, so callers get partial data instead of an error;
+ * `failed` lists the symbols whose chunk failed (callers must not mark those
+ * as "no trade").
+ */
+export async function getOptionBarsMulti(
+  symbols: string[], start: string, end: string, timeframe = '1Day', parallel = 3
+): Promise<{ bars: Record<string, AlpacaBar[]>; failed: string[] }> {
+  const bars: Record<string, AlpacaBar[]> = {};
+  const failed: string[] = [];
+  await inChunks(symbols, 200, parallel, async chunk => {
+    try {
+      let pageToken: string | undefined;
+      for (let page = 0; page < 20; page++) {
+        const params: Record<string, string | number> = { symbols: chunk.join(','), timeframe, limit: 10000, start, end };
+        if (pageToken) params.page_token = pageToken;
+        const response = await alpacaClient.get<AlpacaHistoryResponse>('/v1beta1/options/bars', { params });
+        for (const [sym, list] of Object.entries(response.data?.bars ?? {})) (bars[sym] ??= []).push(...list);
+        pageToken = response.data?.next_page_token;
+        if (!pageToken) break;
+      }
+    } catch (error) {
+      console.error('Error fetching option bars (multi) from Alpaca:', axios.isAxiosError(error) ? `${error.response?.status} ${JSON.stringify(error.response?.data)}` : error);
+      failed.push(...chunk);
+    }
+  });
+  return { bars, failed };
+}
+
+export interface AlpacaOptionSnapshot {
+  dailyBar?: AlpacaBar;
+  prevDailyBar?: AlpacaBar;
+  latestTrade?: { p: number; s: number; t: string };
+  latestQuote?: { bp: number; ap: number; bs: number; as: number; t: string };
+  greeks?: { delta?: number; gamma?: number; theta?: number; vega?: number; rho?: number };
+  impliedVolatility?: number;
+}
+
+/**
+ * Snapshots for specific option contracts. Verified: the endpoint refuses
+ * more than 100 symbols per request ("symbol limit is 100"), so it is chunked.
+ * Returns {} for chunks that fail.
+ */
+export async function getOptionSnapshotsMulti(symbols: string[]): Promise<Record<string, AlpacaOptionSnapshot>> {
+  const parts = await inChunks([...new Set(symbols)], 100, 4, async chunk => {
+    try {
+      const response = await alpacaClient.get('/v1beta1/options/snapshots', { params: { symbols: chunk.join(',') } });
+      return (response.data?.snapshots ?? {}) as Record<string, AlpacaOptionSnapshot>;
+    } catch (error) {
+      console.error('Error fetching option snapshots from Alpaca:', axios.isAxiosError(error) ? error.response?.status : error);
+      return {};
+    }
+  });
+  return Object.assign({}, ...parts);
+}
+
+/**
+ * The whole option chain of one underlying (snapshots keyed by OCC symbol),
+ * optionally narrowed to expiries in [expiryFrom, expiryTo]. Pages of 1,000,
+ * capped at `maxPages` so a very large chain (SPY, SPX) can't run away.
+ */
+export async function getOptionChainSnapshots(
+  underlying: string, opts: { expiryFrom?: string; expiryTo?: string; maxPages?: number } = {}
+): Promise<Record<string, AlpacaOptionSnapshot>> {
+  const out: Record<string, AlpacaOptionSnapshot> = {};
+  try {
+    let pageToken: string | undefined;
+    for (let page = 0; page < (opts.maxPages ?? 10); page++) {
+      const params: Record<string, string | number> = { limit: 1000 };
+      if (opts.expiryFrom) params.expiration_date_gte = opts.expiryFrom;
+      if (opts.expiryTo) params.expiration_date_lte = opts.expiryTo;
+      if (pageToken) params.page_token = pageToken;
+      const response = await alpacaClient.get(`/v1beta1/options/snapshots/${underlying.toUpperCase()}`, { params });
+      Object.assign(out, response.data?.snapshots ?? {});
+      pageToken = response.data?.next_page_token ?? undefined;
+      if (!pageToken) break;
+    }
+  } catch (error) {
+    console.error('Error fetching option chain from Alpaca:', axios.isAxiosError(error) ? error.response?.status : error);
+  }
+  return out;
+}

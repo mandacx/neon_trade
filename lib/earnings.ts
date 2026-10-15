@@ -20,6 +20,7 @@
  * new Date('YYYY-MM-DD') in local time.
  */
 import { sql } from '@/lib/db';
+import { acquireLease, releaseLease } from '@/lib/jobLease';
 import { parseEarningsHeadline, symbolsForResult, easternDateAndSession } from '@/lib/earningsParse';
 import type { EarningsBadge, EarningsEvent, EarningsOutcome, EarningsRangeRow, EarningsResult, EarningsSummary, EarningsTime } from '@/types/earnings';
 
@@ -74,20 +75,6 @@ export async function getTrackedSymbols(): Promise<string[]> {
     WHERE source = 'eod' AND last_trade_date >= CURRENT_DATE - 30
   `;
   return rows.map((r: any) => r.symbol as string);
-}
-
-async function acquireLease(seconds: number): Promise<boolean> {
-  await sql`INSERT INTO public.nt_job_lease (name) VALUES ('earnings') ON CONFLICT (name) DO NOTHING`;
-  const rows = await sql`
-    UPDATE public.nt_job_lease SET locked_until = now() + make_interval(secs => ${seconds})
-    WHERE name = 'earnings' AND locked_until < now()
-    RETURNING 1
-  `;
-  return rows.length > 0;
-}
-
-async function releaseLease(): Promise<void> {
-  await sql`UPDATE public.nt_job_lease SET locked_until = 'epoch' WHERE name = 'earnings'`;
 }
 
 export class AvRateLimited extends Error {}
@@ -490,7 +477,7 @@ export async function catchUpPendingFromNews(opts: { deadline?: number } = {}): 
 export interface EarningsRunPlan { calendar: boolean; news: boolean; catchUp: boolean }
 
 export async function processEarnings(plan: EarningsRunPlan, deadline: number): Promise<Record<string, unknown>> {
-  if (!(await acquireLease(Math.ceil((deadline - Date.now()) / 1000) + 5))) return { skipped: 'another run holds the lease' };
+  if (!(await acquireLease('earnings', Math.ceil((deadline - Date.now()) / 1000) + 5))) return { skipped: 'another run holds the lease' };
   const out: Record<string, unknown> = {};
   const attempt = async (key: string, fn: () => Promise<unknown>) => {
     try { out[key] = await fn(); } catch (e) { out[key] = { error: e instanceof Error ? e.message : String(e) }; }
@@ -500,7 +487,7 @@ export async function processEarnings(plan: EarningsRunPlan, deadline: number): 
     if (plan.news) await attempt('news', () => syncResultsFromNews({ deadline: deadline - 15_000 }));
     if (plan.catchUp) await attempt('catchUp', () => catchUpPendingFromNews({ deadline }));
   } finally {
-    await releaseLease();
+    await releaseLease('earnings');
   }
   return out;
 }

@@ -7,6 +7,127 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-15 — Escape closes only the top modal; volume backfill estimate
+
+Requested: fix stacked modals both closing on Escape, and estimate the volume backfill from Sep 1.
+
+### What changed
+
+`components/ui/Modal.tsx` keeps a module-level stack of open modals. Escape now closes only the top one.
+- `onClose` is read through a ref and the effect runs once per mount.
+- Before this, the effect re-subscribed on every render because callers pass inline functions. With a stack, that re-subscribing would also reorder it.
+
+This applies to every `Modal` user. A single modal behaves as before.
+
+### Verified
+
+- Playwright (Chromium) on a temporary page (deleted afterwards), with modal B opened from inside modal A:
+  - Escape closes B and A stays open; a second Escape closes A.
+  - After the parent re-renders while both are open, Escape still closes B first.
+- `tsc`, eslint and `npm run build` pass.
+- Not checked in the OI modal itself (that needs a Pro login).
+
+### Backfill estimate (measured)
+
+- `scripts/backfill-option-volume.mjs` for the 2026-10-12 load (13,366 contracts) took 62.9s, about 4.7 ms per contract. That date is now filled.
+- Remaining from 2026-09-01: 29 load dates, about 355k contracts, so roughly **28 minutes** (allow 25–35). Run it as `--from 2026-09-01 --to 2026-10-09`.
+- Loads before 10-06 use derived OCC keys, so SPX/NDX weekly contracts there will mostly come back `no_trade`.
+- Not verified: Alpaca throttling over a run that long. The script retries a 429 up to 5 times with backoff.
+
+---
+
+## 2026-10-15 — Options OI Tracker (`/oi-tracker`, Pro feature `oi_tracker`)
+
+Requested: a page that tracks stocks by open interest (OI) and by OI change, both up and down. It should cover:
+- huge volume and huge positions opened or closed
+- views by expiry, by date, by strike and cumulatively
+- $ size (OI × 100 × price) in billions / millions / thousands
+- trade dates filtered or aggregated
+
+Clicking a stock should open an OI modal sorted by volume, with column filters and search. Users should be able to track contracts (buy to open or sell to open) from the date added and see their P&L. Where legs' quantities are nearly identical (2–3%), the page should suggest a possible strategy.
+
+Decisions made with the user:
+- Volume comes from a daily capture plus live data in the modal.
+- $ values use the report's `ltp`.
+- It is a new Pro feature.
+- The user picks BTO/STO, with a hint shown.
+- Positions are private per user. The user added: visible to others only if made public, through a future feature like trade social / follow the board. So a `visibility` column is reserved and always set to `private`.
+
+Full design: **`docs/oi-tracker.md`**.
+
+### Data findings (verified live)
+
+- `us_opt_chg_rpt` is a change report: only rows with |oi_chg| ≥ 101, and **no volume column**. Nothing in the app ranked OI change before this.
+- **OCC `symbol` is null for every load before 2026-10-06.** Contracts are keyed by the real symbol, or by one derived from underlying, expiry, type and strike (`occSql`). The derived key matches the real one on 94.5% of rows; the mismatches are SPXW/NDXP and adjusted roots such as LEN1, which since 10-06 coexist with the standard contract at the same strike (72 such pairs on 10-15).
+- **OI change on load D reflects the session before D.** On the 10-15 load, 1,785 of 1,796 increases of ≥ 1,000 had previous-session volume of at least 95% of the change. For decreases it was 352 of 486 (exercise and assignment close OI without a trade).
+- `ltp` does not match the Tradier close or prevclose for the sample checked (WMT 120C: 2.32 against 2.98 / 1.64). Its meaning is **unverified**.
+- Alpaca option bars accept 200 symbols per call (~2.7s uncached; limit 200 requests/min) and refuse the current day. Option snapshots cap at 100 symbols.
+
+### What changed
+
+| Area | Files |
+|---|---|
+| Tables `nt_opt_daily_bars`, `nt_oi_tracked`, lease row `oi_volume` (DDL run on the live DB) | `scripts/bootstrap-oi-tracker.mjs` (new); migrate lists in `scripts/migrate/copy-public-data.mjs`, `scripts/migrate/migrate.sh` |
+| Feature code | `lib/features.ts` (`FEATURE_OI_TRACKER`), seed in `scripts/bootstrap-app-tables.mjs` (Pro and Expert) |
+| Volume capture, run by the market-catalog cron after the catalog step | `lib/optionVolume.ts` (new), `app/api/cron/market-catalog/route.ts`, `scripts/backfill-option-volume.mjs` (new) |
+| Shared lease helper (earnings now uses it; same SQL) | `lib/jobLease.ts` (new), `lib/earnings.ts` |
+| Alpaca helpers | `getOptionBarsMulti`, `getOptionSnapshotsMulti`, `getOptionChainSnapshots` in `lib/alpaca.ts` |
+| Calendar for any range | `tradingDaysBetween`, `previousTradingDay` in `lib/marketSession.ts` |
+| Screen / grouping / stock queries | `lib/oiTracker.ts` (new), `types/oiTracker.ts` (new) |
+| Strategy candidates and side hint (pure) | `lib/oiStrategies.ts` (new), `scripts/test-oi-strategies.mjs` (new fixtures) |
+| Private tracking + P&L | `lib/oiTracked.ts` (new) |
+| API | `app/api/oi-tracker/{meta,screen,strategies,stock/[symbol],tracked,tracked/[id],tracked/[id]/history}`, `lib/oiTrackerApi.ts` (guard, rate limit, param parsing) |
+| Page + components | `app/oi-tracker/{layout,page}.tsx`, `components/oi/{DataTable,StockOiModal,TrackedPanel,oiShared}.tsx`, `lib/format.ts` |
+| Gating / nav | `middleware.ts` (matcher), `components/layout/Header.tsx` |
+
+**Header change.** On desktop, Earnings and OI Tracker now share one "📊 Trackers" dropdown; the mobile menu lists both separately.
+- Measured with Playwright before the change: the home page already overflowed horizontally by 39px at 1280px.
+- A separate OI button pushed that to 184px at 1280 and 141px at 1366.
+- With the dropdown (and its PRO tags on the items, not the button): 21px at 1280, 0 at 1366 and above.
+- Earnings is now one click deeper on desktop.
+
+### Verified
+
+- **Volume capture:**
+  - Backfilled loads 10-13, 10-14 and 10-15: 43,647 contract-days, about 1% `no_trade`.
+  - With six parallel requests one cron-sized run stored 12,000 of 12,809 contracts in 46s; the next finished the rest in 6s.
+  - `GET /api/cron/market-catalog?force=true` on the production build returned the catalog result plus `optionVolume: { done: true }`.
+- **`getOiScreen` on the live DB:**
+  - 1 load: 0.25–0.8s for every grouping.
+  - 20 loads: ~2.2s for contracts, ~2.0–2.3s grouped.
+  - 60 loads grouped: 5.7–6.8s.
+  - 60 loads per contract took 12.6s, hence the 20-load cap for the market-wide contract view.
+  - A combined filter (opened, $1M–1B, monthly, OTM puts, Technology) returned 143 contracts in 0.4s.
+- **Strategies:** `node scripts/test-oi-strategies.mjs` passes. It covers every pattern, near-misses at 3.5% against tolerances of 3% and 4%, minimum leg size, per-underlying grouping, one use per leg, `suggestSide` and `expiryKind`. The live 10-15 load gives 964 candidates; the top one is APO with put legs of 10,002 and 10,000.
+- **Tracking:** exercised through the lib against the live DB with two test user ids; all test rows were deleted afterwards.
+  - Today's entry used the live mid, and a 10-13 entry used the 10-13 bar close (1.64, matching the bar).
+  - P&L sign is correct for BTO and STO.
+  - An expired AAPL call was valued at intrinsic 0.
+  - A two-leg group's history sums its legs (last point equals the two P&L figures).
+  - Close and reopen work.
+  - Rejected: an unknown contract, a bad side, qty 0, a future date.
+  - **Privacy:** user B listing, reading, editing, deleting, group-deleting and fetching history on user A's ids all returned nothing or 404, and A's row was unchanged.
+- **Build checks:** `npx tsc --noEmit` passes, and eslint reports 0 errors (`any` warnings only, as elsewhere). `npm run build` passes.
+- **Production server, signed out:** `/oi-tracker` redirects to `/login?redirect=%2Foi-tracker`, and all seven API routes (GET, POST, DELETE) return 401. The Trackers dropdown opens and navigates (Chromium).
+
+### Not verified
+
+- **The page, the modal, the column filters, the track form and the My-tracked tab were not seen in a browser.** They need a signed-in account with the feature, and no test credentials were available. The API routes were not called as a signed-in user over HTTP; their lib functions were.
+- The live Alpaca chain in the modal (`getOptionChainSnapshots`) was only probed manually (WMT); SPX/NDX chains are unknown.
+- The pre-market and early-morning behaviour of the live mid used for today's entry price.
+- A full-month backfill (time and rate limits).
+- What `ltp` is (see above).
+- Pre-existing, not changed: the home page still overflows by 21px at exactly 1280px.
+
+### Follow-ups
+
+- **Rollout step:** tick "Options OI Tracker" for Pro (and Expert) in `/admin/plans`; the seed only covers new databases.
+- Optionally backfill volume for older loads (`scripts/backfill-option-volume.mjs --from …`).
+- ~~Two stacked modals both close on Escape.~~ Fixed in the next entry.
+- A future social feature can expose `visibility = 'public'` positions through its own read path; nothing reads that column today.
+
+---
+
 ## 2026-10-14 — Session-aware quotes: live / pre-market / after-hours / closed
 
 Requested: update quotes live or after hours according to the market's opening times, and show the

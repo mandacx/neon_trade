@@ -10,7 +10,7 @@ import SignOutButton from '@/components/auth/SignOutButton';
 import IndicesStrip from '@/components/layout/IndicesStrip';
 import {
   hasFeature, FEATURE_QUADRANT, FEATURE_SCAN_ALERTS_LATEST, FEATURE_SCAN_ALERTS_HISTORY,
-  FEATURE_WATCHLISTS, FEATURE_PERFORMANCE, FEATURE_EARNINGS,
+  FEATURE_WATCHLISTS, FEATURE_PERFORMANCE, FEATURE_EARNINGS, FEATURE_OI_TRACKER,
 } from '@/lib/features';
 
 // Small "needs upgrade" flag for nav entries — shown before a click, not just
@@ -39,9 +39,11 @@ export default function Header() {
   const [scanMenuOpen, setScanMenuOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [watchMenuOpen, setWatchMenuOpen] = useState(false);
+  const [trackersMenuOpen, setTrackersMenuOpen] = useState(false);
   const scanMenuRef = useRef<HTMLDivElement>(null);
   const accountMenuRef = useRef<HTMLDivElement>(null);
   const watchMenuRef = useRef<HTMLDivElement>(null);
+  const trackersMenuRef = useRef<HTMLDivElement>(null);
   const authCtx = useAuthContext();
 
   const isActive = (path: string) => pathname === path;
@@ -52,6 +54,7 @@ export default function Header() {
   const needsWatchlists = !hasFeature(authCtx.features, FEATURE_WATCHLISTS);
   const needsPerformance = !hasFeature(authCtx.features, FEATURE_PERFORMANCE);
   const needsEarnings = !hasFeature(authCtx.features, FEATURE_EARNINGS);
+  const needsOiTracker = !hasFeature(authCtx.features, FEATURE_OI_TRACKER);
 
   useEffect(() => {
     function onClickOutside(e: MouseEvent) {
@@ -63,6 +66,9 @@ export default function Header() {
       }
       if (watchMenuRef.current && !watchMenuRef.current.contains(e.target as Node)) {
         setWatchMenuOpen(false);
+      }
+      if (trackersMenuRef.current && !trackersMenuRef.current.contains(e.target as Node)) {
+        setTrackersMenuOpen(false);
       }
     }
     document.addEventListener('mousedown', onClickOutside);
@@ -177,15 +183,43 @@ export default function Header() {
               🏆 Performance
               {needsPerformance && <ProBadge />}
             </button>
-            <button
-              onClick={() => router.push('/earnings')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                pathname?.startsWith('/earnings') ? 'bg-indigo-700 text-white' : 'bg-indigo-600 text-white hover:bg-indigo-700'
-              }`}
-            >
-              🗓️ Earnings
-              {needsEarnings && <ProBadge />}
-            </button>
+            {/* Earnings + OI Tracker share one dropdown: a separate OI button overflowed the
+                nav at 1280-1366px (measured), see docs/CHANGES.md. PRO tags are on the items. */}
+            <div className="relative" ref={trackersMenuRef}>
+              <button
+                onClick={() => setTrackersMenuOpen(v => !v)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                  pathname?.startsWith('/earnings') || pathname?.startsWith('/oi-tracker') ? 'bg-indigo-700 text-white' : 'bg-indigo-600 text-white hover:bg-indigo-700'
+                }`}
+              >
+                📊 Trackers
+                <svg className={`w-3 h-3 transition-transform ${trackersMenuOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              {trackersMenuOpen && (
+                <div className="absolute right-0 mt-1 w-48 bg-white rounded-lg shadow-lg border border-gray-200 overflow-hidden z-30">
+                  <button
+                    onClick={() => { setTrackersMenuOpen(false); router.push('/earnings'); }}
+                    className={`w-full text-left px-3 py-2 text-xs font-medium hover:bg-indigo-50 ${
+                      pathname?.startsWith('/earnings') ? 'text-indigo-700 bg-indigo-50' : 'text-gray-700'
+                    }`}
+                  >
+                    🗓️ Earnings
+                    {needsEarnings && <MobileProBadge />}
+                  </button>
+                  <button
+                    onClick={() => { setTrackersMenuOpen(false); router.push('/oi-tracker'); }}
+                    className={`w-full text-left px-3 py-2 text-xs font-medium hover:bg-indigo-50 border-t border-gray-100 ${
+                      pathname?.startsWith('/oi-tracker') ? 'text-indigo-700 bg-indigo-50' : 'text-gray-700'
+                    }`}
+                  >
+                    📊 Options OI Tracker
+                    {needsOiTracker && <MobileProBadge />}
+                  </button>
+                </div>
+              )}
+            </div>
             <button
               onClick={() => router.push('/guide')}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
@@ -328,6 +362,13 @@ export default function Header() {
           >
             🗓️ Earnings
             {needsEarnings && <MobileProBadge />}
+          </button>
+          <button
+            onClick={() => router.push('/oi-tracker')}
+            className="w-full text-left px-3 py-2 text-sm font-semibold text-cyan-800 hover:bg-cyan-50 rounded-lg"
+          >
+            📊 OI Tracker
+            {needsOiTracker && <MobileProBadge />}
           </button>
           <button
             onClick={() => router.push('/guide')}
