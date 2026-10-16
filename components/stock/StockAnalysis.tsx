@@ -33,11 +33,12 @@ const INTERVAL_CONFIG: Record<SelectableInterval, { initialDays: number; chunkDa
   '15min': { initialDays: 10, chunkDays: 5, label: '15m' },
   '30min': { initialDays: 20, chunkDays: 10, label: '30m' },
   '1hour': { initialDays: 30, chunkDays: 15, label: '1H' },
-  // 120 days (~85 bars) plus one 120-day chunk fills the chart at TVChart's 10px candle
-  // width (~120 bars on a typical screen). With 60-day windows the chart auto-loaded ~4
-  // older chunks on open, each firing two /levels range calls, and that endpoint allows
-  // only 10 range calls a minute (429).
-  daily: { initialDays: 120, chunkDays: 120, label: '1D' },
+  // 85 calendar days ~ 60 daily bars, loaded first and then in chunks of the same size as
+  // the chart scrolls back (TVChart draws 12px candles, so a typical screen needs ~100
+  // bars: one or two chunks load on open). Each chunk costs one /levels range call and
+  // that endpoint allows only 10 a minute, which is why load-more skips the duplicate
+  // whole-range refetch below (see skipLevelsRefetchRef).
+  daily: { initialDays: 85, chunkDays: 85, label: '1D' },
 };
 const INTERVAL_ORDER: SelectableInterval[] = ['1min', '5min', '15min', '30min', '1hour', 'daily'];
 
@@ -415,6 +416,9 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
   // Stable refs so handleLoadMore never changes reference (prevents chart recreation)
   const ohlcDataRef = useRef<any[]>([]);
   const isLoadingMoreRef = useRef(false);
+  // Set by handleLoadMore just before it merges a chunk of bars: it fetches that chunk's levels itself, so the
+  // whole-range levels refetch effect (which re-runs on every ohlcData change) must skip this one change.
+  const skipLevelsRefetchRef = useRef(false);
   const selectedExpiryRef = useRef('');
   const chartIntervalRef = useRef<SelectableInterval>('daily');
   // Bumped every time the loaded OHLC window is replaced wholesale (initial
@@ -585,6 +589,7 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
   // Fetch historical levels data when expiry date changes (skip initial load)
   useEffect(() => {
     if (!symbol || !selectedExpiry || isInitialLoad || ohlcData.length === 0) return;
+    if (skipLevelsRefetchRef.current) { skipLevelsRefetchRef.current = false; return; }
 
     // `ohlcData` and `selectedExpiry` don't always land in the same render —
     // switching expiries can fire this effect once with the OLD ohlcData
@@ -889,7 +894,8 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
       if (result.success && result.data.data.length > 0) {
         const newData = result.data.data;
 
-        // Merge new data with existing data
+        // Merge new data with existing data (its levels are fetched below, so skip the whole-range refetch)
+        skipLevelsRefetchRef.current = true;
         setOhlcData(prevData =>
           mergeSorted(prevData, newData, (b: any) => b.timestamp ?? b.date)
         );

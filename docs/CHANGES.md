@@ -7,6 +7,38 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-16 — Stock chart: 60-bar windows, 12px candles, free right fifth (and a load-more loop fixed)
+
+Requested: load 60 bars instead of 100/120, make candles 12px, and use only 4/5 of the plot width, leaving 1/5 free on the right.
+
+### What changed
+
+- `components/stock/StockAnalysis.tsx`: daily `initialDays` / `chunkDays` 120 → 85 calendar days (about 60 trading bars).
+- `components/charts/TVChart.tsx`:
+  - `MAX_BAR_SPACING` 10 → 12px.
+  - `FREE_RIGHT_FRACTION = 0.2`: `fitBarsCapped` sets `rightOffset` so the latest bar sits at 80% of the plot. Bars are fitted into the left 80% (spacing at most 12px).
+  - The 1W / 1M / 3M / 6M / 1Y / YTD buttons now set a *logical* (bar-position) range ending 25% of its length past the last bar. A time range snapped to the last bar and showed no margin (seen in a screenshot).
+- **Bug found and fixed on the way:** with the free margin, the chart loaded older history without end (15–31 OHLC chunks per page load, most of their level calls rejected with 429).
+  - Cause 1: the data effect re-fitted the view after every chunk, which squeezed all bars together (spacing 6 → 7.5 → 5 → 3.8 px). The old guard (`isLoadingMore` / `loadingMoreRef`) was already false by then because the parent batches `setOhlcData` and `setIsLoadingMore(false)`. During that re-fit the chart reported a stale range and fired another load.
+  - Fix: fit only when the data is replaced (first bar later or last bar earlier than before, or a new chart), tracked with `fittedRangeRef`; merely extending the data no longer touches the view.
+  - Cause 2: the load-more triggers treated the margins we add on purpose as "scrolled past the data". They now need a 2-bar overshoot beyond the margins (`from < -2`, `to > last + rightOffset + 2`).
+- `StockAnalysis.tsx`: after a load-more merges a chunk, the effect that re-requested levels for the whole loaded range is skipped once (`skipLevelsRefetchRef`), since the handler already fetched that chunk's levels. One level call per chunk instead of two.
+
+### Verified (production build, Chromium, rate-limit counter cleared before each page)
+
+- Page load now makes 2 OHLC and 4 level calls on AAPL (1490px), NVDA (1920px) and SPY (1280px), with no 429s. Before the fix, 15–31 OHLC calls with up to 23 rejected level calls.
+- Screenshots: candles about 12px apart; the latest candle at about 80% of the plot width at 1490 and 1920px; with 3M and ALL selected at 1280px, also about 80% (measured from the images: 0.80).
+- `tsc` passes; no page errors.
+
+### Not verified
+
+- Intraday intervals (1m–1H) keep their old windows; they use the same fit and load-more code but were not viewed.
+- Free space with the 1W / 1M / 6M / 1Y / YTD buttons (3M and ALL were checked; the code path is shared).
+- The embedded W Chart view (needs a login), phone widths, and a very wide screen (2560px+) where more than two chunks may be needed on open (each chunk costs one level call, against a limit of 10 a minute).
+- Scrolling back by hand beyond the loaded data was not exercised after the fix.
+
+---
+
 ## 2026-10-16 — Docs refresh
 
 Updated the documents that still described the app as it was in January, after the chart, earnings, OI tracker and column work:

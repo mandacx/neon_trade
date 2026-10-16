@@ -16,20 +16,27 @@ const EARNINGS_OUTCOME_COLOR: Record<NonNullable<EarningsResult['epsOutcome']>, 
 import { getLevelColor, getLevelDisplayName, formatCurrency, formatPercentage, escapeHtml, SCAN_CODE_TO_LEVEL } from '@/lib/utils';
 
 /** Widest candle spacing (px) when fitting the whole history; fewer bars than fill the width stay this narrow. */
-const MAX_BAR_SPACING = 10;
+const MAX_BAR_SPACING = 12;
+
+/** Share of the plot width left empty to the right of the latest bar. */
+const FREE_RIGHT_FRACTION = 0.2;
 
 /**
- * Fit every bar, but never wider than MAX_BAR_SPACING per bar: a short history is
- * drawn right-aligned at that spacing instead of being stretched into fat candles.
- * The empty space on the left then triggers the existing load-more of older bars.
+ * Fit every bar into the left 80% of the plot (the right 20% stays empty), but never wider than
+ * MAX_BAR_SPACING per bar: a short history is drawn right-aligned at that spacing instead of being
+ * stretched into fat candles. The empty space on the left then triggers the existing load-more of
+ * older bars. The right margin is `rightOffset`, measured in bars.
  */
 function fitBarsCapped(chart: IChartApi, barCount: number) {
   const ts = chart.timeScale();
-  ts.fitContent();
-  if (barCount > 0 && ts.width() / barCount > MAX_BAR_SPACING) {
-    ts.applyOptions({ barSpacing: MAX_BAR_SPACING });
-    ts.scrollToRealTime();
+  const width = ts.width();
+  if (barCount <= 0 || width <= 0) {
+    ts.fitContent();
+    return;
   }
+  const spacing = Math.min(MAX_BAR_SPACING, (width * (1 - FREE_RIGHT_FRACTION)) / barCount);
+  ts.applyOptions({ barSpacing: spacing, rightOffset: (width * FREE_RIGHT_FRACTION) / spacing });
+  ts.scrollToRealTime();
 }
 
 interface TVChartProps {
@@ -172,6 +179,8 @@ export default function TVChart({
   const [activeLevelFilter, setActiveLevelFilter] = useState<string | null>(null);
   const [isEnlarged, setIsEnlarged] = useState(false);
   const loadingMoreRef = useRef(false);
+  // First and last bar time of the data the chart was last fitted to (see the data effect).
+  const fittedRangeRef = useRef<{ first: number; last: number } | null>(null);
 
   // Esc closes the enlarged view, same as the app's Modal component.
   useEffect(() => {
@@ -255,6 +264,7 @@ export default function TVChart({
     });
 
     chartRef.current = chart;
+    fittedRangeRef.current = null; // a new chart has not been fitted to anything yet
 
     // Add candlestick series
     const candleSeries = chart.addCandlestickSeries({
@@ -393,9 +403,13 @@ export default function TVChart({
         // loaded bar (bar index negative); logicalRange.to beyond the last
         // bar's index means they scrolled right past the last loaded bar —
         // both trigger loading further data in that direction.
+        // Margins we add on purpose don't count as "scrolled past the data": the fit leaves
+        // `rightOffset` empty bars on the right and puts the left edge about 1 bar before the first
+        // bar, so require a clear overshoot (2 bars) beyond those before loading more.
+        const freeBars = timeScale.options().rightOffset ?? 0;
         let direction: 'past' | 'future' | null = null;
-        if (logicalRange.from < 0) direction = 'past';
-        else if (logicalRange.to > seriesData.length - 1) direction = 'future';
+        if (logicalRange.from < -2) direction = 'past';
+        else if (logicalRange.to > seriesData.length - 1 + freeBars + 2) direction = 'future';
         if (!direction) return;
 
         loadingMoreRef.current = true;
@@ -728,18 +742,18 @@ export default function TVChart({
     candleSeriesRef.current.applyOptions({ visible: showPrice });
     volumeSeriesRef.current.applyOptions({ visible: showPrice });
 
-    // Only fit content on initial load, not when loading more data. The
-    // `isLoadingMore` PROP is unreliable for this: the parent's
-    // setOhlcData(...) and setIsLoadingMore(false) both happen in the same
-    // async continuation, so React batches them into one render — by the
-    // time this effect runs, the prop already reads `false` even for a
-    // just-appended load-more update, defeating this guard entirely (it
-    // was refitting/snapping the viewport on every load-more, silently,
-    // since the day this guard was written). `loadingMoreRef` is a ref set
-    // synchronously the moment a load-more is triggered (see
-    // handleVisibleTimeRangeChange below) and isn't subject to that batching
-    // race, so check it too.
-    if (!isLoadingMore && !loadingMoreRef.current && chartRef.current) {
+    // Fit only when the data is REPLACED (a new symbol, interval or window), never when it is merely
+    // extended or the effect re-runs. Extending means older bars were loaded before the first bar, or a
+    // newer bar after the last one; re-fitting then snaps the viewport away from where the user is
+    // looking and squeezes every loaded bar together. (The old guard used the parent's isLoadingMore
+    // and loadingMoreRef, but both are already false by the time this effect runs after a load-more,
+    // because the parent batches setOhlcData and setIsLoadingMore(false) into one render.)
+    const first = processedBars.length ? processedBars[0].time : null;
+    const last = processedBars.length ? processedBars[processedBars.length - 1].time : null;
+    const prev = fittedRangeRef.current;
+    fittedRangeRef.current = first === null ? null : { first, last: last as number };
+    const replaced = first !== null && (!prev || first > prev.first || (last as number) < prev.last);
+    if (replaced && chartRef.current) {
       fitBarsCapped(chartRef.current, processedBars.length);
     }
   }, [processedBars, volumeByTime, isLoading, isLoadingMore, showPrice]);
@@ -1074,9 +1088,14 @@ export default function TVChart({
         return;
     }
 
-    chartRef.current.timeScale().setVisibleRange({
-      from: fromTime as any,
-      to: lastTime as any,
+    // Show the bars from `fromTime` on, leaving the right 20% of the plot empty. Set by bar position
+    // (logical range): a time range is snapped to the nearest real bar, which removes the blank space.
+    const bars = candleSeriesRef.current?.data() ?? [];
+    const firstIdx = Math.max(0, bars.findIndex(b => (b.time as number) >= fromTime));
+    const count = Math.max(1, bars.length - firstIdx);
+    chartRef.current.timeScale().setVisibleLogicalRange({
+      from: firstIdx - 0.5,
+      to: bars.length - 1 + (count * FREE_RIGHT_FRACTION) / (1 - FREE_RIGHT_FRACTION),
     });
   };
 
