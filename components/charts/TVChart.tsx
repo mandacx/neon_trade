@@ -32,21 +32,6 @@ function fitBarsCapped(chart: IChartApi, barCount: number) {
   }
 }
 
-type GapPoint = { time: any; value: number; color?: string };
-/**
- * Line points for bars that have a value, given as (bar index, point). Where bars
- * without a value separate two points, the point before the gap is made
- * transparent: lightweight-charts 4.x colours a segment by its starting point and
- * bridges whitespace, so this is what hides the straight line across a data gap
- * (verified against 4.2.3).
- */
-function breakAtGaps(points: Array<{ idx: number; time: any; value: number }>): GapPoint[] {
-  return points.map((p, i) => {
-    const next = points[i + 1];
-    return next && next.idx > p.idx + 1 ? { time: p.time, value: p.value, color: 'rgba(0,0,0,0)' } : { time: p.time, value: p.value };
-  });
-}
-
 interface TVChartProps {
   symbol: string;
   // `time` is epoch seconds — the chart's canonical time axis, at whatever
@@ -324,7 +309,7 @@ export default function TVChart({
     const callOiLine = chart.addLineSeries({
       color: '#ef4444',
       lineWidth: 2,
-      lineType: 2, // curved (original look); a gap in the data is broken by breakAtGaps()
+      lineType: 2, // curved; days without data are simply skipped, the line runs to the next point
       title: 'Call OI',
       priceScaleId: 'left',
       priceFormat: { type: 'volume' },
@@ -336,7 +321,7 @@ export default function TVChart({
     const putOiLine = chart.addLineSeries({
       color: '#22c55e',
       lineWidth: 2,
-      lineType: 2, // curved (original look); a gap in the data is broken by breakAtGaps()
+      lineType: 2, // curved; days without data are simply skipped, the line runs to the next point
       title: 'Put OI',
       priceScaleId: 'left',
       priceFormat: { type: 'volume' },
@@ -348,7 +333,7 @@ export default function TVChart({
     const oiDiffLine = chart.addLineSeries({
       color: '#f59e0b',
       lineWidth: 2,
-      lineType: 2, // curved (original look); a gap in the data is broken by breakAtGaps()
+      lineType: 2, // curved; days without data are simply skipped, the line runs to the next point
       title: 'OI Diff',
       priceScaleId: 'left',
       priceFormat: { type: 'volume' },
@@ -369,7 +354,7 @@ export default function TVChart({
       const s = chart.addLineSeries({
         color: cfg.color,
         lineWidth: 1,
-        lineType: 2, // curved (original look); a gap in the data is broken by breakAtGaps()
+        lineType: 2, // curved; days without data are simply skipped, the line runs to the next point
         title: cfg.title,
         priceScaleId: 'right',
         lastValueVisible: true,
@@ -777,14 +762,14 @@ export default function TVChart({
       oiData.forEach(d => { if (d.time) oiByDay.set(String(d.time), d); });
 
       const oiDiffPoints: HistogramData[] = [];
-      // Line points keep their bar index so breakAtGaps() can hide the segment
-      // across bars that have no OI (the expiry's history is often sparse).
-      type P = { idx: number; time: any; value: number };
+      // Only days that have OI get a point (the API sends no `oi` for a missing day), and the
+      // lines run straight on to the next available point: a missing day is never plotted as 0.
+      type P = { time: any; value: number };
       const callOiPoints: P[] = [];
       const putOiPoints: P[] = [];
       const oiDiffLinePoints: P[] = [];
 
-      processedBars.forEach((bar, idx) => {
+      processedBars.forEach(bar => {
         const dayOi = oiByDay.get(bar.dayKey);
         if (!dayOi) return;
         const t = bar.time as any;
@@ -794,16 +779,16 @@ export default function TVChart({
             value: Math.abs(dayOi.oiDiff),
             color: dayOi.oiDiff > 0 ? 'rgba(34, 197, 94, 0.6)' : 'rgba(239, 68, 68, 0.6)',
           });
-          oiDiffLinePoints.push({ idx, time: t, value: dayOi.oiDiff });
+          oiDiffLinePoints.push({ time: t, value: dayOi.oiDiff });
         }
-        if (Number.isFinite(dayOi.callOi)) callOiPoints.push({ idx, time: t, value: dayOi.callOi });
-        if (Number.isFinite(dayOi.putOi)) putOiPoints.push({ idx, time: t, value: dayOi.putOi });
+        if (Number.isFinite(dayOi.callOi)) callOiPoints.push({ time: t, value: dayOi.callOi });
+        if (Number.isFinite(dayOi.putOi)) putOiPoints.push({ time: t, value: dayOi.putOi });
       });
 
       oiDiffSeriesRef.current.setData(oiDiffPoints);
-      callOiLineRef.current.setData(breakAtGaps(callOiPoints));
-      putOiLineRef.current.setData(breakAtGaps(putOiPoints));
-      oiDiffLineRef.current.setData(breakAtGaps(oiDiffLinePoints));
+      callOiLineRef.current.setData(callOiPoints as any);
+      putOiLineRef.current.setData(putOiPoints as any);
+      oiDiffLineRef.current.setData(oiDiffLinePoints as any);
 
       oiDiffSeriesRef.current.applyOptions({ visible: showOI });
       callOiLineRef.current.applyOptions({ visible: showOI });
@@ -883,27 +868,27 @@ export default function TVChart({
       return;
     }
 
-    const buckets: Record<string, { idx: number; time: any; value: number }[]> = {
+    const buckets: Record<string, { time: any; value: number }[]> = {
       call_high: [], call_int: [], put_call_int: [], put_int: [], put_low: [],
     };
 
-    processedBars.forEach((bar, idx) => {
+    // Only days with a real level (> 0; the DB stores "no data" as 0) get a point, so each line
+    // runs straight on to the next available day instead of dropping to 0 or breaking.
+    processedBars.forEach(bar => {
       const dayData = historicalLevels.get(bar.dayKey);
       if (!dayData) return;
       dayData.levels.forEach(level => {
         const price = typeof level.price === 'string' ? parseFloat(level.price) : level.price;
         if (buckets[level.name] && Number.isFinite(price) && price > 0) {
-          buckets[level.name].push({ idx, time: bar.time as any, value: price });
+          buckets[level.name].push({ time: bar.time as any, value: price });
         }
       });
     });
 
-    // An expiry's level history is often sparse: break the line across gaps
-    // instead of bridging them with a straight segment.
     Object.entries(buckets).forEach(([name, data]) => {
       const s = refs[name];
       if (!s) return;
-      s.setData(breakAtGaps(data));
+      s.setData(data as any);
     });
   }, [historicalLevels, processedBars]);
 

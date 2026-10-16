@@ -21,6 +21,10 @@ interface Meta {
   watchlists: Array<{ id: string; name: string; isSystem: boolean; symbolCount: number }>;
 }
 
+/** Each grouping has its own columns, so each has its own saved Columns choice. */
+const GROUP_TABLE_ID: Record<Exclude<OiGroupBy, 'contract'>, string> = {
+  underlying: 'oiFlowUnderlying', expiry: 'oiFlowExpiry', strike: 'oiFlowStrike', date: 'oiFlowDate',
+};
 const RANGES: Array<[string, string]> = [['1', '1 day'], ['5', '5D'], ['10', '10D'], ['20', '20D'], ['60', '60D'], ['custom', 'Custom']];
 const RANK_BY: Array<[string, string]> = [
   ['abs_chg_value', '|Chg $|'], ['abs_chg', '|OI chg|'], ['chg', 'OI opened'], ['oi_value', 'OI $'], ['vol', 'Volume'],
@@ -419,11 +423,11 @@ export default function OiTrackerPage() {
               ) : !screen ? null : (
                 <div className={screenLoading ? 'opacity-50 pointer-events-none' : ''}>
                   {screen.groupBy === 'contract' ? (
-                    <DataTable rows={screen.rows as OiContractRow[]} columns={contractCols} rowKey={r => r.contract}
+                    <DataTable tableId="oiFlowContract" rows={screen.rows as OiContractRow[]} columns={contractCols} rowKey={r => r.contract}
                       onRowClick={r => setModalSymbol(r.underlying)} csvName={`oi-contracts-${screen.from}-${screen.to}`}
                       toolbar={<RangeNote screen={screen} capNote={!!contractCapNote} max={meta.maxLoadsContract} />} />
                   ) : (
-                    <DataTable rows={screen.rows as OiGroupRow[]} columns={groupCols(screen.groupBy as Exclude<OiGroupBy, 'contract'>)} rowKey={r => r.key}
+                    <DataTable tableId={GROUP_TABLE_ID[screen.groupBy as Exclude<OiGroupBy, 'contract'>]} rows={screen.rows as OiGroupRow[]} columns={groupCols(screen.groupBy as Exclude<OiGroupBy, 'contract'>)} rowKey={r => r.key}
                       onRowClick={screen.groupBy === 'date' ? undefined : r => r.underlying && setModalSymbol(r.underlying)}
                       csvName={`oi-${screen.groupBy}-${screen.from}-${screen.to}`} toolbar={<RangeNote screen={screen} capNote={false} max={meta.maxLoads} />} />
                   )}

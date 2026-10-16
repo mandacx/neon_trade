@@ -1149,8 +1149,8 @@ __tests__/
 ## Future Enhancements
 
 ### Phase 2 Features
-- User authentication & watchlists
-- Email/SMS alerts when stock near level
+- ~~User authentication & watchlists~~ (done)
+- Email/SMS alerts when stock near level (scan alerts and Telegram alerts exist; email/SMS do not)
 - Social sharing of charts
 - Export chart as image
 - Mobile app (React Native)
@@ -1220,6 +1220,7 @@ __tests__/
 | Date | Version | Changes |
 |------|---------|---------|
 | 2026-01-06 | 0.1.0 | Initial project plan created |
+| 2026-10-16 | - | This plan predates the current app (accounts, watchlists, earnings, OI tracker and more). Later changes are recorded in `docs/CHANGES.md`; `CLAUDE.md` is the maintained architecture guide. |
 
 ---
 

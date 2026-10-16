@@ -7,6 +7,9 @@ import { pollDelayMs, type MarketClock } from '@/lib/pollDelay';
 import Header from '@/components/layout/Header';
 import AddSymbolInput from '@/components/watchlists/AddSymbolInput';
 import AlertsWidget from '@/components/watchlists/AlertsWidget';
+import ColumnsMenu from '@/components/ui/ColumnsMenu';
+import { useColumnPrefs } from '@/components/ui/useColumnPrefs';
+import type { ColumnMeta } from '@/lib/tableColumns';
 import { getLevelDisplayName } from '@/lib/utils';
 import {
   type WatchlistSummary, type QuoteRow, type LevelRow, type LevelKey, LEVEL_FILTER_OPTIONS,
@@ -19,18 +22,23 @@ type DirectionFilter = 'all' | 'up' | 'down';
 type ViewMode = 'thin' | 'broad';
 type SortKey = 'symbol' | 'lastPrice' | 'change' | 'changePercent' | 'ext' | 'open' | 'dayLow' | 'dayHigh' | 'volume' | 'level' | 'nextEarnings' | 'lastResult';
 
-type ColumnKey = 'open' | 'dayLow' | 'dayHigh' | 'volume' | 'level' | 'nextEarnings' | 'lastResult';
-// Shown only to viewers with the `earnings` feature (the quotes route says which).
-const EARNINGS_COLUMNS: ReadonlySet<ColumnKey> = new Set(['nextEarnings', 'lastResult']);
-const OPTIONAL_COLUMNS: Array<{ key: ColumnKey; label: string }> = [
-  { key: 'open', label: 'Open' },
-  { key: 'dayLow', label: 'Day Low' },
-  { key: 'dayHigh', label: 'Day High' },
-  { key: 'volume', label: 'Volume' },
-  { key: 'level', label: 'Nearest Level' },
-  { key: 'nextEarnings', label: 'Next Earnings' },
-  { key: 'lastResult', label: 'Last Result' },
+/** Columns of the quotes table, in display order. Saved per user (the Columns menu). */
+const WATCHLIST_COLUMNS: ColumnMeta[] = [
+  { id: 'symbol', label: 'Symbol', required: true },
+  { id: 'lastPrice', label: 'Last Price' },
+  { id: 'change', label: 'Change' },
+  { id: 'changePercent', label: 'Change %' },
+  { id: 'ext', label: 'Ext. Hrs', hint: 'Only appears while a row has a pre/after-hours price' },
+  { id: 'open', label: 'Open' },
+  { id: 'dayLow', label: 'Day Low' },
+  { id: 'dayHigh', label: 'Day High' },
+  { id: 'volume', label: 'Volume' },
+  { id: 'level', label: 'Nearest Level' },
+  { id: 'nextEarnings', label: 'Next Earnings' },
+  { id: 'lastResult', label: 'Last Result' },
 ];
+// Shown only to viewers with the `earnings` feature (the quotes route says which).
+const EARNINGS_COLUMNS: ReadonlySet<string> = new Set(['nextEarnings', 'lastResult']);
 
 const inputClass = "px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white";
 
@@ -77,8 +85,8 @@ export default function WatchlistsPage() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [viewMode, setViewMode] = useState<ViewMode>('thin');
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
-  const [visibleCols, setVisibleCols] = useState<Set<ColumnKey>>(new Set(OPTIONAL_COLUMNS.map(c => c.key)));
-  const [customizeOpen, setCustomizeOpen] = useState(false);
+  // Columns the user switched off: loaded with the page, saved to their account.
+  const cols = useColumnPrefs('watchlists', WATCHLIST_COLUMNS);
   const [renaming, setRenaming] = useState(false);
   const [nameInput, setNameInput] = useState('');
   const [newListName, setNewListName] = useState('');
@@ -112,7 +120,8 @@ export default function WatchlistsPage() {
   // The extended-hours column only exists while some row has an after-hours /
   // pre-market print, i.e. between the close and the next open.
   const showExt = (rows ?? []).some(r => r.ext);
-  const colOn = (k: ColumnKey) => visibleCols.has(k) && (earningsEnabled || !EARNINGS_COLUMNS.has(k));
+  const colOn = (k: string) => cols.isShown(k) && (earningsEnabled || !EARNINGS_COLUMNS.has(k));
+  const menuColumns = WATCHLIST_COLUMNS.filter(c => earningsEnabled || !EARNINGS_COLUMNS.has(c.id));
 
   function sortValue(r: QuoteRow, key: SortKey): number | string | null {
     switch (key) {
@@ -246,14 +255,6 @@ export default function WatchlistsPage() {
     setRenaming(false);
   }, [selected?.id]);
 
-  function toggleCol(key: ColumnKey) {
-    setVisibleCols(prev => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key); else next.add(key);
-      return next;
-    });
-  }
-
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
     const name = newListName.trim();
@@ -311,7 +312,7 @@ export default function WatchlistsPage() {
     await Promise.all([loadRows(selected.id), loadLevels(selected.id, selectedExpiry), refreshLists(true)]);
   }
 
-  const colSpan = 4 + OPTIONAL_COLUMNS.filter(c => colOn(c.key)).length + (canEdit ? 1 : 0);
+  const colSpan = 1 + WATCHLIST_COLUMNS.filter(c => !c.required && colOn(c.id) && (c.id !== 'ext' || showExt)).length + (canEdit ? 1 : 0);
 
   if (listsLoading) {
     return (
@@ -459,28 +460,7 @@ export default function WatchlistsPage() {
                     ))}
                   </div>
                 </div>
-                <div className="relative">
-                  <button
-                    onClick={() => setCustomizeOpen(v => !v)}
-                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-gray-600 hover:text-blue-600 hover:bg-blue-50 transition-colors"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
-                      <path fillRule="evenodd" d="M8.34 1.804A1 1 0 019.32 1h1.36a1 1 0 01.98.804l.213 1.06a4.5 4.5 0 011.226.706l1.012-.464a1 1 0 011.226.464l.68 1.178a1 1 0 01-.226 1.263l-.842.706a4.5 4.5 0 010 1.416l.842.706a1 1 0 01.226 1.263l-.68 1.178a1 1 0 01-1.226.464l-1.012-.464a4.5 4.5 0 01-1.226.706l-.213 1.06a1 1 0 01-.98.804H9.32a1 1 0 01-.98-.804l-.213-1.06a4.5 4.5 0 01-1.226-.706l-1.012.464a1 1 0 01-1.226-.464l-.68-1.178a1 1 0 01.226-1.263l.842-.706a4.5 4.5 0 010-1.416l-.842-.706a1 1 0 01-.226-1.263l.68-1.178a1 1 0 011.226-.464l1.012.464c.376-.29.79-.53 1.226-.706l.213-1.06zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" />
-                    </svg>
-                    Customize
-                  </button>
-                  {customizeOpen && (
-                    <div className="absolute right-0 mt-2 w-44 bg-white border border-gray-200 rounded-lg shadow-lg p-2 z-50">
-                      <p className="text-[10px] font-semibold text-gray-400 uppercase px-1 pb-1">Columns</p>
-                      {OPTIONAL_COLUMNS.filter(c => earningsEnabled || !EARNINGS_COLUMNS.has(c.key)).map(c => (
-                        <label key={c.key} className="flex items-center gap-2 text-xs text-gray-700 px-1 py-1 hover:bg-gray-50 rounded cursor-pointer select-none">
-                          <input type="checkbox" checked={visibleCols.has(c.key)} onChange={() => toggleCol(c.key)} className="accent-blue-600" />
-                          {c.label}
-                        </label>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                <ColumnsMenu metas={menuColumns} {...cols.menu} notes={showExt ? undefined : { ext: 'no after-hours prints right now' }} />
               </div>
             </div>
           </div>
@@ -550,15 +530,15 @@ export default function WatchlistsPage() {
                 that a non-visible x-axis forces a non-visible y-axis too),
                 cutting off AddSymbolInput's dropdown below instead of letting
                 it float over the page. */}
-            <div className="overflow-x-auto">
+            <div className={`overflow-x-auto ${cols.hideUntilReady}`}>
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-[11px] font-semibold text-gray-500 uppercase bg-gray-50 border-b border-gray-100">
                   <th className={cellPad}><SortHeader label="Symbol" active={sortKey === 'symbol'} dir={sortDir} onClick={() => toggleSort('symbol')} /></th>
-                  <th className={`${cellPad} text-right`}><SortHeader label="Last Price" align="right" active={sortKey === 'lastPrice'} dir={sortDir} onClick={() => toggleSort('lastPrice')} /></th>
-                  <th className={`${cellPad} text-right`}><SortHeader label="Change" align="right" active={sortKey === 'change'} dir={sortDir} onClick={() => toggleSort('change')} /></th>
-                  <th className={`${cellPad} text-right`}><SortHeader label="Change %" align="right" active={sortKey === 'changePercent'} dir={sortDir} onClick={() => toggleSort('changePercent')} /></th>
-                  {showExt && <th className={`${cellPad} text-right`}><SortHeader label="Ext. Hrs" align="right" active={sortKey === 'ext'} dir={sortDir} onClick={() => toggleSort('ext')} /></th>}
+                  {colOn('lastPrice') && <th className={`${cellPad} text-right`}><SortHeader label="Last Price" align="right" active={sortKey === 'lastPrice'} dir={sortDir} onClick={() => toggleSort('lastPrice')} /></th>}
+                  {colOn('change') && <th className={`${cellPad} text-right`}><SortHeader label="Change" align="right" active={sortKey === 'change'} dir={sortDir} onClick={() => toggleSort('change')} /></th>}
+                  {colOn('changePercent') && <th className={`${cellPad} text-right`}><SortHeader label="Change %" align="right" active={sortKey === 'changePercent'} dir={sortDir} onClick={() => toggleSort('changePercent')} /></th>}
+                  {showExt && colOn('ext') && <th className={`${cellPad} text-right`}><SortHeader label="Ext. Hrs" align="right" active={sortKey === 'ext'} dir={sortDir} onClick={() => toggleSort('ext')} /></th>}
                   {colOn('open') && <th className={`${cellPad} text-right`}><SortHeader label="Open" align="right" active={sortKey === 'open'} dir={sortDir} onClick={() => toggleSort('open')} /></th>}
                   {colOn('dayLow') && <th className={`${cellPad} text-right`}><SortHeader label="Day Low" align="right" active={sortKey === 'dayLow'} dir={sortDir} onClick={() => toggleSort('dayLow')} /></th>}
                   {colOn('dayHigh') && <th className={`${cellPad} text-right`}><SortHeader label="Day High" align="right" active={sortKey === 'dayHigh'} dir={sortDir} onClick={() => toggleSort('dayHigh')} /></th>}
@@ -593,22 +573,22 @@ export default function WatchlistsPage() {
                       </Link>
                       {!thin && <div className="text-[11px] text-gray-400 truncate max-w-[220px] pl-3">{r.name}</div>}
                     </td>
-                    <td className={`${cellPad} text-right font-semibold text-gray-800 tabular-nums`}>
+                    {colOn('lastPrice') && <td className={`${cellPad} text-right font-semibold text-gray-800 tabular-nums`}>
                       <Link href={`/stock/${encodeURIComponent(r.symbol)}`} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="hover:underline">
                         {fmtPrice(r.lastPrice)}
                       </Link>
-                    </td>
-                    <td className={`${cellPad} text-right`}>
+                    </td>}
+                    {colOn('change') && <td className={`${cellPad} text-right`}>
                       <Link href={`/stock/${encodeURIComponent(r.symbol)}`} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="inline-block hover:underline">
                         <ChangeCell change={r.change} />
                       </Link>
-                    </td>
-                    <td className={`${cellPad} text-right`}>
+                    </td>}
+                    {colOn('changePercent') && <td className={`${cellPad} text-right`}>
                       <Link href={`/stock/${encodeURIComponent(r.symbol)}`} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="inline-block hover:underline">
                         <ChangePercentCell changePercent={r.changePercent} />
                       </Link>
-                    </td>
-                    {showExt && <td className={`${cellPad} text-right`}>{r.ext ? <ExtendedMove ext={r.ext} /> : <span className="text-xs text-gray-300">—</span>}</td>}
+                    </td>}
+                    {showExt && colOn('ext') && <td className={`${cellPad} text-right`}>{r.ext ? <ExtendedMove ext={r.ext} /> : <span className="text-xs text-gray-300">—</span>}</td>}
                     {colOn('open') && <td className={`${cellPad} text-right text-gray-600 tabular-nums`}>{fmtPrice(r.open)}</td>}
                     {colOn('dayLow') && <td className={`${cellPad} text-right text-gray-600 tabular-nums`}>{fmtPrice(r.dayLow)}</td>}
                     {colOn('dayHigh') && <td className={`${cellPad} text-right text-gray-600 tabular-nums`}>{fmtPrice(r.dayHigh)}</td>}

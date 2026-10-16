@@ -144,7 +144,7 @@ export default function TrackedPanel({ refreshKey, onOpenStock }: { refreshKey: 
         <span className="text-[11px] text-gray-400 ml-auto">Private to your account. P&amp;L = (current − entry) × 100 × qty, reversed for sell-to-open.</span>
       </div>
       {error ? <div className="p-8 text-center text-sm text-red-600">{error}</div> : !positions ? <Spinner label="Loading your positions and live prices…" /> : (
-        <DataTable rows={shown} columns={cols} rowKey={p => p.id} initialSort={{ key: 'entryDate', dir: 'desc' }} csvName="tracked-options"
+        <DataTable tableId="oiTracked" rows={shown} columns={cols} rowKey={p => p.id} initialSort={{ key: 'entryDate', dir: 'desc' }} csvName="tracked-options"
           onRowClick={p => setHistory(p)} emptyText={status === 'open' ? 'No open positions. Use "Track" on any contract or strategy.' : 'Nothing here yet.'} />
       )}
       {history && <HistoryModal position={history} onClose={() => setHistory(null)} />}

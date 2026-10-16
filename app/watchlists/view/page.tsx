@@ -7,6 +7,9 @@ import AddSymbolInput from '@/components/watchlists/AddSymbolInput';
 import { getLevelDisplayName } from '@/lib/utils';
 import ExtendedMove from '@/components/ui/ExtendedMove';
 import { pollDelayMs, type MarketClock } from '@/lib/pollDelay';
+import ColumnsMenu from '@/components/ui/ColumnsMenu';
+import { useColumnPrefs } from '@/components/ui/useColumnPrefs';
+import type { ColumnMeta } from '@/lib/tableColumns';
 import {
   type WatchlistSummary, type QuoteRow, type LevelRow, type LevelKey, LEVEL_FILTER_OPTIONS,
   rebaseToLtp, fmtExpiry, fmtPrice, ChangeCell, ChangePercentCell, ChangeDot, LevelCell,
@@ -14,6 +17,17 @@ import {
 } from '@/components/watchlists/watchlistShared';
 
 type SortKey = 'symbol' | 'lastPrice' | 'change' | 'changePercent' | 'ext' | 'level' | 'earnings';
+
+/** Columns of the compact table, in display order. Saved per user (the Columns menu). */
+const CHART_COLUMNS: ColumnMeta[] = [
+  { id: 'symbol', label: 'Symbol', required: true },
+  { id: 'lastPrice', label: 'Last Price' },
+  { id: 'change', label: 'Change' },
+  { id: 'changePercent', label: 'Chg %' },
+  { id: 'ext', label: 'Ext.', hint: 'Only appears while a row has a pre/after-hours price' },
+  { id: 'level', label: 'Nearest Level' },
+  { id: 'earnings', label: 'Earn', hint: 'Next earnings (Pro earnings feature)' },
+];
 
 // Starting widths (px) sized so all six columns fit the 460px panel with no
 // horizontal scrollbar; the user can drag any header edge to rebalance them.
@@ -87,6 +101,8 @@ export default function WatchlistViewPage() {
   const [newListName, setNewListName] = useState('');
   const [busy, setBusy] = useState(false);
   const [colWidths, setColWidths] = useState<Record<SortKey, number>>(DEFAULT_COL_WIDTHS);
+  // Columns the user switched off: loaded with the page, saved to their account.
+  const cols = useColumnPrefs('watchlistChart', CHART_COLUMNS);
   const dragRef = useRef<{ key: SortKey; startX: number; startWidth: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -381,7 +397,9 @@ export default function WatchlistViewPage() {
 
   const th = 'px-2 py-1.5';
   const showExt = (rows ?? []).some(r => r.ext);
-  const COLUMN_ORDER: SortKey[] = ['symbol', 'lastPrice', 'change', 'changePercent', ...(showExt ? ['ext' as const] : []), 'level', ...(earningsEnabled ? ['earnings' as const] : [])];
+  const COLUMN_ORDER = (['symbol', 'lastPrice', 'change', 'changePercent', ...(showExt ? ['ext' as const] : []), 'level', ...(earningsEnabled ? ['earnings' as const] : [])] as SortKey[]).filter(k => cols.isShown(k));
+  const on = (k: SortKey) => COLUMN_ORDER.includes(k);
+  const menuColumns = CHART_COLUMNS.filter(c => c.id !== 'earnings' || earningsEnabled);
   const colSpan = COLUMN_ORDER.length + (canEdit ? 1 : 0);
   const tableWidth = COLUMN_ORDER.reduce((sum, k) => sum + colWidths[k], 0) + (canEdit ? REMOVE_COL_WIDTH : 0);
 
@@ -501,8 +519,11 @@ export default function WatchlistViewPage() {
               {error && <p className="text-[11px] text-red-600 mt-2">{error}</p>}
             </div>
 
+            <div className="flex justify-end px-3 py-1.5 border-b border-gray-100 shrink-0">
+              <ColumnsMenu metas={menuColumns} {...cols.menu} notes={showExt ? undefined : { ext: 'no after-hours prints right now' }} />
+            </div>
             {/* Scrolls inside the panel; header row sticks to the top. */}
-            <div ref={tableScrollRef} className="overflow-auto flex-1 min-h-0 max-h-[60vh] lg:max-h-none">
+            <div ref={tableScrollRef} className={`overflow-auto flex-1 min-h-0 max-h-[60vh] lg:max-h-none ${cols.hideUntilReady}`}>
               <table className="text-xs" style={{ tableLayout: 'fixed', width: tableWidth }}>
                 <colgroup>
                   {COLUMN_ORDER.map(k => <col key={k} style={{ width: colWidths[k] }} />)}
@@ -511,12 +532,12 @@ export default function WatchlistViewPage() {
                 <thead className="[&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-gray-50 [&_th]:shadow-[inset_0_-1px_0_0_#f3f4f6]">
                   <tr className="text-left text-[10px] font-semibold text-gray-500 uppercase">
                     <th className={`${th} relative`}><SortHeader label="Symbol" active={sortKey === 'symbol'} dir={sortDir} onClick={() => toggleSort('symbol')} />{resizeHandle('symbol')}</th>
-                    <th className={`${th} text-right relative`}><SortHeader label="Last Price" align="right" active={sortKey === 'lastPrice'} dir={sortDir} onClick={() => toggleSort('lastPrice')} />{resizeHandle('lastPrice')}</th>
-                    <th className={`${th} text-right relative`}><SortHeader label="Change" align="right" active={sortKey === 'change'} dir={sortDir} onClick={() => toggleSort('change')} />{resizeHandle('change')}</th>
-                    <th className={`${th} text-right relative`}><SortHeader label="Chg %" align="right" active={sortKey === 'changePercent'} dir={sortDir} onClick={() => toggleSort('changePercent')} />{resizeHandle('changePercent')}</th>
-                    {showExt && <th className={`${th} text-right relative`}><SortHeader label="Ext." align="right" active={sortKey === 'ext'} dir={sortDir} onClick={() => toggleSort('ext')} />{resizeHandle('ext')}</th>}
-                    <th className={`${th} text-right relative`}><SortHeader label="Nearest Level" align="right" active={sortKey === 'level'} dir={sortDir} onClick={() => toggleSort('level')} />{resizeHandle('level')}</th>
-                    {earningsEnabled && <th className={`${th} text-right relative`}><SortHeader label="Earn" align="right" active={sortKey === 'earnings'} dir={sortDir} onClick={() => toggleSort('earnings')} />{resizeHandle('earnings')}</th>}
+                    {on('lastPrice') && <th className={`${th} text-right relative`}><SortHeader label="Last Price" align="right" active={sortKey === 'lastPrice'} dir={sortDir} onClick={() => toggleSort('lastPrice')} />{resizeHandle('lastPrice')}</th>}
+                    {on('change') && <th className={`${th} text-right relative`}><SortHeader label="Change" align="right" active={sortKey === 'change'} dir={sortDir} onClick={() => toggleSort('change')} />{resizeHandle('change')}</th>}
+                    {on('changePercent') && <th className={`${th} text-right relative`}><SortHeader label="Chg %" align="right" active={sortKey === 'changePercent'} dir={sortDir} onClick={() => toggleSort('changePercent')} />{resizeHandle('changePercent')}</th>}
+                    {on('ext') && <th className={`${th} text-right relative`}><SortHeader label="Ext." align="right" active={sortKey === 'ext'} dir={sortDir} onClick={() => toggleSort('ext')} />{resizeHandle('ext')}</th>}
+                    {on('level') && <th className={`${th} text-right relative`}><SortHeader label="Nearest Level" align="right" active={sortKey === 'level'} dir={sortDir} onClick={() => toggleSort('level')} />{resizeHandle('level')}</th>}
+                    {on('earnings') && <th className={`${th} text-right relative`}><SortHeader label="Earn" align="right" active={sortKey === 'earnings'} dir={sortDir} onClick={() => toggleSort('earnings')} />{resizeHandle('earnings')}</th>}
                     {canEdit && <th className={th}></th>}
                   </tr>
                 </thead>
@@ -537,12 +558,12 @@ export default function WatchlistViewPage() {
                             <span className="font-semibold text-gray-900">{r.symbol}</span>
                           </div>
                         </td>
-                        <td className={`${th} text-right font-semibold text-gray-800 tabular-nums overflow-hidden`}>{fmtPrice(r.lastPrice)}</td>
-                        <td className={`${th} text-right overflow-hidden`}><ChangeCell change={r.change} /></td>
-                        <td className={`${th} text-right overflow-hidden`}><ChangePercentCell changePercent={r.changePercent} /></td>
-                        {showExt && <td className={`${th} text-right overflow-hidden`}>{r.ext ? <ExtendedMove ext={r.ext} /> : <span className="text-gray-300">—</span>}</td>}
-                        <td className={`${th} overflow-hidden`}><LevelCell level={levelBySymbol.get(r.symbol)} compact /></td>
-                        {earningsEnabled && <td className={`${th} text-right overflow-hidden`}><NextEarningsCell earnings={r.earnings} compact /></td>}
+                        {on('lastPrice') && <td className={`${th} text-right font-semibold text-gray-800 tabular-nums overflow-hidden`}>{fmtPrice(r.lastPrice)}</td>}
+                        {on('change') && <td className={`${th} text-right overflow-hidden`}><ChangeCell change={r.change} /></td>}
+                        {on('changePercent') && <td className={`${th} text-right overflow-hidden`}><ChangePercentCell changePercent={r.changePercent} /></td>}
+                        {on('ext') && <td className={`${th} text-right overflow-hidden`}>{r.ext ? <ExtendedMove ext={r.ext} /> : <span className="text-gray-300">—</span>}</td>}
+                        {on('level') && <td className={`${th} overflow-hidden`}><LevelCell level={levelBySymbol.get(r.symbol)} compact /></td>}
+                        {on('earnings') && <td className={`${th} text-right overflow-hidden`}><NextEarningsCell earnings={r.earnings} compact /></td>}
                         {canEdit && (
                           <td className={`${th} text-right`}>
                             <button

@@ -13,6 +13,13 @@ A modern stock analysis platform featuring interactive candlestick charts with p
 - **Quadrant Analysis**: Scatter plot showing stocks positioned by proximity to critical levels
 - **Real-time Search**: Fast stock symbol search with autocomplete
 - **Responsive Design**: Works on desktop, tablet, and mobile devices
+- **Accounts and plans**: sign-in, a free tier (charts) and a Pro plan; features are switched per plan in the database
+- **Watchlists**: your own lists plus curated sector/index lists, with live quotes, level proximity and earnings, and a split view with the chart beside the list
+- **Scan alerts, Performance and Quadrant**: latest and historical alerts for stocks crossing the OI-derived levels, how those alerts played out by expiry, and the quadrant view
+- **Earnings tracker**: upcoming and reported earnings (EPS and sales vs consensus, price reaction, levels at a chosen expiry)
+- **Options OI tracker**: where option open interest is being opened and closed (by contract, stock, expiry, strike and day), with volume, dollar size, possible multi-leg strategies and private tracked positions with P&L
+- **Your columns**: every table has a Columns menu; the choice is saved to your account (or the browser when signed out)
+- **Session-aware quotes**: live, pre-market, after-hours and closed states from the market calendar
 
 ## Tech Stack
 
@@ -23,6 +30,8 @@ A modern stock analysis platform featuring interactive candlestick charts with p
 - **Deployment**: Vercel-ready
 
 ## Getting Started
+
+> This README gives an overview. [CLAUDE.md](CLAUDE.md) is the maintained architecture guide (data sources, crons, gating), and [docs/CHANGES.md](docs/CHANGES.md) records every change with what was and wasn't verified.
 
 ### Prerequisites
 
@@ -71,9 +80,15 @@ npm run dev
 ```
 neon_trade/
 ├── app/                    # Next.js app router
-│   ├── api/               # API routes
+│   ├── api/               # API routes (stocks, watchlists, earnings, oi-tracker, prefs, cron, admin, ...)
 │   ├── stock/[symbol]/    # Stock detail page
 │   ├── quadrant/          # Quadrant analysis page
+│   ├── watchlists/        # Watchlists and the chart + list split view
+│   ├── scan-alerts/       # Latest and historical scan alerts
+│   ├── performance/       # How alerts played out by expiry
+│   ├── earnings/          # Earnings tracker (Pro)
+│   ├── oi-tracker/        # Options OI tracker (Pro)
+│   ├── admin/, profile/, upgrade/, login/, guide/, diagnostics/
 │   └── page.tsx           # Home page
 ├── components/            # React components
 │   ├── charts/           # Chart component with sanitization
@@ -85,7 +100,10 @@ neon_trade/
 │   ├── calculations.ts   # Level calculations
 │   └── utils.ts          # Helper functions
 ├── types/                 # TypeScript types
-└── PROJECT_MASTER_PLAN.md # Detailed project documentation
+├── scripts/               # One-off DDL (bootstrap-*.mjs), backfills and fixture tests
+├── docs/                  # CHANGES.md (running change log), earnings.md, oi-tracker.md
+├── CLAUDE.md              # Working rules and an up-to-date architecture guide
+└── PROJECT_MASTER_PLAN.md # Original project plan (predates the current code)
 ```
 
 ## API Endpoints
@@ -97,6 +115,15 @@ neon_trade/
 - `GET /api/stocks/{symbol}/expiry-dates` - Get available expiry dates
 - `GET /api/quadrant/data` - Get all stocks for quadrant chart
 - `GET /api/test-alpaca` - Test Alpaca API connection
+
+Signed-in routes (each checks the feature for the user's plan):
+
+- `/api/watchlists/*` - watchlists, items, quotes, levels, alerts, performance
+- `/api/scan-alerts/*` - latest, historical and recent alerts
+- `/api/earnings/*` - earnings list and levels
+- `/api/oi-tracker/*` - meta, screen, strategies, per-stock OI, tracked positions (private to the user)
+- `/api/prefs/[key]` - the user's saved UI preferences (table columns)
+- `/api/cron/*` - protected jobs run by Railway (market catalog + option volume capture, earnings, Telegram alerts)
 
 ## Level Calculation Formula
 
@@ -128,7 +155,15 @@ Required table: `public.eod_usmkts_price`
 - `put_oi`, `call_oi` - Open interest values
 - Calculated field: `OI_DIFF = put_oi - call_oi`
 
-See [PROJECT_MASTER_PLAN.md](PROJECT_MASTER_PLAN.md) for full schema details.
+Other tables:
+
+- `public.us_opt_chg_rpt` - the daily options OI change report (per contract; no volume column)
+- `public.securities` - name, sector, industry, market cap, indices
+- App tables, all `nt_`-prefixed because the database is shared with another app: plans, user profiles, watchlists, earnings, the market date catalog, `nt_opt_daily_bars` (option volume), `nt_oi_tracked`, `nt_user_prefs`, ...
+- The app's tables are created by the idempotent `scripts/bootstrap-*.mjs` (run with `node --env-file=.env.local scripts/<name>.mjs`); `docs/oi-tracker.md` and `docs/earnings.md` list the ones each feature needs.
+- Missing data in `eod_usmkts_price` is stored as zeros, not null; see CLAUDE.md.
+
+See [PROJECT_MASTER_PLAN.md](PROJECT_MASTER_PLAN.md) for the original schema notes (they predate the current tables) and [CLAUDE.md](CLAUDE.md) for the current architecture.
 
 ## Key Implementation Details
 

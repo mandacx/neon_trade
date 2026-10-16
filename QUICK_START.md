@@ -236,10 +236,10 @@ npm run lint
 ## 🎯 Recommended Next Enhancements
 
 1. **Add real-time updates** with WebSocket or polling
-2. **User authentication** with NextAuth.js
-3. **Watchlist feature** to save favorite stocks
+2. ~~User authentication~~ (done: Neon Auth sign-in, plans and per-plan features)
+3. ~~Watchlist feature~~ (done: `/watchlists` and the chart + list split view)
 4. **Export charts** as PNG/PDF
-5. **Alert system** when stock near a level
+5. ~~Alert system~~ (done: scan alerts, and Telegram alerts which are currently switched off)
 6. **Historical comparison** view
 7. **Mobile app** with React Native
 8. **Dark mode** toggle

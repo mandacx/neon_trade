@@ -121,11 +121,15 @@ export async function GET(
         // `oi`/`close` are deliberately outside the gate — the stock page's
         // OI chart and price axis are built from this same response and must
         // keep working on every plan.
-        const oi = {
+        // The loader stores "no data" as zeros, never null: a day whose call AND put OI are
+        // both 0 is a missing day (verified: those rows also have every level at 0), so it
+        // is sent as null and the chart skips it instead of plotting a real-looking 0.
+        const hasOi = Number(data.CALL_OI) !== 0 || Number(data.PUT_OI) !== 0;
+        const oi = hasOi ? {
           callOi: data.CALL_OI,
           putOi: data.PUT_OI,
           oiDiff: data.OI_DIFF,
-        };
+        } : null;
 
         if (gate.withheld(data.TRADE_DATE)) {
           return {

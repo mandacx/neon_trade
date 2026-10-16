@@ -4,6 +4,9 @@ import { useEffect, useMemo, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import QuadrantChart from '@/components/charts/QuadrantChart';
 import Header from '@/components/layout/Header';
+import ColumnsMenu from '@/components/ui/ColumnsMenu';
+import { useColumnPrefs } from '@/components/ui/useColumnPrefs';
+import type { ColumnMeta } from '@/lib/tableColumns';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import ErrorDisplay from '@/components/ui/ErrorDisplay';
 import { ScanAlert } from '@/types/stock';
@@ -60,6 +63,9 @@ function ScanAlertsHistoricalInner() {
 
   const [filtersOpen, setFiltersOpen] = useState(true);
   const [listOpen, setListOpen] = useState(true);
+  // Columns the user switched off: loaded with the page, saved to their account.
+  const cols = useColumnPrefs('scanHistorical', TABLE_COLUMNS);
+  const show = (id: string) => cols.isShown(id);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [threshold, setThreshold] = useState<number>(0.5);
@@ -367,22 +373,25 @@ function ScanAlertsHistoricalInner() {
 
                 {listOpen && (
                   <div className="border-t border-gray-100">
-                    <div className="overflow-x-auto">
+                    <div className="flex justify-end px-4 py-2">
+                      <ColumnsMenu metas={TABLE_COLUMNS.filter(c => (c.id !== 'earnings' || earningsEnabled) && (!['sector', 'capTier'].includes(c.id) || hasSecurityFilters))} {...cols.menu} />
+                    </div>
+                    <div className={`overflow-x-auto ${cols.hideUntilReady}`}>
                       <table className="w-full">
                         <thead className="bg-gray-50 border-b border-gray-200">
                           <tr>
                             <th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Symbol</th>
-                            <th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Name</th>
-                            <th className="px-4 py-2 text-right text-[10px] font-semibold text-gray-500 uppercase">Last Price</th>
-                            <th className="px-4 py-2 text-right text-[10px] font-semibold text-gray-500 uppercase">Chg</th>
-                            <th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Alert</th>
-                            <th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Trade Date</th>
-                            <th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Expiry</th>
-                            {earningsEnabled && <th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase" title="A report landed between the alert's trade date and its expiry">Earnings in window</th>}
+                            {show('name') && (<th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Name</th>)}
+                            {show('lastPrice') && (<th className="px-4 py-2 text-right text-[10px] font-semibold text-gray-500 uppercase">Last Price</th>)}
+                            {show('chg') && (<th className="px-4 py-2 text-right text-[10px] font-semibold text-gray-500 uppercase">Chg</th>)}
+                            {show('alert') && (<th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Alert</th>)}
+                            {show('tradeDate') && (<th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Trade Date</th>)}
+                            {show('expiry') && (<th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Expiry</th>)}
+                            {earningsEnabled && show('earnings') && <th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase" title="A report landed between the alert's trade date and its expiry">Earnings in window</th>}
                             {hasSecurityFilters && (
                               <>
-                                <th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Sector</th>
-                                <th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Cap Tier</th>
+                                {show('sector') && (<th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Sector</th>)}
+                                {show('capTier') && (<th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Cap Tier</th>)}
                               </>
                             )}
                             <th className="px-4 py-2 text-center text-[10px] font-semibold text-gray-500 uppercase">Action</th>
@@ -392,22 +401,22 @@ function ScanAlertsHistoricalInner() {
                           {filteredAlerts.slice(0, 50).map((a) => (
                             <tr key={`${a.symbol}-${a.expiryDate}-${a.loadDateTime}`} className="hover:bg-gray-50">
                               <td className="px-4 py-2 text-sm font-bold">{a.symbol}</td>
-                              <td className="px-4 py-2 text-xs text-gray-600 max-w-[160px] truncate" title={(a as any).name || ''}>
+                              {show('name') && (<td className="px-4 py-2 text-xs text-gray-600 max-w-[160px] truncate" title={(a as any).name || ''}>
                                 {(a as any).name || '—'}
-                              </td>
-                              <td className="px-4 py-2 text-xs text-right font-mono">${a.close.toFixed(2)}</td>
-                              <td className={`px-4 py-2 text-xs text-right font-mono font-semibold ${a.chg >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                              </td>)}
+                              {show('lastPrice') && (<td className="px-4 py-2 text-xs text-right font-mono">${a.close.toFixed(2)}</td>)}
+                              {show('chg') && (<td className={`px-4 py-2 text-xs text-right font-mono font-semibold ${a.chg >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                                 {a.chg >= 0 ? '+' : ''}{a.chg.toFixed(2)}
-                              </td>
-                              <td className="px-4 py-2 text-xs">
+                              </td>)}
+                              {show('alert') && (<td className="px-4 py-2 text-xs">
                                 <span className="px-2 py-0.5 rounded text-[10px] font-semibold text-white"
                                   style={{ backgroundColor: getLevelColor(a.closestLevel) }}>
                                   {getLevelDisplayName(a.closestLevel).toUpperCase()}
                                 </span>
-                              </td>
-                              <td className="px-4 py-2 text-xs text-gray-500">{a.tradeDate}</td>
-                              <td className="px-4 py-2 text-xs text-gray-500">{a.expiryDate}</td>
-                              {earningsEnabled && (
+                              </td>)}
+                              {show('tradeDate') && (<td className="px-4 py-2 text-xs text-gray-500">{a.tradeDate}</td>)}
+                              {show('expiry') && (<td className="px-4 py-2 text-xs text-gray-500">{a.expiryDate}</td>)}
+                              {earningsEnabled && show('earnings') && (
                                 <td className="px-4 py-2 text-xs">
                                   {a.earningsInWindow ? (
                                     <span
@@ -423,8 +432,8 @@ function ScanAlertsHistoricalInner() {
                               )}
                               {hasSecurityFilters && (
                                 <>
-                                  <td className="px-4 py-2 text-xs text-gray-500">{(a as any).sector || '—'}</td>
-                                  <td className="px-4 py-2 text-xs text-gray-500">{(a as any).marketCapTier || '—'}</td>
+                                  {show('sector') && (<td className="px-4 py-2 text-xs text-gray-500">{(a as any).sector || '—'}</td>)}
+                                  {show('capTier') && (<td className="px-4 py-2 text-xs text-gray-500">{(a as any).marketCapTier || '—'}</td>)}
                                 </>
                               )}
                               <td className="px-4 py-2 text-center">
@@ -456,6 +465,21 @@ function ScanAlertsHistoricalInner() {
     </>
   );
 }
+
+/** Columns of the alerts/stocks table, in display order. Saved per user (the Columns menu). */
+const TABLE_COLUMNS: ColumnMeta[] = [
+  { id: 'symbol', label: 'Symbol', required: true },
+  { id: 'name', label: 'Name' },
+  { id: 'lastPrice', label: 'Last Price' },
+  { id: 'chg', label: 'Chg' },
+  { id: 'alert', label: 'Alert' },
+  { id: 'tradeDate', label: 'Trade Date' },
+  { id: 'expiry', label: 'Expiry' },
+  { id: 'earnings', label: 'Earnings in window' },
+  { id: 'sector', label: 'Sector' },
+  { id: 'capTier', label: 'Cap Tier' },
+  { id: 'action', label: 'Action', required: true },
+];
 
 export default function ScanAlertsHistoricalPage() {
   return (

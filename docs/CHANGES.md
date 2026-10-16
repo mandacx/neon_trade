@@ -7,6 +7,178 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-16 — Docs refresh
+
+Updated the documents that still described the app as it was in January, after the chart, earnings, OI tracker and column work:
+- `README.md`: features, project structure, signed-in API groups, other tables and bootstrap scripts, and a pointer to `CLAUDE.md` / `docs/CHANGES.md`.
+- `QUICK_START.md` and `PROJECT_MASTER_PLAN.md`: the "future" items that now exist (authentication, watchlists, alerts) marked done, and a changelog line saying the plan predates the current app.
+- `CLAUDE.md`: the chart rules learned today (price scale follows the candles, 10px cap, 120-day windows and the levels range limit of 10 calls a minute, zeros mean "no data" and are never plotted).
+- Not changed: `docs/ADMIN_DASHBOARD_PROMPT.md` (admin pages weren't touched), `docs/earnings.md` and `docs/oi-tracker.md` (updated alongside their changes).
+- The README's setup steps and level formula were left as they are; they were not re-verified here.
+
+---
+
+## 2026-10-16 — Column selection (Columns menu) on every table, saved per user
+
+Requested: the same select / deselect columns option, with saved preferences loaded with the page, for the watchlists and OI tracker
+pages and every other page that shows table data.
+
+### What changed
+
+One shared mechanism, then each table opted in:
+
+- `lib/tableColumns.ts`: `ColumnMeta` (id, label, hint, `required`, `defaultOff`) and the list of table ids the preferences API accepts.
+- `components/ui/useColumnPrefs.ts`: loads the saved choice and saves every change (debounced 500 ms).
+  - **Signed in:** stored on the account in `nt_user_prefs` under `cols.<tableId>` (`/api/prefs/[key]`, which only serves the caller's own row).
+  - **Signed out** (the stock page is public): stored in this browser's localStorage, with no request at all.
+  - The value stored is the list of **hidden** columns. A column added to a table later is therefore visible by default.
+  - The table stays invisible until the saved choice is known, so there is no flash of the default columns.
+- `components/ui/ColumnsMenu.tsx`: the popover. A checkbox per column, "Show all", "Reset to default", a save status line
+  ("Saved to your account" / "Saved in this browser"). Required columns (the row's link) can't be hidden. Escape closes the menu before it closes a modal.
+- `lib/userPrefs.ts`: the key must be `cols.<known table id>` and the value a list of at most 60 well-formed ids.
+  Anything else is rejected. This replaces the earnings-only validator from the earlier entry.
+
+Tables, by table id:
+
+| Table | Id | Where |
+|---|---|---|
+| Earnings tracker | `earnings` | `app/earnings/page.tsx` (moved onto the shared pieces) |
+| Watchlists quotes | `watchlists` | `app/watchlists/page.tsx` (replaces its old non-saved "Customize" picker; Symbol is required, the other 11 columns are all selectable now) |
+| Watchlist W Chart panel | `watchlistChart` | `app/watchlists/view/page.tsx` (hidden columns also leave the fixed width calculation) |
+| Latest / historical scan alerts | `scanLatest`, `scanHistorical` | `app/scan-alerts/*/page.tsx` |
+| Quadrant stock list | `quadrant` | `app/quadrant/page.tsx` |
+| Performance (drill-down) and per-symbol | `performance`, `performanceSymbol` | `app/performance/**` |
+| Stock page: price levels history, option chain, earnings history | `stockPriceHistory`, `stockOptionChain`, `stockEarnings` | `components/stock/StockAnalysis.tsx`, `EarningsPanel.tsx` |
+| OI tracker (all tabs) | `oiFlowContract`, `oiFlowUnderlying`, `oiFlowExpiry`, `oiFlowStrike`, `oiFlowDate`, `oiTracked`, `oiStockContracts`, `oiStockExpiries`, `oiStockLive` | `components/oi/DataTable.tsx` takes a `tableId`, so every OI table gets the menu from that one change |
+
+Not included: the admin pages (`/admin`, `/admin/users`, the drill-down and history modals, the behaviour panel); they are internal reports.
+
+Behaviour notes:
+- Conditional columns keep their conditions: Ext. hrs only shows while a row has an extended-hours print, and Earnings columns only for the earnings feature,
+  even when ticked.
+- On the option chain, a filter typed into a column the user then hides is ignored, so rows can't stay filtered invisibly.
+- The embedded chart on the W Chart page doesn't load the stock tables' preferences (it doesn't show those tables).
+- The earlier saved-value format (`earnings.columns`, a list of visible columns) was dropped; 0 rows existed.
+
+### Verified
+
+- Server (`lib/userPrefs.ts`, live DB, two test users, rows deleted): all 20 table ids accepted; unknown table, old key, extra suffix, non-list,
+  non-string, malformed id and more than 60 entries rejected; duplicates collapse; "show all" (empty list) is stored; one user can't read or overwrite another's;
+  tables are independent; delete resets.
+- Browser (Chromium), the real page components mounted as a signed-in user on a temporary route (deleted afterwards) with mocked data and an in-memory preferences API:
+  for **earnings, OI flow (contracts), latest scan alerts, historical scan alerts, quadrant list, watchlists, watchlist W Chart, stock earnings history and OI tracked positions**:
+  unticking a column removes its header, the right key and hidden id are saved, the choice survives a reload, and "Reset to default" restores the column and clears the saved row.
+  No page errors.
+- Stock page, signed out, against real data (AAPL): price history 14 → 11 columns and option chain 12 → 10; saved to localStorage; the same columns after a reload;
+  zero `/api/prefs` requests; Reset restores the default 14. A strike filter of 999999 cut the option chain from 295 rows to 1, and hiding the Strike column brought back all 295.
+- `tsc`, eslint (0 errors) and `npm run build` pass.
+
+### Not verified
+
+- **Not seen in a browser:** the Performance page's drill-down tables and the per-symbol Performance page (their routes need params and a real session), the
+  OI tracker's By-stock / group-by tables and the stock OI modal tables (they share `DataTable`, exercised through the contract and tracked tables), and Ext. hrs / the Earnings
+  columns with live data.
+- The real signed-in round trip against the real `/api/prefs` route (the browser tests used a mock of it; the route and library were tested separately and the route returns 401 signed out).
+- Narrow screens, and the Columns menu inside the modal on top of other modals.
+
+---
+
+## 2026-10-16 — Stock chart: level and OI lines connect across days with no data (no more zeros, no gaps)
+
+Reported (MSI screenshot): where levels or OI aren't available for some dates the lines show gaps. Instead they should
+connect to the next available data point, show no point for the missing date, and never treat missing as 0.
+
+### Cause (verified)
+
+- **Gaps were my earlier change.** `breakAtGaps()` (2026-10-15 chart entries) made the point before a gap transparent so a
+  line wouldn't be drawn across it. That is the opposite of what is wanted; it's removed.
+- **Missing data is stored as zeros, not null.** In `eod_usmkts_price` (rows since 2025-10-01: 1.73M) there are no nulls in
+  `call_oi`, `put_oi` or any level, but about 28.4k rows have call OI **and** put OI both 0, and 27.9k of those also have
+  every level at 0; no row has OI at 0 with levels present. So "both OI values are 0" is the "no data" marker.
+- Levels were already skipped when 0 (`price > 0` in `TVChart`), but **OI zeros were plotted as real zeros**
+  (the OI lines dropped to 0 on those days), and the API coerced missing values to 0 with `COALESCE`.
+
+### What changed
+
+- `app/api/stocks/[symbol]/levels/route.ts`: a day whose call OI and put OI are both 0 now returns `oi: null` instead of zeros
+  (a single-sided 0 is kept as real). The client already skips items with a null `oi` for the OI series, and the tooltip
+  shows no OI block for such a day.
+- `components/charts/TVChart.tsx`: removed `breakAtGaps()`; level and OI series get a point only for days that have data, so the
+  curved line runs straight on to the next available point. The line style stays curved.
+- `components/stock/StockAnalysis.tsx`: the `oi` type allows `null`. The Price Levels History table already shows "—" for a missing `oi`.
+
+### Verified
+
+- API against the production build for YETI (expiry 2027-05-21): the four zero days (09-22 to 09-25) return `oi: null`, and
+  the real days keep their values.
+- Real MSI history rendered in an isolated page with simulated missing windows: the old behavior drops the OI lines to 0
+  and back; the new behavior skips those days and the curved line connects across smoothly (plain segments looked the same but
+  angular; curved kept).
+- Production build: `/stock/AAPL` and `/stock/MSI` load with no page errors; `tsc` passes.
+
+### Not verified
+
+- The exact MSI "Current" view from the screenshot with a Pro account (anonymous sessions get only about 10 days of level history).
+- The tooltip on a day with no OI was not hovered in a browser (code path: `currentOiData` undefined).
+- A very long gap with the curved style can overshoot slightly between points.
+
+---
+
+## 2026-10-16 — Earnings tracker: Market cap column and per-user column selection (saved to the account)
+
+> **Superseded in part by the next entry up ("Column selection on every table")**: the saved value is now the list of *hidden* columns
+> under the key `cols.earnings`, and the menu and hook are shared components. The Market cap column and the behaviour described below are unchanged.
+
+Requested: add a market cap column to the earnings tracker, and a personal option to select and deselect columns;
+save the preferences and use them when the page loads.
+
+### What changed
+
+- **Market cap column** (`marketCap`): compact dollars (`$4.0T`, `$17.2B`, `$850.0M`); `—` when `securities.market_cap` is missing
+  (30 of 578 rows). Sortable (missing values always last). The tooltip shows the full value and the cap tier. The data was already in
+  `/api/earnings/list` (`marketCap`, `marketCapTier`) and used for sorting and the Market cap filter; it just wasn't shown.
+- **Columns menu** (button above the table): a checkbox per column, plus "Show all" and "Reset to default". Symbol is always shown (the row link).
+  "Ext. hrs" stays conditional: it appears only when ticked *and* a row has a pre/after-hours print, as before.
+- **Saved per user.** The choice is stored in the new table `nt_user_prefs (user_id, key, value jsonb)` (DDL run on the live DB) through
+  `GET/PUT/DELETE /api/prefs/[key]`, which needs a login and only serves the caller's own row. The page loads the saved list with the
+  first render (it waits for it, so the table doesn't flash the default columns), and each change is saved after 500 ms with a status line in the menu.
+  If the request fails the choice still applies for that visit.
+- A column added later is off for users who already saved a choice. The default for everyone else is all columns, Market cap included.
+
+Files:
+- `scripts/bootstrap-user-prefs.mjs` (new; added to the migrate lists)
+- `lib/userPrefs.ts` (new; key whitelist + validators, ownership in SQL)
+- `lib/earningsColumns.ts` (new; shared column registry)
+- `app/api/prefs/[key]/route.ts` (new)
+- `app/earnings/page.tsx` (the table is now driven by a column list)
+
+The prefs table is generic: another page adds a key with its own validator in `lib/userPrefs.ts`.
+
+### Verified
+
+- `lib/userPrefs.ts` against the live DB with two test user ids (rows deleted afterwards):
+  - Saves and reads back; Symbol is forced on.
+  - An unknown column, a non-list, a list of non-strings and an unknown key are all rejected without changing the stored value.
+  - B sees nothing of A's choice, B's write doesn't touch A's, deleting B's leaves A's.
+  - Duplicates collapse to registry order.
+- The real `EarningsPage` component in Chromium, on a temporary route (since deleted) with mocked list/levels/prefs responses:
+  - 17 default headers (18 columns with Ext. hrs), with the Market cap column showing `$4.0T`, `$17.2B`, `$850.0M`, `—`.
+  - The Symbol checkbox is disabled.
+  - Unticking Company, Sector and Chg $ updates the table and sends one `PUT` with the new list.
+  - After a reload the saved choice is applied.
+  - "Reset to default" sends a `DELETE` and restores all columns.
+  - Sorting by Market cap works in both directions with the missing value last.
+  - No page errors.
+- `tsc`, eslint (0 errors) and `npm run build` pass.
+
+### Not verified
+
+- The real page as a signed-in Pro user against the real API (needs a login); the API route's own login check was not exercised over HTTP while signed in
+  (signed out it should return 401, checked below).
+- Narrow screens and the table's horizontal scroll with all columns on.
+
+---
+
 ## 2026-10-15 — Chart follow-up: curved lines restored, level history no longer rate-limited on load
 
 Reported (screenshot of ROKU): the price level lines looked like a ladder instead of curves. Clarified: all five

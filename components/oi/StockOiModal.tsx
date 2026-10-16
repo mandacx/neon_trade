@@ -205,13 +205,13 @@ export default function StockOiModal({ symbol, loadDates, to, initialRange = '1'
           {loading ? <Spinner label={`Loading ${symbol} open interest…`} /> : error ? <div className="p-8 text-center text-sm text-red-600">{error}</div> : !data ? null : (
             <>
               {tab === 'contracts' && (
-                <DataTable rows={rows} columns={contractCols} rowKey={r => r.contract} csvName={`${symbol}-oi-${data.from}-${data.to}`}
+                <DataTable tableId="oiStockContracts" rows={rows} columns={contractCols} rowKey={r => r.contract} csvName={`${symbol}-oi-${data.from}-${data.to}`}
                   initialSort={{ key: 'vol', dir: 'desc' }} onRowClick={r => setContractModal(r)} maxHeight="60vh"
                   searchPlaceholder="Search expiry, strike, type…"
                   toolbar={data.truncated ? <span className="text-[11px] text-amber-700">Showing the 2,000 largest changes</span> : undefined} />
               )}
               {tab === 'expiries' && (
-                <DataTable rows={data.byExpiry} columns={expiryCols} rowKey={r => r.key} csvName={`${symbol}-oi-expiries`} initialSort={{ key: 'expiry', dir: 'asc' }} maxHeight="60vh"
+                <DataTable tableId="oiStockExpiries" rows={data.byExpiry} columns={expiryCols} rowKey={r => r.key} csvName={`${symbol}-oi-expiries`} initialSort={{ key: 'expiry', dir: 'asc' }} maxHeight="60vh"
                   toolbar={data.fullOi.tradeDate ? <span className="text-[11px] text-gray-400">Total OI as of {data.fullOi.tradeDate}</span> : undefined} />
               )}
               {tab === 'ladder' && (
@@ -277,7 +277,7 @@ export default function StockOiModal({ symbol, loadDates, to, initialRange = '1'
                 </div>
               )}
               {tab === 'live' && data.live && (
-                <DataTable rows={data.live.top} columns={liveTopCols} rowKey={r => r.contract} initialSort={{ key: 'vol', dir: 'desc' }} maxHeight="60vh"
+                <DataTable tableId="oiStockLive" rows={data.live.top} columns={liveTopCols} rowKey={r => r.contract} initialSort={{ key: 'vol', dir: 'desc' }} maxHeight="60vh"
                   csvName={`${symbol}-live-volume`} toolbar={<span className="text-[11px] text-gray-400">Top 100 by latest session volume, of {data.live.count.toLocaleString()} live contracts</span>} />
               )}
             </>

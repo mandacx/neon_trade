@@ -1,9 +1,13 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import Header from '@/components/layout/Header';
 import { getLevelDisplayName } from '@/lib/utils';
 import { addDaysET } from '@/lib/earningsFilter';
+import { fmtMoneyCompact } from '@/lib/format';
+import { EARNINGS_COLUMNS } from '@/lib/earningsColumns';
+import ColumnsMenu from '@/components/ui/ColumnsMenu';
+import { useColumnPrefs } from '@/components/ui/useColumnPrefs';
 import type { EarningsOutcome, EarningsRangeRow } from '@/types/earnings';
 import type { ExtendedQuote } from '@/lib/quote';
 import ExtendedMove from '@/components/ui/ExtendedMove';
@@ -99,6 +103,9 @@ export default function EarningsPage() {
   const [beforeExpiryOnly, setBeforeExpiryOnly] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+
+  // Which columns the user has switched off: loaded with the page, saved to their account.
+  const cols = useColumnPrefs('earnings', EARNINGS_COLUMNS);
 
   // Deep links from the home cards (?mode=reported). Read after mount so the server render matches.
   useEffect(() => {
@@ -230,6 +237,72 @@ export default function EarningsPage() {
   const periodLabel = mode === 'custom' ? `${from} to ${to}` : `${mode === 'upcoming' ? 'Next' : 'Past'} ${days} day${days === 1 ? '' : 's'}`;
   const th = 'px-3 py-2 text-[11px] font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap';
   const td = 'px-3 py-1 whitespace-nowrap';
+
+  const sortHead = (label: string, k: SortKey, right = true) => <SortHeader label={label} k={k} sortKey={sortKey} dir={sortDir} onSort={toggleSort} right={right} />;
+  interface ColDef { head: ReactNode; right?: boolean; cell: (r: Row) => ReactNode; cellClass?: string; title?: (r: Row) => string | undefined }
+  const colDefs: Record<string, ColDef> = {
+    symbol: {
+      head: sortHead('Symbol', 'symbol', false),
+      cell: r => (
+        <a href={`/stock/${encodeURIComponent(r.symbol)}`} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
+          className="font-bold text-gray-900 hover:text-blue-600">{r.symbol}</a>
+      ),
+    },
+    company: { head: 'Company', cell: r => r.name ?? '—', cellClass: 'max-w-[200px] truncate text-xs text-gray-500', title: r => r.name ?? '' },
+    sector: { head: 'Sector', cell: r => r.sector ?? '—', cellClass: 'text-xs text-gray-500', title: r => r.industry ?? '' },
+    marketCap: {
+      head: sortHead('Market cap', 'marketCap'), right: true,
+      cell: r => fmtMoneyCompact(r.marketCap, 1),
+      cellClass: 'text-xs tabular-nums text-gray-700',
+      title: r => (r.marketCap != null ? `${r.marketCap.toLocaleString('en-US')}${r.marketCapTier ? ` · ${r.marketCapTier} cap` : ''}` : undefined),
+    },
+    date: {
+      head: sortHead('Report', 'date', false),
+      cell: r => {
+        const beforeExp = r.kind === 'upcoming' && !!expiry && r.date <= expiry;
+        return (
+          <>
+            <span className="text-xs font-semibold text-gray-800 tabular-nums">{fmtNextDate(r.date, r.kind === 'upcoming' && r.estimated)}</span>
+            {earningsTimeShort(r.time) && <span className="ml-1 text-[10px] text-gray-500">{earningsTimeShort(r.time)}</span>}
+            <span className={`ml-1.5 text-[10px] tabular-nums ${r.daysUntil >= 0 && r.daysUntil <= 1 ? 'text-red-600 font-semibold' : 'text-gray-400'}`}>{whenLabel(r)}</span>
+            {beforeExp && <span className="ml-1 text-[10px] font-semibold text-amber-700" title={`Reports before the ${fmtExpiry(expiry)} expiry`}>⚠</span>}
+          </>
+        );
+      },
+      title: r => (r.kind === 'upcoming' && r.estimated ? 'Estimated date, not yet confirmed by the company' : undefined),
+    },
+    epsEst: { head: 'EPS est', right: true, cell: r => fmtEps(r.epsEstimate), cellClass: 'text-xs tabular-nums text-gray-600' },
+    epsAct: {
+      head: 'EPS act', right: true, cellClass: 'text-xs tabular-nums font-semibold text-gray-800',
+      cell: r => (r.kind === 'pending' ? <span className="text-[11px] font-semibold text-gray-400">Pending</span> : fmtEps(r.epsActual)),
+    },
+    epsSurprise: { head: sortHead('EPS surprise', 'epsSurprise'), right: true, cell: r => <SurpriseCell pct={r.epsSurprisePct} outcome={r.epsOutcome} /> },
+    salesEst: { head: 'Sales est', right: true, cell: r => fmtSales(r.salesEstimate), cellClass: 'text-xs tabular-nums text-gray-600' },
+    salesAct: { head: 'Sales act', right: true, cell: r => fmtSales(r.salesActual), cellClass: 'text-xs tabular-nums font-semibold text-gray-800' },
+    salesSurprise: { head: sortHead('Sales surprise', 'salesSurprise'), right: true, cell: r => <SurpriseCell pct={r.salesSurprisePct} outcome={r.salesOutcome} /> },
+    ltp: { head: sortHead('LTP', 'ltp'), right: true, cell: r => fmtPrice(r.lastPrice), cellClass: 'text-xs tabular-nums font-semibold text-gray-800' },
+    change: { head: sortHead('Chg $', 'change'), right: true, cell: r => <ChangeCell change={r.change} /> },
+    changePercent: { head: sortHead('Chg %', 'changePercent'), right: true, cell: r => <ChangePercentCell changePercent={r.changePercent} /> },
+    ext: {
+      head: sortHead('Ext. hrs', 'ext'), right: true,
+      cell: r => (r.ext ? <ExtendedMove ext={r.ext} /> : <span className="text-xs text-gray-300">—</span>),
+    },
+    reaction: {
+      head: sortHead('Reaction', 'reaction'), right: true, cell: r => <ChangePercentCell changePercent={r.reactionPct} />,
+      title: () => 'Close-to-close move around the report: before the open = prior close to report-day close; after the close = report-day close to next close',
+    },
+    since: {
+      head: sortHead('Since report', 'since'), right: true, cell: r => <ChangePercentCell changePercent={r.sincePct} />,
+      title: r => (r.refClose != null ? `From the pre-report close of ${fmtPrice(r.refClose)} to the live price` : undefined),
+    },
+    level: {
+      head: sortHead(expiry ? `Level ${fmtExpiry(expiry)}` : 'Nearest level', 'level'), right: true,
+      cell: r => <LevelCell level={levelBySymbol.get(r.symbol)} compact />,
+      title: r => { const lvl = levelBySymbol.get(r.symbol); return lvl?.levels.length ? lvl.levels.map(l => `${getLevelDisplayName(l.name)} ${fmtPrice(l.price)}`).join(' | ') : undefined; },
+    },
+  };
+  // Registry order, filtered to the saved choice; Ext. hrs also needs a row with a print.
+  const shownCols = EARNINGS_COLUMNS.map(c => c.id).filter(id => cols.isShown(id) && (id !== 'ext' || showExt));
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -405,8 +478,11 @@ export default function EarningsPage() {
         </div>
 
         {/* Table */}
+        <div className="flex justify-end mb-2">
+          <ColumnsMenu metas={EARNINGS_COLUMNS} {...cols.menu} notes={showExt ? undefined : { ext: 'no after-hours prints right now' }} />
+        </div>
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-x-auto">
-          {loading ? (
+          {loading || !cols.ready ? (
             <div className="p-10 text-center text-sm text-gray-400">
               <div className="inline-block animate-spin h-4 w-4 border-2 border-blue-600 border-t-transparent rounded-full mr-2 align-middle" />
               Loading earnings, quotes and price reactions…
@@ -419,69 +495,19 @@ export default function EarningsPage() {
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr className="text-left">
-                  <th className={th}><SortHeader label="Symbol" k="symbol" sortKey={sortKey} dir={sortDir} onSort={toggleSort} right={false} /></th>
-                  <th className={th}>Company</th>
-                  <th className={th}>Sector</th>
-                  <th className={th}><SortHeader label="Report" k="date" sortKey={sortKey} dir={sortDir} onSort={toggleSort} right={false} /></th>
-                  <th className={`${th} text-right`}>EPS est</th>
-                  <th className={`${th} text-right`}>EPS act</th>
-                  <th className={`${th} text-right`}><SortHeader label="EPS surprise" k="epsSurprise" sortKey={sortKey} dir={sortDir} onSort={toggleSort} /></th>
-                  <th className={`${th} text-right`}>Sales est</th>
-                  <th className={`${th} text-right`}>Sales act</th>
-                  <th className={`${th} text-right`}><SortHeader label="Sales surprise" k="salesSurprise" sortKey={sortKey} dir={sortDir} onSort={toggleSort} /></th>
-                  <th className={`${th} text-right`}><SortHeader label="LTP" k="ltp" sortKey={sortKey} dir={sortDir} onSort={toggleSort} /></th>
-                  <th className={`${th} text-right`}><SortHeader label="Chg $" k="change" sortKey={sortKey} dir={sortDir} onSort={toggleSort} /></th>
-                  <th className={`${th} text-right`}><SortHeader label="Chg %" k="changePercent" sortKey={sortKey} dir={sortDir} onSort={toggleSort} /></th>
-                  {showExt && <th className={`${th} text-right`}><SortHeader label="Ext. hrs" k="ext" sortKey={sortKey} dir={sortDir} onSort={toggleSort} /></th>}
-                  <th className={`${th} text-right`}><SortHeader label="Reaction" k="reaction" sortKey={sortKey} dir={sortDir} onSort={toggleSort} /></th>
-                  <th className={`${th} text-right`}><SortHeader label="Since report" k="since" sortKey={sortKey} dir={sortDir} onSort={toggleSort} /></th>
-                  <th className={`${th} text-right`}><SortHeader label={expiry ? `Level ${fmtExpiry(expiry)}` : 'Nearest level'} k="level" sortKey={sortKey} dir={sortDir} onSort={toggleSort} /></th>
+                  {shownCols.map(id => <th key={id} className={`${th}${colDefs[id].right ? ' text-right' : ''}`}>{colDefs[id].head}</th>)}
                 </tr>
               </thead>
               <tbody>
-                {sorted.map(r => {
-                  const lvl = levelBySymbol.get(r.symbol);
-                  const beforeExp = r.kind === 'upcoming' && !!expiry && r.date <= expiry;
-                  const pending = r.kind === 'pending';
-                  return (
-                    <tr key={`${r.symbol}-${r.date}-${r.kind}`} onClick={() => openChart(r.symbol)}
-                      className="border-b border-gray-50 last:border-0 hover:bg-blue-50/40 cursor-pointer">
-                      <td className={td}>
-                        <a href={`/stock/${encodeURIComponent(r.symbol)}`} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
-                          className="font-bold text-gray-900 hover:text-blue-600">{r.symbol}</a>
-                      </td>
-                      <td className={`${td} max-w-[200px] truncate text-xs text-gray-500`} title={r.name ?? ''}>{r.name ?? '—'}</td>
-                      <td className={`${td} text-xs text-gray-500`} title={r.industry ?? ''}>{r.sector ?? '—'}</td>
-                      <td className={td} title={r.kind === 'upcoming' && r.estimated ? 'Estimated date, not yet confirmed by the company' : undefined}>
-                        <span className="text-xs font-semibold text-gray-800 tabular-nums">{fmtNextDate(r.date, r.kind === 'upcoming' && r.estimated)}</span>
-                        {earningsTimeShort(r.time) && <span className="ml-1 text-[10px] text-gray-500">{earningsTimeShort(r.time)}</span>}
-                        <span className={`ml-1.5 text-[10px] tabular-nums ${r.daysUntil >= 0 && r.daysUntil <= 1 ? 'text-red-600 font-semibold' : 'text-gray-400'}`}>{whenLabel(r)}</span>
-                        {beforeExp && <span className="ml-1 text-[10px] font-semibold text-amber-700" title={`Reports before the ${fmtExpiry(expiry)} expiry`}>⚠</span>}
-                      </td>
-                      <td className={`${td} text-right text-xs tabular-nums text-gray-600`}>{fmtEps(r.epsEstimate)}</td>
-                      <td className={`${td} text-right text-xs tabular-nums font-semibold text-gray-800`}>
-                        {pending ? <span className="text-[11px] font-semibold text-gray-400">Pending</span> : fmtEps(r.epsActual)}
-                      </td>
-                      <td className={`${td} text-right`}><SurpriseCell pct={r.epsSurprisePct} outcome={r.epsOutcome} /></td>
-                      <td className={`${td} text-right text-xs tabular-nums text-gray-600`}>{fmtSales(r.salesEstimate)}</td>
-                      <td className={`${td} text-right text-xs tabular-nums font-semibold text-gray-800`}>{fmtSales(r.salesActual)}</td>
-                      <td className={`${td} text-right`}><SurpriseCell pct={r.salesSurprisePct} outcome={r.salesOutcome} /></td>
-                      <td className={`${td} text-right text-xs tabular-nums font-semibold text-gray-800`}>{fmtPrice(r.lastPrice)}</td>
-                      <td className={`${td} text-right`}><ChangeCell change={r.change} /></td>
-                      <td className={`${td} text-right`}><ChangePercentCell changePercent={r.changePercent} /></td>
-                      {showExt && <td className={`${td} text-right`}>{r.ext ? <ExtendedMove ext={r.ext} /> : <span className="text-xs text-gray-300">—</span>}</td>}
-                      <td className={`${td} text-right`} title="Close-to-close move around the report: before the open = prior close to report-day close; after the close = report-day close to next close">
-                        <ChangePercentCell changePercent={r.reactionPct} />
-                      </td>
-                      <td className={`${td} text-right`} title={r.refClose != null ? `From the pre-report close of ${fmtPrice(r.refClose)} to the live price` : undefined}>
-                        <ChangePercentCell changePercent={r.sincePct} />
-                      </td>
-                      <td className={`${td} text-right`} title={lvl?.levels.length ? lvl.levels.map(l => `${getLevelDisplayName(l.name)} ${fmtPrice(l.price)}`).join(' | ') : undefined}>
-                        <LevelCell level={lvl} compact />
-                      </td>
-                    </tr>
-                  );
-                })}
+                {sorted.map(r => (
+                  <tr key={`${r.symbol}-${r.date}-${r.kind}`} onClick={() => openChart(r.symbol)}
+                    className="border-b border-gray-50 last:border-0 hover:bg-blue-50/40 cursor-pointer">
+                    {shownCols.map(id => {
+                      const c = colDefs[id];
+                      return <td key={id} className={`${td}${c.right ? ' text-right' : ''}${c.cellClass ? ` ${c.cellClass}` : ''}`} title={c.title?.(r)}>{c.cell(r)}</td>;
+                    })}
+                  </tr>
+                ))}
               </tbody>
             </table>
           )}

@@ -5,6 +5,9 @@ import type { EarningsResult, EarningsSummary } from '@/types/earnings';
 import {
   LastResultBadge, fmtExpiry, fmtShortDate, fmtNextDate, fmtEps, fmtSales, earningsTimeShort, earningsTimeLong,
 } from '@/components/watchlists/watchlistShared';
+import ColumnsMenu from '@/components/ui/ColumnsMenu';
+import { useColumnPrefs } from '@/components/ui/useColumnPrefs';
+import type { ColumnMeta } from '@/lib/tableColumns';
 
 /**
  * Stock-page earnings UI (Pro feature `earnings`; data from lib/earnings.ts).
@@ -77,52 +80,73 @@ function OutcomeText({ outcome }: { outcome: EarningsResult['epsOutcome'] }) {
   return <span className={`font-semibold ${tone}`}>{outcome === 'beat' ? 'Beat' : outcome === 'miss' ? 'Miss' : 'In-line'}</span>;
 }
 
+/** Columns of the earnings history table, in display order. Saved per user (the Columns menu). */
+const HISTORY_COLUMNS: ColumnMeta[] = [
+  { id: 'reported', label: 'Reported', required: true },
+  { id: 'time', label: 'Time' },
+  { id: 'period', label: 'Period' },
+  { id: 'epsEst', label: 'EPS est' },
+  { id: 'epsAct', label: 'EPS actual' },
+  { id: 'surprise', label: 'Surprise' },
+  { id: 'epsResult', label: 'EPS result', hint: 'Beat / miss / in-line' },
+  { id: 'salesEst', label: 'Sales est' },
+  { id: 'salesAct', label: 'Sales actual' },
+  { id: 'salesResult', label: 'Sales result', hint: 'Beat / miss / in-line' },
+];
+
 export function EarningsHistoryTable({ history, loading }: { history: EarningsResult[] | null; loading: boolean }) {
+  const cols = useColumnPrefs('stockEarnings', HISTORY_COLUMNS);
+  const show = (id: string) => cols.isShown(id);
   return (
     <div className="mt-6 bg-white rounded-lg shadow-md p-4">
-      <h2 className="text-lg font-semibold text-gray-900 mb-1">Earnings History</h2>
-      <p className="text-[11px] text-gray-400 mb-3">
-        Reported quarters, newest first. EPS and sales vs consensus as reported on the day; adjusted EPS where the company reports it.
-      </p>
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900 mb-1">Earnings History</h2>
+          <p className="text-[11px] text-gray-400">
+            Reported quarters, newest first. EPS and sales vs consensus as reported on the day; adjusted EPS where the company reports it.
+          </p>
+        </div>
+        <ColumnsMenu metas={HISTORY_COLUMNS} {...cols.menu} />
+      </div>
       {loading && history === null ? (
         <p className="text-xs text-gray-400">Loading…</p>
       ) : !history || history.length === 0 ? (
         <p className="text-xs text-gray-400">No reported earnings stored for this symbol yet.</p>
       ) : (
-        <div className="overflow-x-auto">
+        <div className={`overflow-x-auto ${cols.hideUntilReady}`}>
           <table className="w-full text-xs">
             <thead>
               <tr className="text-left text-[10px] font-semibold text-gray-500 uppercase bg-gray-50 border-b border-gray-100">
                 <th className="px-2 py-1.5">Reported</th>
-                <th className="px-2 py-1.5">Time</th>
-                <th className="px-2 py-1.5">Period</th>
-                <th className="px-2 py-1.5 text-right">EPS est</th>
-                <th className="px-2 py-1.5 text-right">EPS actual</th>
-                <th className="px-2 py-1.5 text-right">Surprise</th>
-                <th className="px-2 py-1.5">EPS</th>
-                <th className="px-2 py-1.5 text-right">Sales est</th>
-                <th className="px-2 py-1.5 text-right">Sales actual</th>
-                <th className="px-2 py-1.5">Sales</th>
+                {show('time') && (<th className="px-2 py-1.5">Time</th>)}
+                {show('period') && (<th className="px-2 py-1.5">Period</th>)}
+                {show('epsEst') && (<th className="px-2 py-1.5 text-right">EPS est</th>)}
+                {show('epsAct') && (<th className="px-2 py-1.5 text-right">EPS actual</th>)}
+                {show('surprise') && (<th className="px-2 py-1.5 text-right">Surprise</th>)}
+                {show('epsResult') && (<th className="px-2 py-1.5">EPS</th>)}
+                {show('salesEst') && (<th className="px-2 py-1.5 text-right">Sales est</th>)}
+                {show('salesAct') && (<th className="px-2 py-1.5 text-right">Sales actual</th>)}
+                {show('salesResult') && (<th className="px-2 py-1.5">Sales</th>)}
               </tr>
             </thead>
             <tbody>
               {history.map(q => (
                 <tr key={q.date} className="border-b border-gray-50">
                   <td className="px-2 py-1.5 font-medium text-gray-800 whitespace-nowrap">{fmtExpiry(q.date)}</td>
-                  <td className="px-2 py-1.5 text-gray-500">{earningsTimeShort(q.time) || '—'}</td>
-                  <td className="px-2 py-1.5 text-gray-500">
+                  {show('time') && (<td className="px-2 py-1.5 text-gray-500">{earningsTimeShort(q.time) || '—'}</td>)}
+                  {show('period') && (<td className="px-2 py-1.5 text-gray-500">
                     {q.period ?? (q.fiscalDateEnding ? `FQ end ${fmtShortDate(q.fiscalDateEnding)}` : '—')}
                     {q.epsAdjusted && <span className="ml-1 text-[10px] text-gray-400">adj.</span>}
-                  </td>
-                  <td className="px-2 py-1.5 text-right tabular-nums text-gray-600">{fmtEps(q.epsEstimate)}</td>
-                  <td className="px-2 py-1.5 text-right tabular-nums font-semibold text-gray-800">{fmtEps(q.epsActual)}</td>
-                  <td className="px-2 py-1.5 text-right tabular-nums text-gray-600">
+                  </td>)}
+                  {show('epsEst') && (<td className="px-2 py-1.5 text-right tabular-nums text-gray-600">{fmtEps(q.epsEstimate)}</td>)}
+                  {show('epsAct') && (<td className="px-2 py-1.5 text-right tabular-nums font-semibold text-gray-800">{fmtEps(q.epsActual)}</td>)}
+                  {show('surprise') && (<td className="px-2 py-1.5 text-right tabular-nums text-gray-600">
                     {q.epsSurprisePct == null ? '—' : `${q.epsSurprisePct > 0 ? '+' : ''}${q.epsSurprisePct.toFixed(1)}%`}
-                  </td>
-                  <td className="px-2 py-1.5"><OutcomeText outcome={q.epsOutcome} /></td>
-                  <td className="px-2 py-1.5 text-right tabular-nums text-gray-600">{fmtSales(q.salesEstimate)}</td>
-                  <td className="px-2 py-1.5 text-right tabular-nums text-gray-800">{fmtSales(q.salesActual)}</td>
-                  <td className="px-2 py-1.5"><OutcomeText outcome={q.salesOutcome} /></td>
+                  </td>)}
+                  {show('epsResult') && (<td className="px-2 py-1.5"><OutcomeText outcome={q.epsOutcome} /></td>)}
+                  {show('salesEst') && (<td className="px-2 py-1.5 text-right tabular-nums text-gray-600">{fmtSales(q.salesEstimate)}</td>)}
+                  {show('salesAct') && (<td className="px-2 py-1.5 text-right tabular-nums text-gray-800">{fmtSales(q.salesActual)}</td>)}
+                  {show('salesResult') && (<td className="px-2 py-1.5"><OutcomeText outcome={q.salesOutcome} /></td>)}
                 </tr>
               ))}
             </tbody>

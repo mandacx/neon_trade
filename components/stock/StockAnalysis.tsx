@@ -17,6 +17,9 @@ import type { ExtendedQuote } from '@/lib/quote';
 import type { MarketSession } from '@/lib/marketSession';
 import { pollDelayMs } from '@/lib/pollDelay';
 import ExtendedMove from '@/components/ui/ExtendedMove';
+import ColumnsMenu from '@/components/ui/ColumnsMenu';
+import { useColumnPrefs } from '@/components/ui/useColumnPrefs';
+import type { ColumnMeta } from '@/lib/tableColumns';
 import { format, subDays } from 'date-fns';
 
 type SelectableInterval = '1min' | '5min' | '15min' | '30min' | '1hour' | 'daily';
@@ -46,10 +49,37 @@ type LevelHistoryEntry = {
   closestLevel: string;
   close: number;
   sevenLevels: SevenLevel[];
-  oi?: { callOi: number; putOi: number; oiDiff: number };
+  oi?: { callOi: number; putOi: number; oiDiff: number } | null;
   ratios?: { upc: number; ucpr: number };
 };
 const SEVEN_LEVEL_ORDER = ['put_low', 'put_int', 'put_call_int', 'call_int', 'call_high', 'call_low', 'put_high'];
+
+// Column registries for the two tables below; each choice is saved per user (account when
+// signed in, this browser otherwise) through the Columns menu.
+const PRICE_HISTORY_COLUMNS: ColumnMeta[] = [
+  { id: 'date', label: 'Date', required: true },
+  { id: 'close', label: 'Close' },
+  ...SEVEN_LEVEL_ORDER.map(name => ({ id: name, label: getLevelDisplayName(name) })),
+  { id: 'callOi', label: 'Call OI' },
+  { id: 'putOi', label: 'Put OI' },
+  { id: 'oiDiff', label: 'OI Diff' },
+  { id: 'upc', label: 'UPC' },
+  { id: 'ucpr', label: 'UCPR' },
+];
+const OPT_CHAIN_COLUMNS: ColumnMeta[] = [
+  { id: 'symbol', label: 'Symbol', required: true },
+  { id: 'expiry', label: 'Expiry' },
+  { id: 'loadDate', label: 'Trade Date' },
+  { id: 'cmp', label: 'CMP' },
+  { id: 'strike', label: 'Strike Price' },
+  { id: 'optType', label: 'Opt Typ' },
+  { id: 'ltp', label: 'Opt LTP' },
+  { id: 'oi', label: 'Open Int' },
+  { id: 'oiChg', label: 'Chg Open Int' },
+  { id: 'absOiChg', label: 'ABS Chg Open Int' },
+  { id: 'chgPrice', label: 'Chg Open Int Price' },
+  { id: 'absChgPrice', label: 'ABS Chg Open Int Price' },
+];
 
 type RangePreset = '10d' | '30d' | '90d' | 'custom';
 const RANGE_PRESET_DAYS: Record<Exclude<RangePreset, 'custom'>, number> = { '10d': 10, '30d': 30, '90d': 90 };
@@ -333,6 +363,11 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
   const [optChainLoading, setOptChainLoading] = useState(false);
   const [optChainRange, setOptChainRange] = useState<{ from: string; to: string } | null>(null);
   const [optChainCollapsed, setOptChainCollapsed] = useState(false);
+  // The embedded chart (watchlist W Chart) doesn't show these tables, so it doesn't load their preferences.
+  const phCols = useColumnPrefs(embedded ? null : 'stockPriceHistory', PRICE_HISTORY_COLUMNS);
+  const ocCols = useColumnPrefs(embedded ? null : 'stockOptionChain', OPT_CHAIN_COLUMNS);
+  const ph = (id: string) => phCols.isShown(id);
+  const oc = (id: string) => ocCols.isShown(id);
   const [optChainPreset, setOptChainPreset] = useState<OptChainPreset>('10d');
   const [optChainSearch, setOptChainSearch] = useState('');
   const [optChainTypeFilter, setOptChainTypeFilter] = useState<'all' | 'call' | 'put'>('all');
@@ -996,10 +1031,10 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
 
   const visibleOptChainRows = optChainRows
     .filter(r => {
-      if (optChainTypeFilter !== 'all' && r.optType !== optChainTypeFilter) return false;
+      if (oc('optType') && optChainTypeFilter !== 'all' && r.optType !== optChainTypeFilter) return false;
       const q = optChainSearch.trim().toLowerCase();
       if (q && !String(r.strike).includes(q) && !r.optType.includes(q)) return false;
-      if (optChainColFilters.strike && !String(r.strike).includes(optChainColFilters.strike)) return false;
+      if (oc('strike') && optChainColFilters.strike && !String(r.strike).includes(optChainColFilters.strike)) return false;
       return true;
     })
     // Notional $ value of the OI change: contracts changed * premium * 100 shares/contract.
@@ -1413,6 +1448,7 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
                     </div>
                   )}
                   {priceHistoryLoading && <Spinner />}
+                  <ColumnsMenu metas={PRICE_HISTORY_COLUMNS} {...phCols.menu} />
                 </div>
               )}
             </div>
@@ -1429,7 +1465,7 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
                 // (range presets, custom dates) stays on screen while paging
                 // through rows, and the column headers stick to the top of
                 // this box rather than scrolling away with them.
-                <div className="overflow-auto max-h-[65vh]">
+                <div className={`overflow-auto max-h-[65vh] ${phCols.hideUntilReady}`}>
                   <table className="w-full text-xs whitespace-nowrap">
                     {/* bg-white on the th, not just the thead — a transparent
                         cell would let rows show through as they scroll under.
@@ -1439,17 +1475,17 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
                     <thead className="[&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-white [&_th]:shadow-[inset_0_-1px_0_0_#e5e7eb]">
                       <tr className="text-gray-500">
                         <th className="text-left py-1.5 pr-3 font-medium">Date</th>
-                        <th className="text-right py-1.5 px-2 font-medium">Close</th>
-                        {SEVEN_LEVEL_ORDER.map((name) => (
+                        {ph('close') && (<th className="text-right py-1.5 px-2 font-medium">Close</th>)}
+                        {SEVEN_LEVEL_ORDER.filter(name => ph(name)).map((name) => (
                           <th key={name} className="text-right py-1.5 px-2 font-medium">
                             {getLevelDisplayName(name)}
                           </th>
                         ))}
-                        <th className="text-right py-1.5 px-2 font-medium">Call OI</th>
-                        <th className="text-right py-1.5 px-2 font-medium">Put OI</th>
-                        <th className="text-right py-1.5 px-2 font-medium">OI Diff</th>
-                        <th className="text-right py-1.5 pl-2 font-medium">UPC</th>
-                        <th className="text-right py-1.5 pl-2 font-medium">UCPR</th>
+                        {ph('callOi') && (<th className="text-right py-1.5 px-2 font-medium">Call OI</th>)}
+                        {ph('putOi') && (<th className="text-right py-1.5 px-2 font-medium">Put OI</th>)}
+                        {ph('oiDiff') && (<th className="text-right py-1.5 px-2 font-medium">OI Diff</th>)}
+                        {ph('upc') && (<th className="text-right py-1.5 pl-2 font-medium">UPC</th>)}
+                        {ph('ucpr') && (<th className="text-right py-1.5 pl-2 font-medium">UCPR</th>)}
                       </tr>
                     </thead>
                     <tbody>
@@ -1462,8 +1498,8 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
                         return (
                           <tr key={row.date} className="border-b border-gray-100 last:border-0 hover:bg-gray-50">
                             <td className="py-1.5 pr-3 text-gray-600">{row.date}</td>
-                            <td className="text-right py-1.5 px-2 font-semibold">{formatCurrency(row.close)}</td>
-                            {SEVEN_LEVEL_ORDER.map((name) => {
+                            {ph('close') && (<td className="text-right py-1.5 px-2 font-semibold">{formatCurrency(row.close)}</td>)}
+                            {SEVEN_LEVEL_ORDER.filter(name => ph(name)).map((name) => {
                               const lvl = levelsByName.get(name);
                               const isClosest = !!closest && lvl && closest.name === lvl.name;
                               return (
@@ -1482,11 +1518,11 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
                                 </td>
                               );
                             })}
-                            <td className="text-right py-1.5 px-2 text-gray-600">{row.oi?.callOi?.toLocaleString() ?? '—'}</td>
-                            <td className="text-right py-1.5 px-2 text-gray-600">{row.oi?.putOi?.toLocaleString() ?? '—'}</td>
-                            <td className="text-right py-1.5 px-2 text-gray-600">{row.oi?.oiDiff?.toLocaleString() ?? '—'}</td>
-                            <td className="text-right py-1.5 pl-2 text-gray-600">{row.ratios?.upc ?? '—'}</td>
-                            <td className="text-right py-1.5 pl-2 text-gray-600">{row.ratios?.ucpr ?? '—'}</td>
+                            {ph('callOi') && (<td className="text-right py-1.5 px-2 text-gray-600">{row.oi?.callOi?.toLocaleString() ?? '—'}</td>)}
+                            {ph('putOi') && (<td className="text-right py-1.5 px-2 text-gray-600">{row.oi?.putOi?.toLocaleString() ?? '—'}</td>)}
+                            {ph('oiDiff') && (<td className="text-right py-1.5 px-2 text-gray-600">{row.oi?.oiDiff?.toLocaleString() ?? '—'}</td>)}
+                            {ph('upc') && (<td className="text-right py-1.5 pl-2 text-gray-600">{row.ratios?.upc ?? '—'}</td>)}
+                            {ph('ucpr') && (<td className="text-right py-1.5 pl-2 text-gray-600">{row.ratios?.ucpr ?? '—'}</td>)}
                           </tr>
                         );
                       })}
@@ -1527,6 +1563,7 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
                     ))}
                   </div>
                   {optChainLoading && <Spinner />}
+                  <ColumnsMenu metas={OPT_CHAIN_COLUMNS} {...ocCols.menu} />
                 </div>
               )}
             </div>
@@ -1556,19 +1593,19 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
                   // Same bounded scroll box as the Price Levels History table
                   // above, so the range presets and search stay reachable and
                   // the sort/filter row sticks while scrolling strikes.
-                  <div className="overflow-auto max-h-[65vh]">
+                  <div className={`overflow-auto max-h-[65vh] ${ocCols.hideUntilReady}`}>
                     <table className="w-full text-xs whitespace-nowrap">
                       <thead className="[&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-white [&_th]:shadow-[inset_0_-1px_0_0_#e5e7eb]">
                         <tr className="text-gray-500 align-bottom">
                           <th className="text-left py-1.5 pr-3 font-medium">Symbol</th>
-                          <th className="text-left py-1.5 px-2 font-medium">Expiry</th>
-                          <th className="text-left py-1.5 px-2 font-medium">
+                          {oc('expiry') && (<th className="text-left py-1.5 px-2 font-medium">Expiry</th>)}
+                          {oc('loadDate') && (<th className="text-left py-1.5 px-2 font-medium">
                             <OptChainSortLabel label="Trade Date" align="left" active={optChainSortKey === 'loadDate'} dir={optChainSortDir} onClick={() => handleOptChainSort('loadDate')} />
-                          </th>
-                          <th className="text-right py-1.5 px-2 font-medium">
+                          </th>)}
+                          {oc('cmp') && (<th className="text-right py-1.5 px-2 font-medium">
                             <OptChainSortLabel label="CMP" active={optChainSortKey === 'close'} dir={optChainSortDir} onClick={() => handleOptChainSort('close')} />
-                          </th>
-                          <th className="text-right py-1.5 px-2 font-medium">
+                          </th>)}
+                          {oc('strike') && (<th className="text-right py-1.5 px-2 font-medium">
                             <OptChainSortLabel label="Strike Price" active={optChainSortKey === 'strike'} dir={optChainSortDir} onClick={() => handleOptChainSort('strike')} />
                             <input
                               value={optChainColFilters.strike}
@@ -1576,8 +1613,8 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
                               placeholder="Filter…"
                               className="mt-1 w-full px-1.5 py-0.5 border border-gray-200 rounded text-[11px] text-right font-normal focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
                             />
-                          </th>
-                          <th className="text-left py-1.5 px-2 font-medium">
+                          </th>)}
+                          {oc('optType') && (<th className="text-left py-1.5 px-2 font-medium">
                             <OptChainSortLabel label="Opt Typ" align="left" active={optChainSortKey === 'optType'} dir={optChainSortDir} onClick={() => handleOptChainSort('optType')} />
                             <select
                               value={optChainTypeFilter}
@@ -1588,25 +1625,25 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
                               <option value="call">Call</option>
                               <option value="put">Put</option>
                             </select>
-                          </th>
-                          <th className="text-right py-1.5 px-2 font-medium">
+                          </th>)}
+                          {oc('ltp') && (<th className="text-right py-1.5 px-2 font-medium">
                             <OptChainSortLabel label="Opt LTP" active={optChainSortKey === 'ltp'} dir={optChainSortDir} onClick={() => handleOptChainSort('ltp')} />
-                          </th>
-                          <th className="text-right py-1.5 px-2 font-medium">
+                          </th>)}
+                          {oc('oi') && (<th className="text-right py-1.5 px-2 font-medium">
                             <OptChainSortLabel label="Open Int" active={optChainSortKey === 'oi'} dir={optChainSortDir} onClick={() => handleOptChainSort('oi')} />
-                          </th>
-                          <th className="text-right py-1.5 px-2 font-medium">
+                          </th>)}
+                          {oc('oiChg') && (<th className="text-right py-1.5 px-2 font-medium">
                             <OptChainSortLabel label="Chg Open Int" active={optChainSortKey === 'oiChg'} dir={optChainSortDir} onClick={() => handleOptChainSort('oiChg')} />
-                          </th>
-                          <th className="text-right py-1.5 px-2 font-medium">
+                          </th>)}
+                          {oc('absOiChg') && (<th className="text-right py-1.5 px-2 font-medium">
                             <OptChainSortLabel label="ABS Chg Open Int" active={optChainSortKey === 'absOiChg'} dir={optChainSortDir} onClick={() => handleOptChainSort('absOiChg')} />
-                          </th>
-                          <th className="text-right py-1.5 px-2 font-medium">
+                          </th>)}
+                          {oc('chgPrice') && (<th className="text-right py-1.5 px-2 font-medium">
                             <OptChainSortLabel label="Chg Open Int Price" active={optChainSortKey === 'chgOpenIntPrice'} dir={optChainSortDir} onClick={() => handleOptChainSort('chgOpenIntPrice')} />
-                          </th>
-                          <th className="text-right py-1.5 pl-2 font-medium">
+                          </th>)}
+                          {oc('absChgPrice') && (<th className="text-right py-1.5 pl-2 font-medium">
                             <OptChainSortLabel label="ABS Chg Open Int Price" active={optChainSortKey === 'absChgOpenIntPrice'} dir={optChainSortDir} onClick={() => handleOptChainSort('absChgOpenIntPrice')} />
-                          </th>
+                          </th>)}
                         </tr>
                       </thead>
                       <tbody>
@@ -1620,26 +1657,26 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
                               className="border-b border-gray-100 last:border-0 hover:bg-blue-50 cursor-pointer"
                             >
                               <td className="py-1.5 pr-3 text-gray-600">{symbol.toUpperCase()}</td>
-                              <td className="py-1.5 px-2 text-gray-600">{selectedExpiry}</td>
-                              <td className="py-1.5 px-2 text-gray-600">{r.loadDate}</td>
-                              <td className="text-right py-1.5 px-2 text-gray-600">{r.close}</td>
-                              <td className="text-right py-1.5 px-2 font-mono">{r.strike}</td>
-                              <td className={`py-1.5 px-2 font-semibold capitalize ${r.optType === 'call' ? 'text-green-600' : 'text-red-600'}`}>{r.optType}</td>
-                              <td className="text-right py-1.5 px-2 text-gray-600">{r.ltp}</td>
-                              <td className="text-right py-1.5 px-2 text-gray-600">{r.oi.toLocaleString()}</td>
-                              <td className={`text-right py-1.5 px-2 font-semibold ${r.oiChg > 0 ? 'text-green-600' : r.oiChg < 0 ? 'text-red-600' : 'text-gray-500'}`}>
+                              {oc('expiry') && (<td className="py-1.5 px-2 text-gray-600">{selectedExpiry}</td>)}
+                              {oc('loadDate') && (<td className="py-1.5 px-2 text-gray-600">{r.loadDate}</td>)}
+                              {oc('cmp') && (<td className="text-right py-1.5 px-2 text-gray-600">{r.close}</td>)}
+                              {oc('strike') && (<td className="text-right py-1.5 px-2 font-mono">{r.strike}</td>)}
+                              {oc('optType') && (<td className={`py-1.5 px-2 font-semibold capitalize ${r.optType === 'call' ? 'text-green-600' : 'text-red-600'}`}>{r.optType}</td>)}
+                              {oc('ltp') && (<td className="text-right py-1.5 px-2 text-gray-600">{r.ltp}</td>)}
+                              {oc('oi') && (<td className="text-right py-1.5 px-2 text-gray-600">{r.oi.toLocaleString()}</td>)}
+                              {oc('oiChg') && (<td className={`text-right py-1.5 px-2 font-semibold ${r.oiChg > 0 ? 'text-green-600' : r.oiChg < 0 ? 'text-red-600' : 'text-gray-500'}`}>
                                 {r.oiChg > 0 ? '+' : ''}{r.oiChg.toLocaleString()}
-                              </td>
-                              <td className="text-right py-1.5 px-2 text-gray-600">{Math.abs(r.oiChg).toLocaleString()}</td>
-                              <td className={`text-right py-1.5 px-2 font-semibold ${chgOpenIntPrice > 0 ? 'text-green-600' : chgOpenIntPrice < 0 ? 'text-red-600' : 'text-gray-500'}`}>
+                              </td>)}
+                              {oc('absOiChg') && (<td className="text-right py-1.5 px-2 text-gray-600">{Math.abs(r.oiChg).toLocaleString()}</td>)}
+                              {oc('chgPrice') && (<td className={`text-right py-1.5 px-2 font-semibold ${chgOpenIntPrice > 0 ? 'text-green-600' : chgOpenIntPrice < 0 ? 'text-red-600' : 'text-gray-500'}`}>
                                 {chgOpenIntPrice > 0 ? '+' : ''}{chgOpenIntPrice.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                              </td>
-                              <td className="text-right py-1.5 pl-2 text-gray-600">{Math.abs(chgOpenIntPrice).toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+                              </td>)}
+                              {oc('absChgPrice') && (<td className="text-right py-1.5 pl-2 text-gray-600">{Math.abs(chgOpenIntPrice).toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>)}
                             </tr>
                           );
                         })}
                         {visibleOptChainRows.length === 0 && (
-                          <tr><td colSpan={12} className="text-center py-4 text-gray-400">No rows match your filters.</td></tr>
+                          <tr><td colSpan={OPT_CHAIN_COLUMNS.filter(c => oc(c.id)).length} className="text-center py-4 text-gray-400">No rows match your filters.</td></tr>
                         )}
                       </tbody>
                     </table>

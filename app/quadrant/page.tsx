@@ -7,6 +7,9 @@ import { EARNINGS_FILTER_OPTIONS } from '@/lib/earningsFilter';
 import { useSearchParams } from 'next/navigation';
 import QuadrantChart from '@/components/charts/QuadrantChart';
 import Header from '@/components/layout/Header';
+import ColumnsMenu from '@/components/ui/ColumnsMenu';
+import { useColumnPrefs } from '@/components/ui/useColumnPrefs';
+import type { ColumnMeta } from '@/lib/tableColumns';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import ErrorDisplay from '@/components/ui/ErrorDisplay';
 import { QuadrantStock } from '@/types/stock';
@@ -54,6 +57,9 @@ function QuadrantPageInner() {
   // Collapsible state
   const [filtersOpen, setFiltersOpen] = useState(true);
   const [stockListOpen, setStockListOpen] = useState(true);
+  // Columns the user switched off: loaded with the page, saved to their account.
+  const cols = useColumnPrefs('quadrant', TABLE_COLUMNS);
+  const show = (id: string) => cols.isShown(id);
 
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -306,21 +312,24 @@ function QuadrantPageInner() {
 
             {stockListOpen && (
               <div className="border-t border-gray-100">
-                <div className="overflow-x-auto">
+                <div className="flex justify-end px-4 py-2">
+                  <ColumnsMenu metas={TABLE_COLUMNS.filter(c => (c.id !== 'earnings' || earningsEnabled) && (!['sector', 'capTier'].includes(c.id) || hasSecurityFilters))} {...cols.menu} />
+                </div>
+                <div className={`overflow-x-auto ${cols.hideUntilReady}`}>
                   <table className="w-full">
                     <thead className="bg-gray-50 border-b border-gray-200">
                       <tr>
                         <th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Symbol</th>
-                        <th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Name</th>
-                        <th className="px-4 py-2 text-right text-[10px] font-semibold text-gray-500 uppercase">LTP</th>
-                        <th className="px-4 py-2 text-right text-[10px] font-semibold text-gray-500 uppercase">Close</th>
-                        <th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Closest Level</th>
-                        <th className="px-4 py-2 text-right text-[10px] font-semibold text-gray-500 uppercase">Distance</th>
-                        {earningsEnabled && <th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Next Earnings</th>}
+                        {show('name') && (<th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Name</th>)}
+                        {show('ltp') && (<th className="px-4 py-2 text-right text-[10px] font-semibold text-gray-500 uppercase">LTP</th>)}
+                        {show('close') && (<th className="px-4 py-2 text-right text-[10px] font-semibold text-gray-500 uppercase">Close</th>)}
+                        {show('level') && (<th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Closest Level</th>)}
+                        {show('distance') && (<th className="px-4 py-2 text-right text-[10px] font-semibold text-gray-500 uppercase">Distance</th>)}
+                        {earningsEnabled && show('earnings') && <th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Next Earnings</th>}
                         {hasSecurityFilters && (
                           <>
-                            <th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Sector</th>
-                            <th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Cap Tier</th>
+                            {show('sector') && (<th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Sector</th>)}
+                            {show('capTier') && (<th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Cap Tier</th>)}
                           </>
                         )}
                         <th className="px-4 py-2 text-center text-[10px] font-semibold text-gray-500 uppercase">Action</th>
@@ -330,27 +339,27 @@ function QuadrantPageInner() {
                       {filteredStocks.slice(0, 50).map((stock) => (
                         <tr key={stock.symbol} className="hover:bg-gray-50">
                           <td className="px-4 py-2 text-sm font-bold">{stock.symbol}</td>
-                          <td className="px-4 py-2 text-xs text-gray-600 max-w-[160px] truncate" title={(stock as any).name || ''}>
+                          {show('name') && (<td className="px-4 py-2 text-xs text-gray-600 max-w-[160px] truncate" title={(stock as any).name || ''}>
                             {(stock as any).name || '—'}
-                          </td>
-                          <td className="px-4 py-2 text-xs text-right font-mono">
+                          </td>)}
+                          {show('ltp') && (<td className="px-4 py-2 text-xs text-right font-mono">
                             {stock.livePrice != null ? `$${stock.livePrice.toFixed(2)}` : '—'}
-                          </td>
-                          <td className="px-4 py-2 text-xs text-right font-mono text-gray-500">${stock.close.toFixed(2)}</td>
-                          <td className="px-4 py-2 text-xs">
+                          </td>)}
+                          {show('close') && (<td className="px-4 py-2 text-xs text-right font-mono text-gray-500">${stock.close.toFixed(2)}</td>)}
+                          {show('level') && (<td className="px-4 py-2 text-xs">
                             <span className="px-2 py-0.5 rounded text-[10px] font-semibold text-white"
                               style={{ backgroundColor: LEVEL_COLORS[stock.closestLevel] || '#6b7280' }}>
                               {stock.closestLevel.replace(/_/g, ' ').toUpperCase()}
                             </span>
-                          </td>
-                          <td className="px-4 py-2 text-xs text-right font-mono">
+                          </td>)}
+                          {show('distance') && (<td className="px-4 py-2 text-xs text-right font-mono">
                             {stock.closestValue > 0 ? '+' : ''}{(stock.closestValue * 100).toFixed(2)}%
-                          </td>
-                          {earningsEnabled && <td className="px-4 py-2"><EarningsBadgeCell badge={stock.earnings} /></td>}
+                          </td>)}
+                          {earningsEnabled && show('earnings') && <td className="px-4 py-2"><EarningsBadgeCell badge={stock.earnings} /></td>}
                           {hasSecurityFilters && (
                             <>
-                              <td className="px-4 py-2 text-xs text-gray-500">{(stock as any).sector || '—'}</td>
-                              <td className="px-4 py-2 text-xs text-gray-500">{(stock as any).marketCapTier || '—'}</td>
+                              {show('sector') && (<td className="px-4 py-2 text-xs text-gray-500">{(stock as any).sector || '—'}</td>)}
+                              {show('capTier') && (<td className="px-4 py-2 text-xs text-gray-500">{(stock as any).marketCapTier || '—'}</td>)}
                             </>
                           )}
                           <td className="px-4 py-2 text-center">
@@ -380,6 +389,20 @@ function QuadrantPageInner() {
     </>
   );
 }
+
+/** Columns of the alerts/stocks table, in display order. Saved per user (the Columns menu). */
+const TABLE_COLUMNS: ColumnMeta[] = [
+  { id: 'symbol', label: 'Symbol', required: true },
+  { id: 'name', label: 'Name' },
+  { id: 'ltp', label: 'LTP' },
+  { id: 'close', label: 'Close' },
+  { id: 'level', label: 'Closest Level' },
+  { id: 'distance', label: 'Distance' },
+  { id: 'earnings', label: 'Next Earnings' },
+  { id: 'sector', label: 'Sector' },
+  { id: 'capTier', label: 'Cap Tier' },
+  { id: 'action', label: 'Action', required: true },
+];
 
 export default function QuadrantPage() {
   return (

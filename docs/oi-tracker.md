@@ -172,6 +172,7 @@ Controls: a period card (load date, range 1/5/10/20/60 loads or custom), the fil
 - sorting
 - a filter popover on every column: text "contains" (comma = either); numeric min/max, which accepts `1.5m`, `2b`, `750k`; date from/to
 - global search, CSV export, "show more" paging
+- a **Columns** menu (each table has its own saved choice, see `docs/CHANGES.md` "Column selection"; a column with an empty label, such as the row action, is always shown)
 
 **`components/oi/StockOiModal.tsx`** opens when a stock row is clicked.
 - Tabs:

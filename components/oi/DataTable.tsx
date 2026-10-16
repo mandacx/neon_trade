@@ -2,12 +2,17 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { parseHumanNumber } from '@/lib/format';
+import ColumnsMenu from '@/components/ui/ColumnsMenu';
+import { useColumnPrefs } from '@/components/ui/useColumnPrefs';
 
 /**
  * Generic client-side table for the OI tracker: click-to-sort headers, a
  * filter popover per column (text "contains", numeric min/max that accepts
  * 1.5m / 2b, date from/to), a global search box, sticky header, "show more"
  * paging to keep the DOM small, and CSV export of the filtered rows.
+ *
+ * With `tableId` (lib/tableColumns.ts) it also gets a Columns menu whose choice is
+ * saved per user. A column with an empty label (a row-action column) is always shown.
  */
 export interface Column<T> {
   key: string;
@@ -94,7 +99,7 @@ function FilterPopover<T>({ col, filter, onChange, onClose }: { col: Column<T>; 
 }
 
 export default function DataTable<T>({
-  rows, columns, rowKey, initialSort, onRowClick, rowClassName, toolbar, emptyText = 'No rows match.', csvName,
+  rows, columns: allColumns, rowKey, initialSort, onRowClick, rowClassName, toolbar, emptyText = 'No rows match.', csvName, tableId,
   maxHeight = '70vh', pageSize = 200, searchPlaceholder = 'Search all columns…', dense = true,
 }: {
   rows: T[];
@@ -110,7 +115,13 @@ export default function DataTable<T>({
   pageSize?: number;
   searchPlaceholder?: string;
   dense?: boolean;
+  /** Enables the Columns menu and saves the user's choice under this table id. */
+  tableId?: string;
 }) {
+  const metas = allColumns.filter(c => c.label).map(c => ({ id: c.key, label: c.label, hint: c.title }));
+  const prefs = useColumnPrefs(tableId ?? null, metas);
+  const columns = tableId ? allColumns.filter(c => !c.label || prefs.isShown(c.key)) : allColumns;
+
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState<Record<string, Filter>>({});
   const [openFilter, setOpenFilter] = useState<string | null>(null);
@@ -130,7 +141,7 @@ export default function DataTable<T>({
 
   const sorted = useMemo(() => {
     if (!sort) return filtered;
-    const col = columns.find(c => c.key === sort.key);
+    const col = allColumns.find(c => c.key === sort.key);
     if (!col) return filtered;
     const mul = sort.dir === 'asc' ? 1 : -1;
     return [...filtered].sort((a, b) => {
@@ -179,10 +190,11 @@ export default function DataTable<T>({
         <span className="ml-auto text-[11px] text-gray-400 tabular-nums">
           {sorted.length.toLocaleString()} of {rows.length.toLocaleString()} rows
         </span>
+        {tableId && <ColumnsMenu metas={metas} {...prefs.menu} />}
         <button onClick={exportCsv} disabled={sorted.length === 0}
           className="text-[11px] font-semibold text-gray-600 border border-gray-200 rounded px-2 py-1 hover:bg-gray-50 disabled:opacity-40">CSV</button>
       </div>
-      <div className="overflow-auto" style={{ maxHeight }}>
+      <div className={`overflow-auto ${prefs.hideUntilReady}`} style={{ maxHeight }}>
         <table className="w-full text-sm">
           <thead className="sticky top-0 z-20">
             <tr className="border-b border-gray-200">
