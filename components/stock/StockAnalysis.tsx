@@ -30,7 +30,11 @@ const INTERVAL_CONFIG: Record<SelectableInterval, { initialDays: number; chunkDa
   '15min': { initialDays: 10, chunkDays: 5, label: '15m' },
   '30min': { initialDays: 20, chunkDays: 10, label: '30m' },
   '1hour': { initialDays: 30, chunkDays: 15, label: '1H' },
-  daily: { initialDays: 60, chunkDays: 60, label: '1D' },
+  // 120 days (~85 bars) plus one 120-day chunk fills the chart at TVChart's 10px candle
+  // width (~120 bars on a typical screen). With 60-day windows the chart auto-loaded ~4
+  // older chunks on open, each firing two /levels range calls, and that endpoint allows
+  // only 10 range calls a minute (429).
+  daily: { initialDays: 120, chunkDays: 120, label: '1D' },
 };
 const INTERVAL_ORDER: SelectableInterval[] = ['1min', '5min', '15min', '30min', '1hour', 'daily'];
 

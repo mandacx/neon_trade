@@ -14,6 +14,7 @@ import { sql } from '@/lib/db';
 import { catalogTradeDates } from '@/lib/marketCatalog';
 import { previousTradingDay, tradingDaysBetween } from '@/lib/marketSession';
 import { suggestSide, type StrategyInputRow } from '@/lib/oiStrategies';
+import { getWatchlistSymbols } from '@/lib/watchlists';
 import type {
   ExpiryKind, OiContractRow, OiGroupBy, OiGroupRow, OiScreenResult, OiSummary, OptType, ValueBasis, ValueBucket,
 } from '@/types/oiTracker';
@@ -45,6 +46,10 @@ export interface OiScreenParams {
   industry?: string | null;
   marketCapTier?: string | null;
   indexCode?: string | null;
+  /** A watchlist id (the user's own, or a curated 'sys:' list); resolved with an ownership check. */
+  watchlistId?: string | null;
+  /** Owner for watchlistId; another user's list resolves to no symbols. */
+  userId?: string | null;
   sort?: string | null;
   sortDir?: 'asc' | 'desc';
   limit?: number;
@@ -99,6 +104,25 @@ async function sessionsFor(loads: string[]): Promise<string[]> {
     const before = days.filter(x => x < d);
     return before.length ? before[before.length - 1] : d;
   });
+}
+
+/**
+ * The symbol restriction from the symbols list, the securities filters and the
+ * watchlist, intersected. null = no restriction; [] = nothing matches (e.g. an
+ * empty watchlist), which must return no rows rather than everything.
+ */
+async function resolveSymbols(p: OiScreenParams): Promise<string[] | null> {
+  const [secSymbols, wlSymbols] = await Promise.all([
+    symbolsForSecurities(p),
+    p.watchlistId ? getWatchlistSymbols(p.watchlistId, p.userId ?? null) : Promise.resolve(null),
+  ]);
+  let symbols: string[] | null = p.symbols?.length ? p.symbols.map(s => s.toUpperCase()) : null;
+  for (const set of [secSymbols, wlSymbols?.map(s => s.toUpperCase()) ?? null]) {
+    if (!set) continue;
+    const allowed = new Set(set);
+    symbols = symbols ? symbols.filter(s => allowed.has(s)) : [...allowed];
+  }
+  return symbols;
 }
 
 /** Symbols matching securities filters, or null when no such filter is set. */
@@ -311,9 +335,7 @@ export async function getOiScreen(p: OiScreenParams): Promise<OiScreenResult> {
   if (loads.length === 0) {
     return { from: p.from, to: p.to, loadDates: [], groupBy: p.groupBy, rows: [], summary: emptySummary, truncated: false, volumeCoverage: { loads: 0, withVolume: 0 } };
   }
-  const [sessions, secSymbols] = await Promise.all([sessionsFor(loads), symbolsForSecurities(p)]);
-  let symbols = p.symbols?.length ? p.symbols.map(s => s.toUpperCase()) : null;
-  if (secSymbols) symbols = symbols ? symbols.filter(s => secSymbols.includes(s)) : secSymbols;
+  const [sessions, symbols] = await Promise.all([sessionsFor(loads), resolveSymbols(p)]);
 
   const limit = Math.min(Math.max(p.limit ?? 500, 1), MAX_ROWS);
   const dir = p.sortDir === 'asc' ? 'ASC' : 'DESC';
@@ -373,9 +395,7 @@ export async function getOiScreen(p: OiScreenParams): Promise<OiScreenResult> {
 export async function getStrategyRows(p: OiScreenParams & { minLeg: number }): Promise<StrategyInputRow[]> {
   const loads = await loadDatesIn(p.from, p.to, MAX_LOADS_CONTRACT);
   if (loads.length === 0) return [];
-  const [sessions, secSymbols] = await Promise.all([sessionsFor(loads), symbolsForSecurities(p)]);
-  let symbols = p.symbols?.length ? p.symbols.map(s => s.toUpperCase()) : null;
-  if (secSymbols) symbols = symbols ? symbols.filter(s => secSymbols.includes(s)) : secSymbols;
+  const [sessions, symbols] = await Promise.all([sessionsFor(loads), resolveSymbols(p)]);
   // Leg filters only: direction/value/moneyness would hide one leg of a pair.
   const base = buildBase({ ...p, direction: 'both', valueBucket: 'all', minValue: null, moneyness: 'all', minAbsChg: p.minLeg }, loads, sessions, symbols, true);
   const rows = await sql(`${base.text} SELECT * FROM c LIMIT 20000`, base.params);

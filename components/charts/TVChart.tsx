@@ -16,7 +16,7 @@ const EARNINGS_OUTCOME_COLOR: Record<NonNullable<EarningsResult['epsOutcome']>, 
 import { getLevelColor, getLevelDisplayName, formatCurrency, formatPercentage, escapeHtml, SCAN_CODE_TO_LEVEL } from '@/lib/utils';
 
 /** Widest candle spacing (px) when fitting the whole history; fewer bars than fill the width stay this narrow. */
-const MAX_BAR_SPACING = 8;
+const MAX_BAR_SPACING = 10;
 
 /**
  * Fit every bar, but never wider than MAX_BAR_SPACING per bar: a short history is
@@ -324,7 +324,7 @@ export default function TVChart({
     const callOiLine = chart.addLineSeries({
       color: '#ef4444',
       lineWidth: 2,
-      lineType: 1, // steps: daily values; curved lines loop at data gaps
+      lineType: 2, // curved (original look); a gap in the data is broken by breakAtGaps()
       title: 'Call OI',
       priceScaleId: 'left',
       priceFormat: { type: 'volume' },
@@ -336,7 +336,7 @@ export default function TVChart({
     const putOiLine = chart.addLineSeries({
       color: '#22c55e',
       lineWidth: 2,
-      lineType: 1, // steps: daily values; curved lines loop at data gaps
+      lineType: 2, // curved (original look); a gap in the data is broken by breakAtGaps()
       title: 'Put OI',
       priceScaleId: 'left',
       priceFormat: { type: 'volume' },
@@ -348,7 +348,7 @@ export default function TVChart({
     const oiDiffLine = chart.addLineSeries({
       color: '#f59e0b',
       lineWidth: 2,
-      lineType: 1, // steps: daily values; curved lines loop at data gaps
+      lineType: 2, // curved (original look); a gap in the data is broken by breakAtGaps()
       title: 'OI Diff',
       priceScaleId: 'left',
       priceFormat: { type: 'volume' },
@@ -369,7 +369,7 @@ export default function TVChart({
       const s = chart.addLineSeries({
         color: cfg.color,
         lineWidth: 1,
-        lineType: 1, // steps: daily values; curved lines loop at data gaps
+        lineType: 2, // curved (original look); a gap in the data is broken by breakAtGaps()
         title: cfg.title,
         priceScaleId: 'right',
         lastValueVisible: true,

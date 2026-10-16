@@ -4,15 +4,17 @@ import { getOiLoadDates, MAX_LOADS, MAX_LOADS_CONTRACT } from '@/lib/oiTracker';
 import { catalogExpiries } from '@/lib/marketCatalog';
 import { getSecuritiesFilterOptions } from '@/lib/securitiesFilters';
 import { sql } from '@/lib/db';
+import { getWatchlistsForUser } from '@/lib/watchlists';
+import { FEATURE_WATCHLISTS, hasFeature } from '@/lib/features';
 
 export const dynamic = 'force-dynamic';
 
-/** Load dates, upcoming expiries and securities filter options for the OI tracker page. */
+/** Load dates, upcoming expiries, securities filter options and (with the Watchlists feature) the user's watchlists. */
 export async function GET() {
-  const { blocked } = await guardOi();
+  const { ctx, blocked } = await guardOi();
   if (blocked) return blocked;
   try {
-    const [loadDates, expiries, filters] = await Promise.all([
+    const [loadDates, expiries, filters, watchlists] = await Promise.all([
       getOiLoadDates(400),
       catalogExpiries('opt_chg', { when: 'upcoming', limit: 150 }, async () => {
         const rows = await sql`
@@ -22,10 +24,11 @@ export async function GET() {
         return rows.map((r: any) => r.d as string);
       }),
       getSecuritiesFilterOptions(),
+      hasFeature(ctx.features, FEATURE_WATCHLISTS) ? getWatchlistsForUser(ctx.userId) : Promise.resolve([]),
     ]);
     return NextResponse.json({
       success: true,
-      data: { loadDates, latest: loadDates[0] ?? null, expiries, filters, maxLoads: MAX_LOADS, maxLoadsContract: MAX_LOADS_CONTRACT },
+      data: { loadDates, latest: loadDates[0] ?? null, expiries, filters, watchlists, maxLoads: MAX_LOADS, maxLoadsContract: MAX_LOADS_CONTRACT },
     });
   } catch (error) {
     return serverError('meta', error);

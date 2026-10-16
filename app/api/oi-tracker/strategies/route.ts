@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { guardOi, parseScreenParams, serverError } from '@/lib/oiTrackerApi';
+import { guardOi, parseScreenParams, scopeWatchlist, serverError } from '@/lib/oiTrackerApi';
 import { getStrategyRows } from '@/lib/oiTracker';
 import { detectStrategies } from '@/lib/oiStrategies';
 
@@ -14,7 +14,7 @@ const MAX_CANDIDATES = 500;
  * drops small legs. Filters as for /screen (dates, symbols, expiries, type).
  */
 export async function GET(request: NextRequest) {
-  const { blocked } = await guardOi(true);
+  const { ctx, blocked } = await guardOi(true);
   if (blocked) return blocked;
   const sp = request.nextUrl.searchParams;
   const params = parseScreenParams(sp);
@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
   const tol = Math.min(10, Math.max(0.5, Number(sp.get('tol')) || 3));
   const minLeg = Math.max(101, Math.trunc(Number(sp.get('minLeg')) || 500));
   try {
-    const rows = await getStrategyRows({ ...params, minLeg });
+    const rows = await getStrategyRows(scopeWatchlist({ ...params, minLeg }, ctx));
     const all = detectStrategies(rows, tol, minLeg);
     return NextResponse.json({
       success: true,

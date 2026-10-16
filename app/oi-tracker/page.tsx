@@ -17,6 +17,8 @@ type FlowGroup = Exclude<OiGroupBy, 'underlying'>;
 interface Meta {
   loadDates: string[]; latest: string | null; expiries: string[]; maxLoads: number; maxLoadsContract: number;
   filters: { sectors: string[]; indices: Array<{ code: string; name: string }> };
+  /** The user's own watchlists first, then curated sector/index lists; empty without the Watchlists feature. */
+  watchlists: Array<{ id: string; name: string; isSystem: boolean; symbolCount: number }>;
 }
 
 const RANGES: Array<[string, string]> = [['1', '1 day'], ['5', '5D'], ['10', '10D'], ['20', '20D'], ['60', '60D'], ['custom', 'Custom']];
@@ -51,6 +53,7 @@ export default function OiTrackerPage() {
   const [moneyness, setMoneyness] = useState<'all' | 'itm' | 'otm'>('all');
   const [sector, setSector] = useState('');
   const [indexCode, setIndexCode] = useState('');
+  const [watchlistId, setWatchlistId] = useState('');
   const [rankBy, setRankBy] = useState('abs_chg_value');
   const [limit, setLimit] = useState('500');
 
@@ -98,8 +101,9 @@ export default function OiTrackerPage() {
     if (dteMax) p.set('dteMax', dteMax);
     if (sector) p.set('sector', sector);
     if (indexCode) p.set('index', indexCode);
+    if (watchlistId) p.set('watchlist', watchlistId);
     return p;
-  }, [from, to, symbols, optType, expiryKind, expiry, dteMin, dteMax, sector, indexCode]);
+  }, [from, to, symbols, optType, expiryKind, expiry, dteMin, dteMax, sector, indexCode, watchlistId]);
 
   const screenGroup: OiGroupBy = tab === 'stocks' ? 'underlying' : groupBy;
   useEffect(() => {
@@ -309,6 +313,22 @@ export default function OiTrackerPage() {
                         <Segmented value={moneyness} onChange={setMoneyness} options={[['all', 'All'], ['itm', 'ITM'], ['otm', 'OTM']]} />
                       </div>
                     </>
+                  )}
+                  {meta.watchlists.length > 0 && (
+                    <div>
+                      <label className={labelClass}>Watchlist</label>
+                      <select value={watchlistId} onChange={e => setWatchlistId(e.target.value)} className={`${inputClass} max-w-[200px]`}>
+                        <option value="">All stocks</option>
+                        {meta.watchlists.some(w => !w.isSystem) && (
+                          <optgroup label="My watchlists">
+                            {meta.watchlists.filter(w => !w.isSystem).map(w => <option key={w.id} value={w.id}>{w.name} ({w.symbolCount})</option>)}
+                          </optgroup>
+                        )}
+                        <optgroup label="Lists">
+                          {meta.watchlists.filter(w => w.isSystem).map(w => <option key={w.id} value={w.id}>{w.name} ({w.symbolCount})</option>)}
+                        </optgroup>
+                      </select>
+                    </div>
                   )}
                   <div>
                     <label className={labelClass}>Sector</label>

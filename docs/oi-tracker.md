@@ -60,7 +60,7 @@ History: `node --env-file=.env.local scripts/backfill-option-volume.mjs --from Y
 
 `getOiScreen(params)` does all filtering, aggregation, sorting and the row limit in one SQL statement (plus a summary statement and a coverage count).
 - **Rows:** per contract, or grouped by underlying / underlying + expiry / underlying + strike / load date.
-- **Filters:** load-date range, symbols, call/put, expiry range / list / kind (weekly; monthly = 3rd Friday, including quarterly; quarterly = 3rd Friday of Mar/Jun/Sep/Dec), DTE, opened/closed, min |OI chg|, a $ bucket of the change or the total OI ($1B+, $1M–1B, $1K–1M), ITM/OTM, and sector/index via `public.securities`.
+- **Filters:** load-date range, symbols, call/put, expiry range / list / kind (weekly; monthly = 3rd Friday, including quarterly; quarterly = 3rd Friday of Mar/Jun/Sep/Dec), DTE, opened/closed, min |OI chg|, a $ bucket of the change or the total OI ($1B+, $1M–1B, $1K–1M), ITM/OTM, sector/index via `public.securities`, and a watchlist (the user's own lists or the curated sector/index lists, resolved by `getWatchlistSymbols()` with an ownership check; ignored without the Watchlists feature). All symbol restrictions are intersected, and an empty result means no rows.
 
 Per-contract fields:
 

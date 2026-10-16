@@ -4,7 +4,7 @@
  */
 import { NextResponse } from 'next/server';
 import { requireFeatureApi } from '@/lib/routeGuards';
-import { FEATURE_OI_TRACKER } from '@/lib/features';
+import { FEATURE_OI_TRACKER, FEATURE_WATCHLISTS, hasFeature } from '@/lib/features';
 import { checkRateLimit, rateLimitHeaders } from '@/lib/rateLimit';
 import type { CurrentUserContext } from '@/lib/appUsers';
 import type { OiScreenParams } from '@/lib/oiTracker';
@@ -72,10 +72,20 @@ export function parseScreenParams(sp: URLSearchParams): OiScreenParams | string 
     industry: sp.get('industry') || null,
     marketCapTier: sp.get('marketCapTier') || null,
     indexCode: sp.get('index') || null,
+    watchlistId: sp.get('watchlist') || null,
     sort: sp.get('sort'),
     sortDir: sp.get('dir') === 'asc' ? 'asc' : 'desc',
     limit: int(sp.get('limit')) ?? 500,
   };
+}
+
+/**
+ * Bind the watchlist filter to the caller: their own lists resolve, other users'
+ * resolve empty; without the Watchlists feature the filter is ignored.
+ */
+export function scopeWatchlist<T extends { watchlistId?: string | null; userId?: string | null }>(params: T, ctx: CurrentUserContext): T {
+  if (!params.watchlistId || !hasFeature(ctx.features, FEATURE_WATCHLISTS)) return { ...params, watchlistId: null };
+  return { ...params, userId: ctx.userId };
 }
 
 export function serverError(tag: string, error: unknown) {

@@ -7,6 +7,94 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-15 — Chart follow-up: curved lines restored, level history no longer rate-limited on load
+
+Reported (screenshot of ROKU): the price level lines looked like a ladder instead of curves. Clarified: all five
+level lines and the OI lines.
+
+### Cause (verified)
+
+1. **Ladder = my previous change.** I had set `lineType: 1` (step) on all eight line series (5 levels + Call OI, Put OI,
+   OI Diff) to avoid loops that the curved style draws at the edges of data gaps.
+2. **Regression found while checking it: HTTP 429 on level history.**
+   - `/api/stocks/[symbol]/levels?range=true` allows **10 calls a minute** (`LEVEL_RANGE_RATE`).
+   - With candles capped at 8px, the first 60 days no longer filled the chart, so it auto-loaded about four older
+     chunks on open.
+   - Each chunk fires two range calls: `handleLoadMore`'s own, plus the effect that re-fetches levels for the whole
+     loaded range whenever `ohlcData` changes.
+   - Measured: one AAPL page load made 13 level calls, 9 of them 429, so most of the level and OI history was
+     missing from the chart.
+
+### What changed
+
+- `components/charts/TVChart.tsx`: all eight line series are `lineType: 2` (curved) again. The gap-breaking from the
+  previous entry stays.
+- `components/stock/StockAnalysis.tsx`: daily `initialDays` 60 → 120 and `chunkDays` 60 → 120 (first tried 200 / 180;
+  the user asked for 100–120).
+- `components/charts/TVChart.tsx`: `MAX_BAR_SPACING` 8 → 10px on request.
+  - 120 days is about 85 bars; one 120-day chunk loads on open to reach the ~120 bars that fill the chart at 10px.
+  - Wider screens may load one more chunk, which is still under the limit.
+
+### Verified
+
+- Request counts on a fresh page load (production build, rate-limit counter cleared first), with the final 10px /
+  120-day settings: AAPL at 1490px, NVDA at 1920px and SPY at 1280px each made 2 OHLC and 5 level calls, with
+  no 429s. The first attempt (60-day windows, 8px) made 13 level calls on AAPL, 9 of them 429.
+- Screenshots at those widths: candles about 10px apart, filling the plot from early March to today.
+- Line styles compared in an isolated page using ROKU's real Oct 16 history from the DB (163 days, Feb 20 – Oct 15):
+  step is the ladder; curved is smooth, with small dips where a level jumps; plain is straight and slightly angular.
+  Curved was chosen as requested.
+- `tsc` passes; eslint 0 errors.
+
+### Not verified / notes
+
+- **I could not see the real chart with full level history.** My browser session is anonymous, and the levels
+  route limits non-Pro viewers to about 10 days (`DELAYED_RANGE_DAYS`), so level lines look sparse there. The
+  curved-style check used the DB data in an isolated page instead. Please look at a Pro account's stock page.
+- Curved lines can still show small hooks at the edge of a *real* gap in the data (a sparse expiry); with dense
+  history there are none.
+- Free-tier (delayed) viewers get a ~10-day sample of level history per request, so their level and OI lines are
+  short fragments, and the curved style shows small hooks at their ends. This only affects viewers without live levels.
+- The duplicate whole-range levels fetch on every `ohlcData` change is unchanged (it costs one extra call per chunk).
+- Not run: 1m–1H intervals, whose windows are unchanged.
+
+---
+
+## 2026-10-15 — OI tracker: watchlist filter
+
+Requested: add the watchlist filters to the open interest tracker.
+
+### What changed
+
+The OI tracker's filter bar has a **Watchlist** dropdown, the same one the latest scan alerts page uses.
+- It lists the user's own watchlists, then the curated sector/index lists. It defaults to All stocks.
+- It applies to the OI flow, By stock and Strategies views. It combines with Symbols, Sector and Index, and the
+  result is the overlap.
+
+Files:
+- `lib/oiTracker.ts`: `watchlistId` / `userId` params, and `resolveSymbols()` intersecting symbols, securities
+  filters and watchlist. An empty list returns no rows, not everything.
+- `lib/oiTrackerApi.ts`: `watchlist` query param, and `scopeWatchlist()`, which binds the list to the caller. Without
+  the Watchlists feature the filter is ignored.
+- `app/api/oi-tracker/{meta,screen,strategies}`; `app/oi-tracker/page.tsx`.
+
+Ownership is checked by the existing `getWatchlistSymbols()`: a list id that isn't the caller's resolves to no symbols.
+
+### Verified (lib against the live DB, load 2026-10-15)
+
+- `sys:etf` (20 symbols) narrowed 464 stocks to the 11 ETFs with OI changes, all of them in the list.
+- A real user's 35-symbol list returned only those symbols.
+- The same list id requested as another user returned 0 rows; a non-existent id also returned 0 rows.
+- `sys:etf` combined with symbols SPY, AAPL gave SPY only.
+- Strategy legs were restricted to the list.
+- `tsc`, eslint (0 errors) and `npm run build` pass.
+
+### Not verified
+
+- The dropdown was not seen in a browser (the page needs a Pro login).
+
+---
+
 ## 2026-10-15 — Stock chart: candles fit the window, narrower candles, level lines break at data gaps
 
 Reported: candle height should improve and candle width should be reduced. Plot candles by each day's range
@@ -31,12 +119,12 @@ compared with the other days, so they fit the window, rather than letting every 
   - The price scale fits the visible candles' high/low only.
   - Levels outside that range are off-screen; the level chips below the chart still list them with % distance.
 - **Candle area.** Right price scale margins are `top 0.06, bottom 0.24`, so candles sit above the volume band.
-- **Width cap.** `fitBarsCapped()` replaces `fitContent()` on initial load and on "ALL": at most 8px per bar.
+- **Width cap.** `fitBarsCapped()` replaces `fitContent()` on initial load and on "ALL": at most 10px per bar (8px at first; raised to 10px on request, see the follow-up entry).
   - A shorter history is drawn right-aligned at that spacing.
   - The empty space on the left triggers the existing load-more, which fills it with older bars.
   - The period buttons (1W, 1M, …) are unchanged.
 - **Lines break at gaps.** `breakAtGaps()` makes the point before a gap transparent, because a segment takes its
-  starting point's colour. Level and OI lines now use the step style instead of curved, since they are daily values.
+  starting point's colour. Level and OI lines were switched to step style in that change; that was reverted in the entry above (curved again).
 
 ### Verified
 
