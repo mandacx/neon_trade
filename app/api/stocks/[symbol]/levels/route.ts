@@ -4,8 +4,9 @@ import { calculateLevels, findClosestLevel } from '@/lib/calculations';
 import { formatPercentage } from '@/lib/utils';
 import { format, subDays } from 'date-fns';
 import { getSessionUser, getUserContextFor } from '@/lib/appUsers';
-import { levelGate, LEVEL_RANGE_RATE, LEVEL_POINT_RATE, DELAYED_RANGE_DAYS } from '@/lib/levelAccess';
-import { checkRateLimit, rateLimitKey, rateLimitHeaders } from '@/lib/rateLimit';
+import { levelGate, levelAccessFor, LEVEL_RANGE_RATE, LEVEL_POINT_RATE, DELAYED_RANGE_DAYS } from '@/lib/levelAccess';
+import { recordHit, rateLimitKey, rateLimitHeaders } from '@/lib/rateLimit';
+import { applyTieredLimit } from '@/lib/rateLimitConfig';
 
 export async function GET(
   request: NextRequest,
@@ -35,13 +36,19 @@ export async function GET(
     // several. Keyed by session user when signed in, else client IP — which
     // only needs the session, so the counter write runs alongside the
     // plan/feature queries instead of after them.
+    //
+    // The limit depends on the user's tier (users with live levels get a higher, admin-editable
+    // one: lib/rateLimitConfig.ts), so the counter is only *recorded* in parallel with the user
+    // lookup and judged once the tier is known.
     const rl = range ? LEVEL_RANGE_RATE : LEVEL_POINT_RATE;
     const user = await getSessionUser();
-    const [ctx, limit] = await Promise.all([
+    const rlKey = rateLimitKey(request.headers, user?.id ?? null);
+    const [ctx, hit] = await Promise.all([
       getUserContextFor(user),
-      checkRateLimit(rl.name, rateLimitKey(request.headers, user?.id ?? null), rl.limit, rl.windowSeconds),
+      recordHit(rl.name, rlKey, rl.windowSeconds).catch(err => { console.error('rateLimit: counter unavailable, failing open', err); return null; }),
     ]);
     const gate = levelGate(ctx.features);
+    const limit = await applyTieredLimit(hit, rl.name, rlKey, levelAccessFor(ctx.features) === 'latest');
     if (!limit.allowed) {
       return NextResponse.json(
         {

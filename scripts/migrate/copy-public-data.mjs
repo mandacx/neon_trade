@@ -42,6 +42,7 @@ const APP_TABLES = [
   'nt_opt_daily_bars',
   'nt_oi_tracked',
   'nt_user_prefs',
+  'nt_app_settings',
 ];
 
 const GROUPS = { market: MARKET_TABLES, app: APP_TABLES, all: [...MARKET_TABLES, ...APP_TABLES] };

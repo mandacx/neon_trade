@@ -46,6 +46,7 @@ TABLES=(
   nt_opt_daily_bars
   nt_oi_tracked
   nt_user_prefs
+  nt_app_settings
 )
 
 PARALLEL_JOBS="${PARALLEL_JOBS:-4}"

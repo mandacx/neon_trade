@@ -6,12 +6,13 @@ import { NextResponse } from 'next/server';
 import { requireFeatureApi } from '@/lib/routeGuards';
 import { FEATURE_OI_TRACKER, FEATURE_WATCHLISTS, hasFeature } from '@/lib/features';
 import { checkRateLimit, rateLimitHeaders } from '@/lib/rateLimit';
+import { resolveLimit } from '@/lib/rateLimitConfig';
 import type { CurrentUserContext } from '@/lib/appUsers';
 import type { OiScreenParams } from '@/lib/oiTracker';
 import type { ExpiryKind, OiGroupBy, OptType, ValueBasis, ValueBucket } from '@/types/oiTracker';
 
-/** Screen/stock queries: generous for normal use, bounds a runaway client. */
-export const OI_RATE = { name: 'oi_tracker', limit: 90, windowSeconds: 60 };
+/** Screen/stock queries: generous for normal use, bounds a runaway client. The limit is admin-editable (lib/rateLimitConfig.ts). */
+const OI_LIMITER = 'oi_tracker';
 
 const YMD = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -19,7 +20,8 @@ const YMD = /^\d{4}-\d{2}-\d{2}$/;
 export async function guardOi(rateLimited = false): Promise<{ ctx: CurrentUserContext; blocked: NextResponse | null }> {
   const { ctx, blocked } = await requireFeatureApi(FEATURE_OI_TRACKER);
   if (blocked || !rateLimited) return { ctx, blocked };
-  const limit = await checkRateLimit(OI_RATE.name, `user:${ctx.userId}`, OI_RATE.limit, OI_RATE.windowSeconds);
+  const { limit: cap, windowSeconds } = await resolveLimit(OI_LIMITER, false);
+  const limit = await checkRateLimit(OI_LIMITER, `user:${ctx.userId}`, cap, windowSeconds);
   if (!limit.allowed) {
     return {
       ctx,

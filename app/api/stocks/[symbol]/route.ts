@@ -4,8 +4,9 @@ import { processStockData } from '@/lib/calculations';
 import { formatPercentage } from '@/lib/utils';
 import { getSessionUser, getUserContextFor } from '@/lib/appUsers';
 import { getSecuritiesMeta } from '@/lib/securitiesFilters';
-import { levelGate, LEVEL_POINT_RATE } from '@/lib/levelAccess';
-import { checkRateLimit, rateLimitKey, rateLimitHeaders } from '@/lib/rateLimit';
+import { levelGate, levelAccessFor, LEVEL_POINT_RATE } from '@/lib/levelAccess';
+import { recordHit, rateLimitKey, rateLimitHeaders } from '@/lib/rateLimit';
+import { applyTieredLimit } from '@/lib/rateLimitConfig';
 import { FEATURE_EARNINGS, hasFeature } from '@/lib/features';
 import { getEarningsSummary } from '@/lib/earnings';
 
@@ -29,16 +30,15 @@ export async function GET(
     // The rate-limit key only needs the session user id, so the counter
     // write runs alongside the plan/feature queries instead of after them.
     const user = await getSessionUser();
-    const [ctx, limit] = await Promise.all([
+    const rlKey = rateLimitKey(request.headers, user?.id ?? null);
+    const [ctx, hit] = await Promise.all([
       getUserContextFor(user),
-      checkRateLimit(
-        LEVEL_POINT_RATE.name,
-        rateLimitKey(request.headers, user?.id ?? null),
-        LEVEL_POINT_RATE.limit,
-        LEVEL_POINT_RATE.windowSeconds
-      ),
+      recordHit(LEVEL_POINT_RATE.name, rlKey, LEVEL_POINT_RATE.windowSeconds)
+        .catch(err => { console.error('rateLimit: counter unavailable, failing open', err); return null; }),
     ]);
     const gate = levelGate(ctx.features);
+    // Users with live levels get the higher, admin-editable limit (lib/rateLimitConfig.ts).
+    const limit = await applyTieredLimit(hit, LEVEL_POINT_RATE.name, rlKey, levelAccessFor(ctx.features) === 'latest');
 
     if (!limit.allowed) {
       return NextResponse.json(

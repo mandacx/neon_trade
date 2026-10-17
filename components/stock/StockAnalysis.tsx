@@ -53,6 +53,16 @@ type LevelHistoryEntry = {
   oi?: { callOi: number; putOi: number; oiDiff: number } | null;
   ratios?: { upc: number; ucpr: number };
 };
+/**
+ * Which symbol / expiry / date range the chart's `historicalLevels` already holds (from the last fetch, plus any
+ * chunks merged by load-more). A request for a range inside it would only return what is already loaded, so it
+ * is skipped: opening a stock, switching interval and the Price Levels History panel all used to ask the levels
+ * endpoint (limited to 10 range calls a minute per user) for data the page already had.
+ */
+interface LevelsCoverage { symbol: string; expiry: string; from: string; to: string }
+const coversRange = (c: LevelsCoverage | null, symbol: string, expiry: string, from: string, to: string) =>
+  !!c && c.symbol === symbol && c.expiry === expiry && from >= c.from && to <= c.to;
+
 const SEVEN_LEVEL_ORDER = ['put_low', 'put_int', 'put_call_int', 'call_int', 'call_high', 'call_low', 'put_high'];
 
 // Column registries for the two tables below; each choice is saved per user (account when
@@ -419,6 +429,7 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
   // Set by handleLoadMore just before it merges a chunk of bars: it fetches that chunk's levels itself, so the
   // whole-range levels refetch effect (which re-runs on every ohlcData change) must skip this one change.
   const skipLevelsRefetchRef = useRef(false);
+  const levelsCoverageRef = useRef<LevelsCoverage | null>(null);
   const selectedExpiryRef = useRef('');
   const chartIntervalRef = useRef<SelectableInterval>('daily');
   // Bumped every time the loaded OHLC window is replaced wholesale (initial
@@ -473,6 +484,8 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
           const dates: string[] = expiryData?.success ? expiryData.data.expiryDates : [];
           if (dates.length === 0) return null;
           const expiryToUse = selectedExpiryRef.current || dates[0];
+          // Already loaded (e.g. switching interval: the new window is inside the one we hold): keep it.
+          if (coversRange(levelsCoverageRef.current, symbol, expiryToUse, from, to)) return null;
           return fetch(`/api/stocks/${symbol}/levels?expiry=${expiryToUse}&range=true&from=${from}&to=${to}`)
             .then(res => (res.ok ? res.json() : null))
             .catch(histErr => {
@@ -555,6 +568,7 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
             });
 
             setHistoricalLevels(levelsMap);
+            levelsCoverageRef.current = { symbol, expiry: selectedExpiryRef.current || expiryData.data.expiryDates[0], from, to };
 
             const oiDataFromLevels = histLevelsData.data.history
               .filter((item: any) => item.oi != null)
@@ -589,7 +603,23 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
   // Fetch historical levels data when expiry date changes (skip initial load)
   useEffect(() => {
     if (!symbol || !selectedExpiry || isInitialLoad || ohlcData.length === 0) return;
-    if (skipLevelsRefetchRef.current) { skipLevelsRefetchRef.current = false; return; }
+    if (skipLevelsRefetchRef.current) {
+      // The chunk's levels were fetched by handleLoadMore, so no refetch. The run this change just
+      // cleaned up may have been cancelled mid-flight, and a cancelled run never clears the
+      // "refreshing" overlay (its finally is guarded by `cancelled`), so clear it here or the
+      // chart shows "Loading chart…" forever.
+      skipLevelsRefetchRef.current = false;
+      setLevelsRefreshing(false);
+      return;
+    }
+
+    {
+      const ds = ohlcData.map(d => d.date).sort();
+      if (coversRange(levelsCoverageRef.current, symbol, selectedExpiry, ds[0], ds[ds.length - 1])) {
+        setLevelsRefreshing(false); // a cancelled run may have left the overlay on
+        return;
+      }
+    }
 
     // `ohlcData` and `selectedExpiry` don't always land in the same render —
     // switching expiries can fire this effect once with the OLD ohlcData
@@ -634,6 +664,7 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
             });
 
             setHistoricalLevels(levelsMap);
+            levelsCoverageRef.current = { symbol, expiry: selectedExpiry, from, to };
 
             const oiDataFromLevels = levelsData.data.history
               .filter((item: any) => item.oi != null)
@@ -652,6 +683,7 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
             }
           } else {
             setHistoricalLevels(new Map());
+            levelsCoverageRef.current = null;
             setLevels([]);
             setClosestLevel('');
             setOiData([]);
@@ -749,6 +781,13 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
       // nothing to do with a contract that already expired.
       to = expiryMode === 'historical' ? selectedExpiry : format(new Date(), 'yyyy-MM-dd');
       from = shiftDateString(to, -RANGE_PRESET_DAYS[priceHistoryPreset]);
+    }
+
+    // Inside the range the chart already holds: build the rows from it instead of asking again.
+    if (coversRange(levelsCoverageRef.current, symbol, selectedExpiry, from, to)) {
+      setPriceHistoryMap(new Map([...historicalLevels].filter(([d]) => d >= from && d <= to)));
+      setPriceHistoryLoading(false);
+      return;
     }
 
     let cancelled = false;
@@ -915,7 +954,8 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
         }
 
         const expiryAtStart = selectedExpiryRef.current;
-        if (expiryAtStart && !isStale()) {
+        // Dates the page already holds levels for (e.g. an intraday window inside the daily history) need no request.
+        if (expiryAtStart && !isStale() && !coversRange(levelsCoverageRef.current, symbol, expiryAtStart, from, to)) {
           const levelsResponse = await fetch(
             `/api/stocks/${symbol}/levels?expiry=${expiryAtStart}&range=true&from=${from}&to=${to}`
           );
@@ -940,6 +980,11 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
                 });
                 return newMap;
               });
+              // The chunk is merged into what is loaded, so the loaded range grows with it.
+              const cov = levelsCoverageRef.current;
+              if (cov && cov.symbol === symbol && cov.expiry === expiryAtStart) {
+                levelsCoverageRef.current = { ...cov, from: from < cov.from ? from : cov.from, to: to > cov.to ? to : cov.to };
+              }
 
               const newOiData = historyData
                 .filter((item: any) => item.oi != null)

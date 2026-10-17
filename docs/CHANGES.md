@@ -7,6 +7,107 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-17 — Rate limits: higher limit for users with live levels, admin-editable; far fewer level-history requests
+
+Requested (after the stuck-chart / throttling report below): implement both options: raise the limit for users with the levels feature and cut
+the duplicate requests, and make the rate limit configurable in the admin dashboard.
+
+### What changed
+
+**1. Limits are settings, with two tiers** (`lib/rateLimitConfig.ts`, new)
+- Each limiter has a *standard* limit (anonymous and unentitled users, counted by IP when signed out) and, where it makes sense, an *entitled* limit for users with
+  `FEATURE_LEVELS`. Window stays 60 s. Defaults:
+
+  | Limiter | Standard | Entitled |
+  |---|---|---|
+  | `levels_range` (chart history) | 10 | **30** |
+  | `levels_point` (stock header / one day) | 60 | **120** |
+  | `oi_tracker` (Pro-only) | 90 | single tier |
+
+- Stored in `nt_app_settings` (new table, key `rate_limits`); a saved value overrides the defaults and deleting it restores them. Read through a 30 s per-instance
+  cache, so a change reaches every server within about 30 s (the one that saved applies it at once). Invalid or unreadable stored values fall back to the defaults.
+- `/api/stocks/[symbol]/levels` and `/api/stocks/[symbol]` now *record* the hit in parallel with the user lookup (`recordHit`, keeping the latency optimisation from issue #4)
+  and judge it afterwards with the right tier (`applyTieredLimit`). `lib/oiTrackerApi.ts` reads its limit from the config.
+
+**2. Admin editor** — `/admin/settings` (new nav item "Settings"; also linked from the Heavy API users panel on the dashboard)
+- `components/admin/RateLimitsEditor.tsx`, `app/admin/settings/page.tsx`, `app/api/admin/settings/rate-limits/route.ts` (GET / PUT / DELETE, admin only, 403 otherwise).
+- Validation (server side): every limiter present, whole numbers 1–10,000, entitled limit never lower than the standard one, nothing for a limiter with no entitled tier,
+  no unknown limiters. Shows "customised" badges, defaults, who changed it and when, and "Reset to defaults".
+
+**3. The Heavy API users tile counts real rejections**
+- The limit now differs per user, so "hits above one constant" no longer tells who was throttled. `nt_rate_limit_hits` has a new `blocked` column, incremented when a request in that
+  minute is rejected; "Throttled min" = minutes with `blocked > 0`. (Flags from before this change drop off immediately: their rows have `blocked = 0`.)
+
+**4. Fewer level-history requests** (`components/stock/StockAnalysis.tsx`)
+- `levelsCoverageRef` records which symbol, expiry and date range the page already holds levels for (set when levels are fetched, widened when a scroll-back chunk is merged).
+  Requests inside it are skipped: the mount effect (interval switches), the refetch effect, the scroll-back chunk's own levels call, and the Price Levels History panel,
+  which now builds its rows from the loaded levels instead of asking again.
+
+### Verified
+
+- Library against the live DB (test rows removed, production left on the defaults): tiers resolve (10 / 30, 60 / 120, 90 single); 8 invalid submissions rejected and one valid one accepted;
+  save → effective → customised view → reset; 15 hits in a window are rejected at the standard limit (and recorded), allowed at the entitled limit, and the counter-down case fails open;
+  the heavy-users query flags the rejected minute and does **not** flag an entitled user who made 15 calls and was never rejected; `checkRateLimit` still allows 3 then rejects the 4th.
+- Admin editor mounted in Chromium with a mocked API: Save disabled until a change; a server rejection (entitled < standard) shows its message; a valid save updates the badge and
+  "last changed" text; Reset restores 10 / 30 / 60 / 120 / 90. Signed out, `/admin/settings` redirects to login and the API returns 403 for GET, PUT and DELETE.
+- Request counts on a production build (anonymous, Chromium, counter cleared first), AAPL: opening the stock **2** level-history calls (was 4), switching to 1H **0** (was 3), 5m **0** (was 3),
+  back to 1D 0, switching expiry 2; the sequence open → 1H → 5m → 1D → expiry cost 12 calls before and 2 + 0 + 0 + 0 + 2 = 4 now. The Price Levels History table still has its rows (3, same as
+  the separate request returned). Dragging the chart back 6 times loads 5 older chunks at 1 chart-data + 1 level call each; the loading overlay clears and there are no page errors.
+- `tsc`, eslint (0 errors) and `npm run build` pass.
+
+### Not verified
+
+- **Not seen with a real admin or entitled login:** the settings page and API were exercised with a mocked API (and the library directly); whether `levelAccessFor(...) === 'latest'` selects the entitled tier for a real Pro
+  account is covered by the unit test of `applyTieredLimit` and by reading the route, not by a signed-in request.
+- Expiry switch still costs 2 calls (the refetch for the new expiry and the history panel's own request run at the same time).
+- Windows that were open before the deploy keep running their old code and need a reload.
+- A user scrolling far back quickly makes one level call per chunk (5 chunks in 11 s in the test), which still needs the entitled limit to stay clear of 429.
+
+### Deploy steps
+
+- DDL already run on the shared database (additive): `node --env-file=.env.local scripts/bootstrap-app-settings.mjs` creates `nt_app_settings` and adds `nt_rate_limit_hits.blocked`.
+  Running it again is safe, and the limiter also adds the column itself if it is missing.
+
+---
+
+## 2026-10-17 — Fix: stock chart stuck on "Loading … chart…" (my regression from 2026-10-16), and what the throttling is
+
+Reported on production, in browser windows that were already open: the chart sits in a loading state forever, and "Heavy API users" shows
+users throttled for minutes.
+
+### Cause (reproduced on the production build)
+
+- **Stuck overlay.** `skipLevelsRefetchRef` (added 2026-10-16 so a load-more doesn't re-request levels for the whole range) skips the
+  levels-refetch effect once. The run that effect had just started (`setLevelsRefreshing(true)`) is cancelled by the same data change, and a cancelled
+  run never clears the overlay (its `finally` is guarded by `cancelled`). With the refetch skipped, nothing cleared it, so
+  `Loading <expiry> chart…` stayed on screen with every request already finished. Reproduced on AAPL (default expiry 2026-10-19, the Monday
+  weekly, now that Friday's expired); it blocked clicks on the interval buttons for 30 s.
+  Why it showed up now: the bug is in the code pushed in `28c462c`; open windows from before that deploy run older code (below).
+- **Throttling is real and caused by call volume.** The tile reads the rate-limiter counters: "Throttled min" = minutes in which a user made
+  10 or more `/api/stocks/[symbol]/levels?range=true` calls (`LEVEL_RANGE_RATE`, 10 per minute). Measured cost of normal use on the current build:
+  about 4 calls to open a stock, about 3 per interval switch, 2 to 3 per expiry switch, so a few quick actions cross 10. In the counters
+  (read-only query, last 48 h) there are 4 limiter buckets: two real accounts with 1 to 2 minutes at the limit now and then (one burst of 37 calls in an
+  hour on 2026-10-16 18:00 UTC), one anonymous address, and `ip:::1`, which is my own local test traffic (it uses the same database).
+- **Open windows keep running whichever bundle they loaded.** Tabs opened after `b699076` and before `6a586d3` run the 8px / 60-day version, which
+  fetched about 4 older chunks (about 13 level calls) on every open; those tabs only get the fixes after a reload.
+
+### What changed
+
+- `components/stock/StockAnalysis.tsx`: when the levels refetch is skipped, `setLevelsRefreshing(false)` is called, so the overlay always clears.
+
+### Verified (production build, Chromium, rate-limit counter cleared first)
+
+- Before: the overlay `Loading 2026-10-19 chart…` still present 12 s after load, all requests 200.
+- After: overlay gone after the default load, after switching to 1H, 5m and back to 1D, after switching expiry, and after dragging the chart back; no page
+  errors. (The two 429s in that run were my test exceeding 10 calls in a minute: 12 calls in about 40 s.)
+
+### Follow-up
+
+- The 10 per minute limit and the request volume are addressed in the entry above (higher limit for users with live levels, editable at `/admin/settings`, and far fewer requests per page).
+- Windows that were open before the deploy need a reload; nothing server-side can fix their client code.
+
+---
+
 ## 2026-10-16 — Stock chart: 60-bar windows, 12px candles, free right fifth (and a load-more loop fixed)
 
 Requested: load 60 bars instead of 100/120, make candles 12px, and use only 4/5 of the plot width, leaving 1/5 free on the right.

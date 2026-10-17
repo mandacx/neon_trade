@@ -1,10 +1,9 @@
 /**
  * Heavy API users, read straight from the rate-limiter counters
  * (public.nt_rate_limit_hits, buckets named `<limit name>:user:<id>`), so it
- * costs no extra writes. Counters are pruned after a day, hence a 24h view.
+ * costs no extra writes beyond the counter the limiter already keeps. Counters are pruned after a day, hence a 24h view.
  */
 import { sql } from '@/lib/db';
-import { LEVEL_RANGE_RATE, LEVEL_POINT_RATE } from '@/lib/levelAccess';
 
 export interface HeavyUserRow {
   userId: string;
@@ -25,9 +24,10 @@ export async function getHeavyApiUsers(limit: number = 20): Promise<HeavyUserRow
         SELECT split_part(bucket, ':', 1) AS name,
                substr(bucket, length(split_part(bucket, ':', 1)) + length(':user:') + 1) AS user_id,
                hits,
-               hits > CASE split_part(bucket, ':', 1)
-                        WHEN ${LEVEL_RANGE_RATE.name}::text THEN ${LEVEL_RANGE_RATE.limit}::int
-                        ELSE ${LEVEL_POINT_RATE.limit}::int END AS throttled
+               -- A minute counts as throttled when a request in it was actually rejected. The limit is
+               -- editable and differs per user (standard vs entitled), so comparing hits to one
+               -- constant no longer tells; rateLimit.ts records every rejection in the blocked column.
+               blocked > 0 AS throttled
         FROM public.nt_rate_limit_hits
         WHERE window_start >= now() - interval '24 hours'
           AND bucket LIKE '%:user:%'

@@ -375,6 +375,10 @@ export default function AdminDashboardPage() {
       )}
       {drillKey === 'heavy' && (
         <DrillPanel title="Heavy API users — last 24h" count={data.heavyUsers.length} onClose={close} onExpand={() => open('heavy', 'Heavy API users', 'today')}>
+          <p className="text-[11px] text-gray-400 mb-2">
+            Throttled min = minutes in which a request was rejected for going over the limit.{' '}
+            <a href="/admin/settings" className="font-semibold text-blue-600 hover:underline">Edit rate limits →</a>
+          </p>
           <DataTable head={['User', 'Requests', 'Peak/min', 'Throttled min']} empty={data.heavyUsers.length === 0}>
             {data.heavyUsers.map(u => (
               <tr key={u.userId} className={u.flagged ? 'bg-red-50' : undefined}>

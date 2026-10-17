@@ -29,7 +29,11 @@ export const LEVEL_DELAY_DAYS = 7;
  */
 export const DELAYED_RANGE_DAYS = 10;
 
-/** Rate limits for the level endpoints (see lib/rateLimit.ts). */
+/**
+ * Rate limits for the level endpoints (see lib/rateLimit.ts): the *standard* limits, used as defaults.
+ * The effective limits are admin-editable and users with live levels get a higher one: see
+ * lib/rateLimitConfig.ts and /admin/settings.
+ */
 export const LEVEL_RANGE_RATE = { name: 'levels_range', limit: 10, windowSeconds: 60 };
 export const LEVEL_POINT_RATE = { name: 'levels_point', limit: 60, windowSeconds: 60 };
 

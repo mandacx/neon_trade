@@ -146,7 +146,7 @@ It is a hint only. The user always picks BTO/STO when tracking.
 
 ## API
 
-All routes use `requireFeatureApi(FEATURE_OI_TRACKER)`, via `guardOi()` in `lib/oiTrackerApi.ts`. The heavy ones are also rate-limited at 90 requests/min per user.
+All routes use `requireFeatureApi(FEATURE_OI_TRACKER)`, via `guardOi()` in `lib/oiTrackerApi.ts`. The heavy ones are also rate-limited per user (default 90 requests/min; editable at `/admin/settings`).
 
 | Route | Purpose |
 |---|---|

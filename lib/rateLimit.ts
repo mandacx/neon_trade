@@ -31,9 +31,12 @@ async function ensureTable(): Promise<void> {
       bucket      TEXT NOT NULL,
       window_start TIMESTAMPTZ NOT NULL,
       hits        INT NOT NULL DEFAULT 0,
+      blocked     INT NOT NULL DEFAULT 0,
       PRIMARY KEY (bucket, window_start)
     )
   `;
+  // Tables created before `blocked` existed: add it (idempotent; scripts/bootstrap-app-settings.mjs does the same).
+  await sql`ALTER TABLE public.nt_rate_limit_hits ADD COLUMN IF NOT EXISTS blocked INT NOT NULL DEFAULT 0`;
   tableReady = true;
 }
 
@@ -51,6 +54,61 @@ export function rateLimitKey(headers: Headers, userId: string | null): string {
   return `ip:${ip || 'unknown'}`;
 }
 
+export interface RecordedHit { hits: number; windowEpoch: number; windowSeconds: number }
+
+/**
+ * Count one request against `name` for `key` and return the window's running total. Does not decide
+ * anything: pair it with evaluateHit() once the limit is known. Split out so a route can run the counter
+ * write in parallel with the user lookup that tells it which tier's limit applies.
+ * Throws if the counter is unavailable; callers go through checkRateLimit() or handle that themselves.
+ */
+export async function recordHit(name: string, key: string, windowSeconds: number): Promise<RecordedHit> {
+  await ensureTable();
+  const rows = await sql`
+    INSERT INTO public.nt_rate_limit_hits (bucket, window_start, hits)
+    VALUES (
+      ${`${name}:${key}`},
+      to_timestamp(floor(extract(epoch FROM now()) / ${windowSeconds}) * ${windowSeconds}),
+      1
+    )
+    ON CONFLICT (bucket, window_start) DO UPDATE SET hits = nt_rate_limit_hits.hits + 1
+    RETURNING hits, extract(epoch FROM window_start)::bigint AS window_epoch
+  `;
+  const row = rows[0] as { hits: number; window_epoch: string } | undefined;
+  return { hits: Number(row?.hits ?? 1), windowEpoch: Number(row?.window_epoch ?? 0), windowSeconds };
+}
+
+/** Apply a limit to a recorded hit. */
+export function evaluateHit(hit: RecordedHit, limit: number): RateLimitResult {
+  const windowEnd = (hit.windowEpoch + hit.windowSeconds) * 1000;
+  return {
+    allowed: hit.hits <= limit,
+    limit,
+    remaining: Math.max(0, limit - hit.hits),
+    resetSeconds: Math.max(1, Math.ceil((windowEnd - Date.now()) / 1000)),
+  };
+}
+
+/**
+ * Note that a request in this window was rejected. The admin "Heavy API users" tile counts these
+ * (minutes with a rejection) instead of comparing hits to one constant, because the limit now differs
+ * per user (standard vs entitled) and is editable.
+ */
+export async function recordBlocked(name: string, key: string, hit: RecordedHit): Promise<void> {
+  try {
+    await sql`
+      UPDATE public.nt_rate_limit_hits SET blocked = blocked + 1
+      WHERE bucket = ${`${name}:${key}`} AND window_start = to_timestamp(${hit.windowEpoch})
+    `;
+  } catch (err) {
+    console.error('rateLimit: could not record a blocked request', err);
+  }
+}
+
+/** The failure-open result used when the counter can't be written. */
+export const failOpen = (limit: number, windowSeconds: number): RateLimitResult =>
+  ({ allowed: true, limit, remaining: limit, resetSeconds: windowSeconds });
+
 /**
  * Count one request against `name` for `key`. Returns allowed=false once the
  * window's budget is spent. Fails OPEN: if the counter write errors we serve the
@@ -64,29 +122,13 @@ export async function checkRateLimit(
   windowSeconds: number
 ): Promise<RateLimitResult> {
   try {
-    await ensureTable();
-    const rows = await sql`
-      INSERT INTO public.nt_rate_limit_hits (bucket, window_start, hits)
-      VALUES (
-        ${`${name}:${key}`},
-        to_timestamp(floor(extract(epoch FROM now()) / ${windowSeconds}) * ${windowSeconds}),
-        1
-      )
-      ON CONFLICT (bucket, window_start) DO UPDATE SET hits = nt_rate_limit_hits.hits + 1
-      RETURNING hits, extract(epoch FROM window_start)::bigint AS window_epoch
-    `;
-    const row = rows[0] as { hits: number; window_epoch: string } | undefined;
-    const hits = Number(row?.hits ?? 1);
-    const windowEnd = (Number(row?.window_epoch ?? 0) + windowSeconds) * 1000;
-    return {
-      allowed: hits <= limit,
-      limit,
-      remaining: Math.max(0, limit - hits),
-      resetSeconds: Math.max(1, Math.ceil((windowEnd - Date.now()) / 1000)),
-    };
+    const hit = await recordHit(name, key, windowSeconds);
+    const result = evaluateHit(hit, limit);
+    if (!result.allowed) await recordBlocked(name, key, hit);
+    return result;
   } catch (err) {
     console.error('rateLimit: counter unavailable, failing open', err);
-    return { allowed: true, limit, remaining: limit, resetSeconds: windowSeconds };
+    return failOpen(limit, windowSeconds);
   }
 }
 
