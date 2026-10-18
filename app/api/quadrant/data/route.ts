@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAllStocksLatest, getAllStocksByDate, getAllStocksByDateAndExpiry, getAvailableDates, getAvailableExpiryDates } from '@/lib/db';
 import { calculateLevels, findClosestLevel, rebaseLevels } from '@/lib/calculations';
 import { deriveFilterOptions, getSecuritiesFilterOptions, getSecuritiesMeta, applySecuritiesFilters, attachSecuritiesMeta } from '@/lib/securitiesFilters';
-import { getSnapshotsMulti } from '@/lib/alpaca';
+import { getLatestPrices, getDayClosePrices, type ReferencePrices } from '@/lib/quadrantPrices';
 import { format } from 'date-fns';
 import { requireFeatureApi } from '@/lib/routeGuards';
 import { levelGate } from '@/lib/levelAccess';
@@ -72,36 +72,42 @@ export async function GET(request: NextRequest) {
       date ? getAvailableDates(1) : Promise.resolve([] as string[]),
     ]);
 
-    // Positions are only rebased onto a live LTP when looking at the latest
-    // trade date — a historical date's levels stay measured against that
-    // day's own close, same rule the stock detail page follows.
+    // Every level is measured against one reference price per stock:
+    //   latest load date -> live (regular session, shared 5-min cache) or the last regular
+    //                       close (stored until the next session opens);
+    //   past load date   -> the close of that date's own session. (The EOD table's `close`
+    //                       for load date D is session D-1's close, so it is not used.)
+    // lib/quadrantPrices.ts has the caching rules. A stock with no price keeps its stored close.
     const isLatestDate = !date || date === latestDate;
     const allSymbols = Array.from(new Set(stocksData.map(d => d.SYMBOL)));
-    const [snapshots, allSecMeta, watchlistSymbols, earningsMap] = await Promise.all([
-      isLatestDate && allSymbols.length > 0
-        ? getSnapshotsMulti(allSymbols)
-        : Promise.resolve({} as Awaited<ReturnType<typeof getSnapshotsMulti>>),
+    const noPrices: ReferencePrices = { prices: {}, source: 'day-close', asOf: null, session: null, nextChangeAt: null };
+    const loadDate = stocksData[0]?.TRADE_DATE;
+    const [refPrices, allSecMeta, watchlistSymbols, earningsMap] = await Promise.all([
+      allSymbols.length === 0
+        ? Promise.resolve(noPrices)
+        : isLatestDate
+          ? getLatestPrices(allSymbols)
+          : getDayClosePrices(loadDate, allSymbols),
       getSecuritiesMeta(allSymbols),
       watchlistId && watchlistsEnabled ? getWatchlistSymbols(watchlistId, ctx.userId) : Promise.resolve(null),
       earningsEnabled ? getEarningsSummary(allSymbols) : Promise.resolve(null),
     ]);
-    const liveBySymbol: Record<string, number> = {};
-    for (const [symbol, snap] of Object.entries(snapshots)) {
-      const price = snap.dailyBar?.c ?? snap.latestTrade?.p;
-      if (price) liveBySymbol[symbol] = price;
-    }
 
     // Process each stock to calculate levels
     const processedStocks = stocksData.map(data => {
       const levels = calculateLevels(data);
-      const livePrice = liveBySymbol[data.SYMBOL];
-      const effectiveLevels = livePrice ? rebaseLevels(levels, livePrice) : levels;
+      const refPrice = refPrices.prices[data.SYMBOL];
+      const effectiveLevels = refPrice ? rebaseLevels(levels, refPrice) : levels;
       const closest = findClosestLevel(effectiveLevels);
 
       return {
         symbol: data.SYMBOL,
         close: data.CLOSE,
-        livePrice: livePrice ?? null,
+        // The price the levels are measured against, and where it came from ('stored' = no
+        // price available, the EOD close was used).
+        refPrice: refPrice ?? data.CLOSE,
+        refSource: refPrice ? refPrices.source : 'stored',
+        livePrice: refPrice && refPrices.source !== 'day-close' ? refPrice : null,
         tradeDate: data.TRADE_DATE,
         expiryDate: data.EXPIRY_DT,
         levels: effectiveLevels.map(l => ({
@@ -201,6 +207,13 @@ export async function GET(request: NextRequest) {
         stocks: enriched,
         filterOptions: derivedFilterOptions,
         hasSecurities: Object.keys(secMeta).length > 0,
+        price: {
+          source: refPrices.source,
+          asOf: refPrices.asOf,
+          session: refPrices.session,
+          nextChangeAt: refPrices.nextChangeAt,
+          isLatest: isLatestDate,
+        },
         earningsEnabled,
       },
     });

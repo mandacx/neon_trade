@@ -7,6 +7,95 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-18 — Quadrant reference prices: tested, and a cache bug fixed before release
+
+Tested the uncommitted quadrant price work from 2026-10-16 (entry below) before pushing it, including the parts that entry lists as unverified.
+
+### Bug found and fixed (`lib/quadrantPrices.ts`)
+
+- **Problem (reproduced):** the cache rows (`quadrant:latest`, `quadrant:close:<date>`) were reused for any request, but a row only holds the symbols it was captured for, and the route asks for the symbols of the
+  *selected expiry*. On the latest load date those counts are 631 (2026-10-16), 326, 21, 6 and so on. After a request for a 6-symbol expiry, a request for the 631-symbol set got **4 of 631** prices: the small capture
+  was marked `final` after the close and then served to everyone until the next session (the whole weekend), so nearly every dot silently fell back to the stored (previous-session) close. The day-close cache had the same
+  flaw and was only protected by luck (the 4-of-6 capture was below its 80% completeness rule; a 20-symbol capture would have been stored).
+  It matters today: the default expiry is now the 21-stock 2026-10-19 weekly.
+- **Fix:** a cached row is reused only for symbols it covers. Missing symbols are priced and merged into the row (keeping its capture time and `final` flag), and a refresh includes the symbols the previous capture held, so a small
+  request cannot shrink the cache. Symbols the vendor has no price for are stored as 0 ("attempted") so they are not requested again; 0 is never returned to callers. Up to 10 unpriced symbols count as "the vendor has none"; for a
+  larger missing set, "nothing priced" is treated as a vendor failure and nothing is stored. In-flight de-duplication is now per symbol set.
+
+### Verified
+
+- Library against live Alpaca and the database (test rows removed afterwards): small set first, then 326, then 631 symbols: 4, 324/326 and 629/631 priced (the 2 missing are symbols with no vendor price); the repeat call is
+  served from the table (52 ms, same `asOf`); the stored row holds 631 symbols with 2 remembered as "no price"; day close: a 20-symbol capture, then 631: 629/631, repeat 56 ms; the older 2026-10-15 row settles after one lookup (second call
+  54 ms). The same small-first scenario on the unfixed code gave 4/631.
+- The route's own code (`app/api/quadrant/data/route.ts`) run with only the login guard stubbed: a 6-stock expiry first, then the default expiry: 19 of 21 stocks on `last-close` and 2 `stored`; AAPL measured against 343.39 (the 10-16
+  close) instead of the stored 342.00; the past date 2026-10-15 returns 628 stocks with `day-close`; `price` metadata present; the second call served from the cache (113 ms, same `asOf`).
+- The real quadrant page and the scan-alerts page (which shares `QuadrantChart`) mounted in Chromium with mocked data: the badge reads "Live · 10:42 AM ET", "Last close" or "Close of 2026-10-16"; the Price and Prev close
+  columns show `-` for a stock without a price; dots are positioned by the reference price; in the live state the page re-reads once per 5 simulated minutes (+1 request in 6 minutes) with no loading spinner and the new price shown,
+  while "last close" (15 min cap) and past dates do not poll; no page errors on either page.
+- `tsc`, eslint (0 errors) and `npm run build` pass.
+
+### Not verified
+
+- A signed-in browser session against the real route (the route was run with its login guard stubbed; the page with a mocked API).
+- Pre-market behaviour of Alpaca's daily bar and cross-instance races (both noted in the entry below).
+- `nt_price_cache` is created on first use by `ensureTable()` (it already exists in the shared database); it is not in the migrate scripts' table lists.
+
+---
+
+## 2026-10-16 — Quadrant: one reference price per stock (live / last close / that day's close), shared 5-minute cache
+
+Requested: the quadrant plotted stocks from the EOD levels and did not use the current day's price; use the day's own
+close for history, and a live price intraday, cached for all users (about every 5 minutes), keeping the last read after
+the close until the next session.
+
+### Findings (verified)
+
+- **`trade_date` is the load date; the stored `close` is the previous session's.** Across 16 symbols and about 11 weeks
+  (795 symbol-days) the stored close matched Alpaca's previous-session close in 781 and the same-day close in 14
+  (the 14 were not investigated). E.g. the 2026-10-16 row: AAPL 342.00 vs Alpaca 10-15 close 341.91.
+- The route already rebased the levels onto a live price for the latest date (so `closestLevel` / `closestValue` were live),
+  but it still returned the stored `close`, and `QuadrantChart` placed the dot with `ladderX(close, levels)`. Dots were
+  grouped by the live level and positioned by the old close. Past dates used the stored (D-1) close.
+- Ruled out: the single 631-symbol snapshot request works (HTTP 200, 629 symbols with today's bar).
+
+### What changed
+
+- `lib/quadrantPrices.ts` (new), table `nt_price_cache` (created on first use, like `nt_rate_limit_hits`):
+  - **Latest load date:** regular session -> last trade (via `buildQuote`), refreshed at most every 5 minutes for all users;
+    otherwise the last regular close, captured once after the close (marked `final` 5 minutes after it, so the bar has
+    settled) and served unchanged until the next regular session. Holidays/early closes come from `lib/marketSession.ts`.
+  - **Past load dates:** the close of that date's own session from Alpaca daily bars, stored once per date (immutable).
+  - A failed Alpaca call never overwrites a good row; the previous capture is served.
+- `app/api/quadrant/data/route.ts`: uses the above; rows carry `refPrice` / `refSource` (`live`, `last-close`, `day-close`,
+  `stored` = no price, EOD close used); response has `price: { source, asOf, session, nextChangeAt, isLatest }`.
+  `livePrice` is kept (set for the latest date only).
+- `components/charts/QuadrantChart.tsx`: x position and tooltip use `refPrice`. `app/quadrant/page.tsx`: a badge
+  ("Live · 10:42 ET", "Last close", "Close of <date>"), a silent background refresh on the latest date (every 5 min in
+  the regular session, 15 min pre/post, sleeping to the next boundary when closed), and columns "Price" and "Prev close"
+  (the stored close). Saved column choices keep their ids. `types/stock.ts`: `refPrice`, `refSource` on `QuadrantStock`.
+
+### Verified
+
+- Against the live DB and Alpaca (script calling the module): first live read 1.2 s, 629 prices; second call served from
+  the table (same `asOf`); 10-15 closes AAPL 341.91, NVDA 217.33 (match Alpaca); second call served from the stored row.
+- With a faked clock: 16:01 ET capture not final; 16:10 ET capture final; the same row served at 23:00 ET and at 07:00 ET
+  Monday (pre-market). (The fake clock only moved time; the prices themselves were read mid-session. Test rows deleted.)
+- `tsc` and eslint (0 errors on the touched files).
+
+### Not verified
+
+- **No HTTP / browser check** of `/quadrant` (needs a signed-in Pro session): the badge, the silent refresh and the moved dots
+  were not seen. `npm run build` was not run.
+- Alpaca's pre-market `dailyBar` roll (same caveat as the 2026-10-14 quotes entry).
+- Cross-instance races: two serverless instances can refetch in the same minute when a live row expires (harmless, one extra call).
+- The first open of a past date fetches its bars (**12.5 s** measured for 631 symbols) before it is stored. Follow-up: warm it
+  from a cron, or the previous trading day's close right after the session.
+- Past-date closes are split-adjusted bars compared against unadjusted levels, as elsewhere in the app.
+- Between the 09:30 open and the morning load (about 10:00 ET), the latest load date is still the previous one, so live prices
+  are compared with the previous morning's levels (unchanged behaviour).
+
+---
+
 ## 2026-10-17 — Rate limits: higher limit for users with live levels, admin-editable; far fewer level-history requests
 
 Requested (after the stuck-chart / throttling report below): implement both options: raise the limit for users with the levels feature and cut

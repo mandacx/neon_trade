@@ -59,6 +59,9 @@ export interface QuadrantStock {
   earnings?: EarningsBadge | null;
   close: number;
   livePrice?: number | null;
+  /** The price the levels are measured against (live / session close); the stored close when none was available. */
+  refPrice?: number;
+  refSource?: 'live' | 'last-close' | 'day-close' | 'stored';
   tradeDate: string;
   expiryDate?: string;
   levels: LevelCalculation[];

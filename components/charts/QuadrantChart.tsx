@@ -47,7 +47,7 @@ const ZOOM_STEP = 0.85;
 const DRAG_THRESHOLD = 3; // px — separates pan from click
 
 // §1 — Position a stock on the ladder between its own price levels.
-// Interpolate CLOSE across the adjacent level-pair that brackets it.
+// Interpolate the reference price (live / session close) across the adjacent level-pair that brackets it.
 function ladderX(close: number, levels: QuadrantStock['levels']): number {
   const prices = LEVEL_ORDER.map(name => {
     const lv = levels.find(l => l.name === name);
@@ -131,7 +131,7 @@ export default function QuadrantChart({ data, onStockClick, height = 600, title 
       const count = stocks.length;
       if (count === 0) return;
       // Sort by ladder position so the grid de-overlap is stable left→right.
-      const withX = stocks.map(s => ({ s, lx: ladderX(s.close, s.levels) }));
+      const withX = stocks.map(s => ({ s, lx: ladderX(s.refPrice ?? s.close, s.levels) }));
       withX.sort((a, b) => a.lx - b.lx);
       withX.forEach(({ s: stock, lx }, index) => {
         const cols = Math.ceil(Math.sqrt(count));
@@ -148,6 +148,8 @@ export default function QuadrantChart({ data, onStockClick, height = 600, title 
           ladderX: lx,
           actualDistance: stock.closestValue * 100,
           close: stock.close,
+          refPrice: stock.refPrice ?? stock.close,
+          refSource: stock.refSource,
           closestLevel: stock.closestLevel,
           levels: stock.levels,
           tradeDate: stock.tradeDate,
@@ -292,7 +294,7 @@ export default function QuadrantChart({ data, onStockClick, height = 600, title 
             )}
           </div>
           <p className="text-sm text-gray-600 mb-2">
-            Close: <span className="font-semibold">{formatCurrency(d.close)}</span>
+            {{ live: 'Live', 'last-close': 'Last close', 'day-close': 'Close', stored: 'EOD close' }[d.refSource as string] ?? 'Close'}: <span className="font-semibold">{formatCurrency(d.refPrice ?? d.close)}</span>
             {d.chg != null && (
               <span className={`ml-2 font-semibold ${d.chg >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                 {d.chg >= 0 ? '+' : ''}{Number(d.chg).toFixed(2)}
@@ -511,7 +513,7 @@ export default function QuadrantChart({ data, onStockClick, height = 600, title 
         </button>
         {showGuide && (
           <div className="px-4 pb-4 pt-2 text-sm text-gray-600 space-y-1">
-            <p>• X-axis = where the close price sits <strong>among the stock&apos;s own 5 levels</strong> (rungs), interpolated between adjacent levels</p>
+            <p>• X-axis = where the price (live during market hours, otherwise that day&apos;s close) sits <strong>among the stock&apos;s own 5 levels</strong> (rungs), interpolated between adjacent levels</p>
             <p>• Dot color = closest level (category) · Dot size = market cap (larger = bigger company)</p>
             <p>• Amber ring = earnings fall before the expiry (Pro earnings data) — the report can move price through these levels</p>
             <p>• Scroll to zoom toward the cursor · Drag to pan · Use + / − / Reset to control the view</p>

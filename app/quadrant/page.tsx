@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, Suspense } from 'react';
+import { useEffect, useRef, useState, Suspense } from 'react';
 import EarningsBadgeCell from '@/components/ui/EarningsBadgeCell';
 import { EarningsRangeInputs } from '@/components/watchlists/watchlistShared';
 import { EARNINGS_FILTER_OPTIONS } from '@/lib/earningsFilter';
@@ -13,6 +13,19 @@ import type { ColumnMeta } from '@/lib/tableColumns';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import ErrorDisplay from '@/components/ui/ErrorDisplay';
 import { QuadrantStock } from '@/types/stock';
+import { pollDelayMs } from '@/lib/pollDelay';
+import type { MarketSession } from '@/lib/marketSession';
+
+interface PriceMeta {
+  source: 'live' | 'last-close' | 'day-close';
+  asOf: string | null;
+  session: MarketSession | null;
+  nextChangeAt: string | null;
+  isLatest: boolean;
+}
+
+// The server refreshes live prices every 5 minutes for everyone; polling faster gains nothing.
+const POLL_MS = { regularMs: 5 * 60_000, extendedMs: 15 * 60_000, closedMaxMs: 15 * 60_000 };
 
 interface FilterOptions {
   sectors?: string[];
@@ -41,6 +54,11 @@ function ChevronIcon({ open }: { open: boolean }) {
   );
 }
 
+function etTime(iso: string | null): string {
+  if (!iso) return '';
+  return new Date(iso).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' }) + ' ET';
+}
+
 function QuadrantPageInner() {
   const searchParams = useSearchParams();
   const [stocks, setStocks] = useState<QuadrantStock[]>([]);
@@ -53,6 +71,9 @@ function QuadrantPageInner() {
   const [expiryDates, setExpiryDates] = useState<string[]>([]);
   const [filterOptions, setFilterOptions] = useState<FilterOptions>({});
   const [watchlists, setWatchlists] = useState<WatchlistOption[]>([]);
+  const [priceMeta, setPriceMeta] = useState<PriceMeta | null>(null);
+  const [refreshTick, setRefreshTick] = useState(0);
+  const lastKeyRef = useRef('');
 
   // Collapsible state
   const [filtersOpen, setFiltersOpen] = useState(true);
@@ -99,9 +120,11 @@ function QuadrantPageInner() {
 
   useEffect(() => {
     if (!tradeDate || !expiryDate) return;
+    const fetchKey = [tradeDate, expiryDate, sector, industry, marketCapTier, indexCode, watchlistId, earningsFilter, earningsFrom, earningsTo].join('|');
+    const silent = refreshTick > 0 && lastKeyRef.current === fetchKey;
+    lastKeyRef.current = fetchKey;
     const fetchData = async () => {
-      setIsLoading(true);
-      setError(null);
+      if (!silent) { setIsLoading(true); setError(null); }
       try {
         const params = new URLSearchParams({ date: tradeDate, expiry: expiryDate });
         if (sector) params.set('sector', sector);
@@ -120,16 +143,25 @@ function QuadrantPageInner() {
         if (!result.success) throw new Error(result.error || 'Unknown error');
         setStocks(result.data.stocks);
         setFilteredStocks(result.data.stocks);
+        setPriceMeta(result.data.price ?? null);
         // §4 — adopt filter options derived from the items actually present.
         if (result.data.filterOptions) setFilterOptions(result.data.filterOptions);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load quadrant data');
+        // A failed background refresh keeps the picture already on screen.
+        if (!silent) setError(err instanceof Error ? err.message : 'Failed to load quadrant data');
       } finally {
-        setIsLoading(false);
+        if (!silent) setIsLoading(false);
       }
     };
     fetchData();
-  }, [tradeDate, expiryDate, sector, industry, marketCapTier, indexCode, watchlistId, earningsFilter, earningsFrom, earningsTo]);
+  }, [tradeDate, expiryDate, sector, industry, marketCapTier, indexCode, watchlistId, earningsFilter, earningsFrom, earningsTo, refreshTick]);
+
+  // Latest load date only: re-read on the market's rhythm (past dates never change).
+  useEffect(() => {
+    if (!priceMeta?.isLatest) return;
+    const t = setTimeout(() => setRefreshTick(n => n + 1), pollDelayMs({ session: priceMeta.session ?? 'closed', nextChangeAt: priceMeta.nextChangeAt }, POLL_MS));
+    return () => clearTimeout(t);
+  }, [priceMeta]);
 
   useEffect(() => {
     let filtered = stocks;
@@ -171,6 +203,16 @@ function QuadrantPageInner() {
                 <span className="text-xs text-gray-400">
                   Showing <strong className="text-gray-700">{filteredStocks.length}</strong> of <strong className="text-gray-700">{stocks.length}</strong> stocks
                 </span>
+                {priceMeta && (
+                  <span
+                    className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${priceMeta.source === 'live' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}
+                    title="Levels are measured against this price. Live prices are shared by all users and refresh about every 5 minutes during market hours."
+                  >
+                    {priceMeta.source === 'live' && `Live · ${etTime(priceMeta.asOf)}`}
+                    {priceMeta.source === 'last-close' && 'Last close'}
+                    {priceMeta.source === 'day-close' && `Close of ${tradeDate}`}
+                  </span>
+                )}
                 {hasActiveFilters && (
                   <span className="text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">Active</span>
                 )}
@@ -321,8 +363,8 @@ function QuadrantPageInner() {
                       <tr>
                         <th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Symbol</th>
                         {show('name') && (<th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Name</th>)}
-                        {show('ltp') && (<th className="px-4 py-2 text-right text-[10px] font-semibold text-gray-500 uppercase">LTP</th>)}
-                        {show('close') && (<th className="px-4 py-2 text-right text-[10px] font-semibold text-gray-500 uppercase">Close</th>)}
+                        {show('ltp') && (<th className="px-4 py-2 text-right text-[10px] font-semibold text-gray-500 uppercase" title="Live during market hours, otherwise that day's close">Price</th>)}
+                        {show('close') && (<th className="px-4 py-2 text-right text-[10px] font-semibold text-gray-500 uppercase" title="The close stored in the EOD table: the session before the load date">Prev close</th>)}
                         {show('level') && (<th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Closest Level</th>)}
                         {show('distance') && (<th className="px-4 py-2 text-right text-[10px] font-semibold text-gray-500 uppercase">Distance</th>)}
                         {earningsEnabled && show('earnings') && <th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Next Earnings</th>}
@@ -343,7 +385,7 @@ function QuadrantPageInner() {
                             {(stock as any).name || '—'}
                           </td>)}
                           {show('ltp') && (<td className="px-4 py-2 text-xs text-right font-mono">
-                            {stock.livePrice != null ? `$${stock.livePrice.toFixed(2)}` : '—'}
+                            {stock.refPrice != null && stock.refSource !== 'stored' ? `$${stock.refPrice.toFixed(2)}` : '—'}
                           </td>)}
                           {show('close') && (<td className="px-4 py-2 text-xs text-right font-mono text-gray-500">${stock.close.toFixed(2)}</td>)}
                           {show('level') && (<td className="px-4 py-2 text-xs">
@@ -394,8 +436,8 @@ function QuadrantPageInner() {
 const TABLE_COLUMNS: ColumnMeta[] = [
   { id: 'symbol', label: 'Symbol', required: true },
   { id: 'name', label: 'Name' },
-  { id: 'ltp', label: 'LTP' },
-  { id: 'close', label: 'Close' },
+  { id: 'ltp', label: 'Price' },
+  { id: 'close', label: 'Prev close' },
   { id: 'level', label: 'Closest Level' },
   { id: 'distance', label: 'Distance' },
   { id: 'earnings', label: 'Next Earnings' },
