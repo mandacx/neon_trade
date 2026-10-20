@@ -24,6 +24,12 @@ export const FEATURE_TELEGRAM_ALERTS = 'telegram_alerts';
 export const FEATURE_EARNINGS = 'earnings';
 /** Options OI tracker page and private tracked option positions (lib/oiTracker.ts). */
 export const FEATURE_OI_TRACKER = 'oi_tracker';
+/**
+ * A *restriction*, not a grant: a plan (or user override) that has it only sees monthly and
+ * quarterly expiries. Weekly expiries are hidden and rejected server-side (lib/expiryAccess.ts).
+ * No plan has it by default, so nothing changes until an admin ticks it in the Plans editor.
+ */
+export const FEATURE_STANDARD_EXPIRY_ONLY = 'standard_expiry_only';
 
 /** True if `features` (a plan's feature-code list) includes `code`. */
 export function hasFeature(features: string[] | undefined | null, code: string): boolean {
@@ -34,7 +40,7 @@ export function hasFeature(features: string[] | undefined | null, code: string):
  * All known feature codes + display labels, for the admin plan editor, the
  * /upgrade comparison table and the /profile entitlement list.
  */
-export const ALL_FEATURES: Array<{ code: string; label: string }> = [
+export const ALL_FEATURES: Array<{ code: string; label: string; restriction?: boolean }> = [
   { code: FEATURE_STOCK_ANALYSIS, label: 'Charts & Stock Analysis' },
   { code: FEATURE_LEVELS, label: 'Price Levels (live)' },
   { code: FEATURE_SCAN_ALERTS_LATEST, label: 'Latest Scan Alerts' },
@@ -45,6 +51,7 @@ export const ALL_FEATURES: Array<{ code: string; label: string }> = [
   { code: FEATURE_TELEGRAM_ALERTS, label: 'Telegram Alerts' },
   { code: FEATURE_EARNINGS, label: 'Earnings Dates & Results' },
   { code: FEATURE_OI_TRACKER, label: 'Options OI Tracker' },
+  { code: FEATURE_STANDARD_EXPIRY_ONLY, label: 'Monthly & quarterly expiries only (no weeklies)', restriction: true },
 ];
 
 // Route gating lives in exactly two places: middleware.ts (login) and the

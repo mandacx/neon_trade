@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireFeatureApi } from '@/lib/routeGuards';
 import { FEATURE_EARNINGS, FEATURE_PERFORMANCE, hasFeature } from '@/lib/features';
 import { getWatchlistDetail } from '@/lib/watchlists';
+import { standardExpiryOnly } from '@/lib/expiryAccess';
 import { getExpiryPerformanceForSymbols, tagEarningsInWindow } from '@/lib/alertPerformance';
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string; symbol: string }> }) {
@@ -20,7 +21,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const expiryCountParam = Number(request.nextUrl.searchParams.get('expiryCount'));
   const expiryCount = Number.isFinite(expiryCountParam) && expiryCountParam > 0 ? expiryCountParam : undefined;
 
-  const baseRows = await getExpiryPerformanceForSymbols([upperSymbol], { expiryCount });
+  const baseRows = await getExpiryPerformanceForSymbols([upperSymbol], { expiryCount, standardOnly: standardExpiryOnly(ctx.features) });
   const earningsEnabled = hasFeature(ctx.features, FEATURE_EARNINGS);
   const rows = earningsEnabled ? await tagEarningsInWindow(baseRows) : baseRows;
   return NextResponse.json({ success: true, data: { symbol: upperSymbol, rows, earningsEnabled } });

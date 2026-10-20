@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { guardOi, parseScreenParams, scopeWatchlist, serverError } from '@/lib/oiTrackerApi';
+import { guardOi, parseScreenParams, scopeExpiry, scopeWatchlist, serverError } from '@/lib/oiTrackerApi';
 import { getOiScreen } from '@/lib/oiTracker';
 
 export const dynamic = 'force-dynamic';
@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
   const params = parseScreenParams(request.nextUrl.searchParams);
   if (typeof params === 'string') return NextResponse.json({ success: false, error: params }, { status: 400 });
   try {
-    return NextResponse.json({ success: true, data: await getOiScreen(scopeWatchlist(params, ctx)) });
+    return NextResponse.json({ success: true, data: await getOiScreen(scopeExpiry(scopeWatchlist(params, ctx), ctx)) });
   } catch (error) {
     return serverError('screen', error);
   }

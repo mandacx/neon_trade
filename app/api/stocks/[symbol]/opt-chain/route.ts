@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { catalogLastSeen } from '@/lib/marketCatalog';
+import { getCurrentUserContext } from '@/lib/appUsers';
+import { expiryAllowed, WEEKLY_EXPIRY_ERROR } from '@/lib/expiryAccess';
 
 // Per-strike option-chain OI snapshot(s) from public.us_opt_chg_rpt — a
 // different, finer granularity than eod_usmkts_price's aggregate call/put OI
@@ -22,6 +24,12 @@ export async function GET(
     const expiry = request.nextUrl.searchParams.get('expiry');
     if (!expiry) {
       return NextResponse.json({ success: false, error: 'expiry query parameter is required' }, { status: 400 });
+    }
+
+    // Plans limited to monthly/quarterly expiries get no weekly chains (lib/expiryAccess.ts).
+    const ctx = await getCurrentUserContext();
+    if (!expiryAllowed(ctx.features, expiry)) {
+      return NextResponse.json(WEEKLY_EXPIRY_ERROR, { status: 403 });
     }
 
     const upperSymbol = symbol.toUpperCase();

@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getScanAlertsForSymbol } from '@/lib/scanAlerts';
+import { getCurrentUserContext } from '@/lib/appUsers';
+import { filterByExpiry } from '@/lib/expiryAccess';
 
 // Scan alerts for a single symbol, for annotating that stock's chart.
 export async function GET(
@@ -16,7 +18,9 @@ export async function GET(
       return NextResponse.json({ success: false, error: 'Symbol parameter is required' }, { status: 400 });
     }
 
-    const alerts = await getScanAlertsForSymbol(symbol, from, to);
+    const [ctx, allAlerts] = await Promise.all([getCurrentUserContext(), getScanAlertsForSymbol(symbol, from, to)]);
+    // Plans limited to monthly/quarterly expiries get no weekly-expiry markers (lib/expiryAccess.ts).
+    const alerts = filterByExpiry(ctx.features, allAlerts, a => a.expiryDate);
 
     return NextResponse.json({
       success: true,

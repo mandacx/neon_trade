@@ -4,6 +4,7 @@ import { sql } from '@/lib/db';
 import { getScanAlertsSince, TickerAlert } from '@/lib/scanAlerts';
 import { getWatchlistSymbols } from '@/lib/watchlists';
 import { sendTelegramMessage, isPermanentTelegramError } from '@/lib/telegram';
+import { isStandardExpiry } from '@/lib/expiryAccess';
 import { getLevelDisplayName, isUsMarketHours } from '@/lib/utils';
 import { getEarningsSummary } from '@/lib/earnings';
 import type { EarningsSummary } from '@/types/earnings';
@@ -23,6 +24,8 @@ interface Subscriber {
   tg_alerts: boolean;
   /** Has the `earnings` feature: gets the " · ER <date> before exp" suffix. */
   earnings: boolean;
+  /** Plan is limited to monthly/quarterly expiries: weekly-expiry alerts are not sent. */
+  std_only: boolean;
 }
 
 function sleep(ms: number) {
@@ -85,7 +88,8 @@ export async function GET(request: NextRequest) {
       SELECT s.user_id, s.watchlist_id, u.telegram_chat_id,
              c.last_alert_time::timestamp::text as last_alert_time, c.consecutive_failures,
              (e.features ? 'telegram_alerts') AS tg_alerts,
-             (e.features ? 'earnings') AS earnings
+             (e.features ? 'earnings') AS earnings,
+             (e.features ? 'standard_expiry_only') AS std_only
       FROM public.nt_telegram_alert_subscriptions s
       JOIN public.nt_app_user_profiles u ON u.user_id = s.user_id
       JOIN public.nt_telegram_alert_cursors c ON c.user_id = s.user_id
@@ -126,7 +130,8 @@ export async function GET(request: NextRequest) {
         // cursor — otherwise a later upgrade would blast the whole backlog.
         const matched = newForUser
           .filter(a => symbols.has(a.symbol))
-          .filter(() => sub.tg_alerts);
+          .filter(() => sub.tg_alerts)
+          .filter(a => !sub.std_only || isStandardExpiry(a.expiryDate));
 
         // Cursor advances to everything this user *considered*, matched or
         // not — prevents endless re-scanning of irrelevant rows and still

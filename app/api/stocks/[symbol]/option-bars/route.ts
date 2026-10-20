@@ -3,6 +3,8 @@ import { getOptionBars, getOptionTodaySnapshotBar, buildOccOptionSymbol, convert
 import { usTradingDayKey } from '@/lib/utils';
 import { format, subDays } from 'date-fns';
 import axios from 'axios';
+import { getCurrentUserContext } from '@/lib/appUsers';
+import { expiryAllowed, WEEKLY_EXPIRY_ERROR } from '@/lib/expiryAccess';
 
 // OHLCV bars for a single option contract, via Alpaca's Options Market Data
 // API (OCC symbol built from expiry+strike+optType) — see lib/alpaca.ts for
@@ -28,6 +30,11 @@ export async function GET(
     const strike = Number(strikeParam);
     if (!Number.isFinite(strike)) {
       return NextResponse.json({ success: false, error: 'strike must be numeric' }, { status: 400 });
+    }
+    // Plans limited to monthly/quarterly expiries get no weekly contract bars (lib/expiryAccess.ts).
+    const ctx = await getCurrentUserContext();
+    if (!expiryAllowed(ctx.features, expiry)) {
+      return NextResponse.json(WEEKLY_EXPIRY_ERROR, { status: 403 });
     }
 
     // "Today"/"yesterday" must be the US Eastern trading day, not the server's

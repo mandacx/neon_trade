@@ -7,6 +7,7 @@ import { getSessionUser, getUserContextFor } from '@/lib/appUsers';
 import { levelGate, levelAccessFor, LEVEL_RANGE_RATE, LEVEL_POINT_RATE, DELAYED_RANGE_DAYS } from '@/lib/levelAccess';
 import { recordHit, rateLimitKey, rateLimitHeaders } from '@/lib/rateLimit';
 import { applyTieredLimit } from '@/lib/rateLimitConfig';
+import { expiryAllowed, standardExpiryOnly, WEEKLY_EXPIRY_ERROR } from '@/lib/expiryAccess';
 
 export async function GET(
   request: NextRequest,
@@ -48,6 +49,12 @@ export async function GET(
       recordHit(rl.name, rlKey, rl.windowSeconds).catch(err => { console.error('rateLimit: counter unavailable, failing open', err); return null; }),
     ]);
     const gate = levelGate(ctx.features);
+    // Plans limited to monthly/quarterly expiries: a weekly is rejected, and "no expiry given"
+    // picks among the monthly/quarterly rows only (lib/expiryAccess.ts).
+    const stdOnly = standardExpiryOnly(ctx.features);
+    if (expiryDate && !expiryAllowed(ctx.features, expiryDate)) {
+      return NextResponse.json(WEEKLY_EXPIRY_ERROR, { status: 403 });
+    }
     const limit = await applyTieredLimit(hit, rl.name, rlKey, levelAccessFor(ctx.features) === 'latest');
     if (!limit.allowed) {
       return NextResponse.json(
@@ -121,7 +128,7 @@ export async function GET(
           LOW: 0,
         }));
       } else {
-        historicalData = await getHistoricalStockData(symbol, from, to);
+        historicalData = await getHistoricalStockData(symbol, from, to, stdOnly);
       }
 
       const processedData = historicalData.map(data => {
@@ -219,13 +226,13 @@ export async function GET(
         // Delayed viewer: fetch the newest row OUTSIDE the withheld window
         // rather than the latest row, so they see stale levels instead of a
         // blank panel.
-        stockData = await getStockDataAsOf(symbol, gate.meta.levelsWithheldAfter, expiryDate);
+        stockData = await getStockDataAsOf(symbol, gate.meta.levelsWithheldAfter, expiryDate, stdOnly);
       } else if (expiryDate) {
         // Fetch data for specific expiry date
         stockData = await getStockDataByExpiry(symbol, expiryDate);
       } else {
         // Fetch latest data
-        stockData = await getLatestStockData(symbol);
+        stockData = await getLatestStockData(symbol, stdOnly);
       }
 
       if (!stockData) {

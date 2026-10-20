@@ -34,6 +34,8 @@ export interface OiScreenParams {
   expiryTo?: string | null;
   expiries?: string[] | null;
   expiryKind?: ExpiryKind | null;
+  /** Monthly/quarterly (3rd Friday) expiries only; set from the viewer's plan (lib/expiryAccess.ts), never from the query string. */
+  standardOnly?: boolean;
   dteMin?: number | null;
   dteMax?: number | null;
   direction?: 'opened' | 'closed' | 'both';
@@ -175,6 +177,7 @@ function buildBase(p: OiScreenParams, loads: string[], sessions: string[], symbo
   if (p.expiries?.length) where.push(`r.expiry_dt = ANY(${$(p.expiries)}::date[])`);
   // 3rd Friday = monthly; of Mar/Jun/Sep/Dec = quarterly (same rule as the stock page's expiryKind()).
   const third = `(EXTRACT(DOW FROM r.expiry_dt) = 5 AND EXTRACT(DAY FROM r.expiry_dt) BETWEEN 15 AND 21)`;
+  if (p.standardOnly) where.push(third);
   if (p.expiryKind === 'weekly') where.push(`NOT ${third}`);
   if (p.expiryKind === 'monthly') where.push(third);
   if (p.expiryKind === 'quarterly') where.push(`${third} AND EXTRACT(MONTH FROM r.expiry_dt) IN (3, 6, 9, 12)`);

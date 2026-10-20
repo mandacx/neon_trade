@@ -57,11 +57,11 @@ export default async function ProfilePage() {
                 )}
                 <ul className="text-xs space-y-1 mt-2">
                   {ALL_FEATURES.map(f => {
-                    const on = ctx.features.includes(f.code);
+                    const on = f.restriction ? !ctx.features.includes(f.code) : ctx.features.includes(f.code);
                     return (
                       <li key={f.code} className="flex items-center gap-2">
                         <span className={on ? 'text-green-600' : 'text-gray-300'}>{on ? '✓' : '–'}</span>
-                        <span className={on ? 'text-gray-700' : 'text-gray-400'}>{f.label}</span>
+                        <span className={on ? 'text-gray-700' : 'text-gray-400'}>{f.restriction ? 'Weekly expiries' : f.label}</span>
                       </li>
                     );
                   })}

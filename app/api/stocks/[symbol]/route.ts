@@ -9,6 +9,7 @@ import { recordHit, rateLimitKey, rateLimitHeaders } from '@/lib/rateLimit';
 import { applyTieredLimit } from '@/lib/rateLimitConfig';
 import { FEATURE_EARNINGS, hasFeature } from '@/lib/features';
 import { getEarningsSummary } from '@/lib/earnings';
+import { standardExpiryOnly } from '@/lib/expiryAccess';
 
 export async function GET(
   request: NextRequest,
@@ -56,8 +57,8 @@ export async function GET(
     const earningsEnabled = hasFeature(ctx.features, FEATURE_EARNINGS);
     const [stockData, secRows, earningsMap] = await Promise.all([
       gate.meta.levelsWithheldAfter
-        ? getStockDataAsOf(symbol, gate.meta.levelsWithheldAfter)
-        : getLatestStockData(symbol),
+        ? getStockDataAsOf(symbol, gate.meta.levelsWithheldAfter, null, standardExpiryOnly(ctx.features))
+        : getLatestStockData(symbol, standardExpiryOnly(ctx.features)),
       getSecuritiesMeta([symbol.toUpperCase()]),
       earningsEnabled ? getEarningsSummary([symbol]) : Promise.resolve(null),
     ]);

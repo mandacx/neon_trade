@@ -7,6 +7,35 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-19 — Plan restriction: monthly & quarterly expiries only (no weeklies)
+
+Requested: let selected plans see only monthly and quarterly expiry data, switchable on and off. Decisions (asked): a **per-plan feature flag**, enforced **server-side on every expiry-aware route**.
+
+### Design
+
+- New feature code `standard_expiry_only` (`FEATURE_STANDARD_EXPIRY_ONLY`, `lib/features.ts`) is a *restriction*, not a grant: ticking it on a plan in `/admin/plans` (or granting it to a user in the user editor) limits them to monthly/quarterly expiries; unticking lifts it. **No plan has it by default, so nothing changes until an admin enables it.** `ALL_FEATURES` entries gained `restriction?: true`; `/upgrade` and `/profile` show it inverted as "Weekly expiries" (✓ when not restricted).
+- Rule (`lib/expiryAccess.ts`): standard = the 3rd Friday of a month (quarterlies are a subset), same as `expiryKind()`. A monthly moved to Thursday for a Friday holiday counts as weekly (as elsewhere in the app).
+- Enforcement: lists are filtered; an explicit weekly `?expiry=` is rejected with 403 (`WEEKLY_EXPIRY_ERROR`); "no expiry given" defaults pick among standard expiries only (SQL predicate `NOT $standardOnly OR (DOW=5 AND DAY BETWEEN 15 AND 21)`).
+
+### Changed
+
+- `lib/db.ts`: optional `standardOnly` on `getLatestStockData`, `getHistoricalStockData`, `getStockDataAsOf`, `getNearestExpiryLatestForSymbols`. `lib/scanAlerts.ts`: `standardOnly` on `getScanAlerts` and `getAlertsForSymbolsByExpiry` (also feeds watchlist performance). `lib/oiTracker.ts`: `standardOnly` in `buildBase` (set only by `scopeExpiry()` in `lib/oiTrackerApi.ts`, never from the query string).
+- Routes: stock `expiry-dates`, `levels`, details, `opt-chain`, `option-bars`, `scan-alerts` (chart markers); watchlist `levels`, `alerts`, `performance` (+ `[symbol]`); `earnings/levels`; `quadrant/data`; `scan-alerts/latest|historical`; `oi-tracker/screen|strategies|stock|meta` (incl. live chain and full-OI rows); **Telegram cron** (`std_only` per subscriber; weekly alerts are skipped but the cursor still advances, so lifting the restriction later does not blast a backlog). OI tracker page hides the "Weekly" filter when restricted.
+
+### Verified
+
+- `npx tsc --noEmit` clean; eslint on changed API/lib files: 0 errors.
+- The SQL predicate against the live DB (AAPL, recent rows): unrestricted lists weeklies and monthlies; restricted returns only 3rd Fridays (2026-10-16, 11-20, 12-18, ...).
+
+### Not verified / follow-ups
+
+- No signed-in end-to-end run with a restricted plan (routes not exercised over HTTP; UI not opened). Enable on a test plan and check the stock, quadrant, OI tracker pages and a 403 on a weekly `?expiry=`.
+- **Not restricted:** the public, CDN-cached `/api/home/data` (same data for everyone by design), and My tracked OI positions (a user's own entries). Say if either should be.
+- `getStockFullOi`-style callers outside the routes listed, and `us_opt_chg_rpt`/earnings *list* routes, were not found to expose expiry choice; unverified beyond a code search.
+- Anonymous visitors get the FREE plan's features, so the restriction applies to them if set on FREE.
+
+---
+
 ## 2026-10-18 — Quadrant reference prices: tested, and a cache bug fixed before release
 
 Tested the uncommitted quadrant price work from 2026-10-16 (entry below) before pushing it, including the parts that entry lists as unverified.

@@ -62,6 +62,8 @@ export interface ScanAlertQueryFilters {
   expiryDate?: string;
   futureExpiryOnly?: boolean;
   yearMonth?: string; // 'YYYY-MM', scopes to that calendar month of trade_date
+  /** Monthly/quarterly (3rd Friday) expiries only: plans with FEATURE_STANDARD_EXPIRY_ONLY. */
+  standardOnly?: boolean;
 }
 
 /**
@@ -119,6 +121,9 @@ export async function getScanAlerts(filters: ScanAlertQueryFilters): Promise<Sca
   }
   if (filters.futureExpiryOnly) {
     conditions.push(`expiry_dt >= CURRENT_DATE`);
+  }
+  if (filters.standardOnly) {
+    conditions.push(`(EXTRACT(DOW FROM expiry_dt) = 5 AND EXTRACT(DAY FROM expiry_dt) BETWEEN 15 AND 21)`);
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -344,6 +349,8 @@ export interface AlertsByExpiryOptions {
   /** Pin to one exact expiry_dt instead of the N-most-recent-distinct-expiries window — for the
    * watchlist-wide monthly-expiry toggle (see app/watchlists/page.tsx). Takes precedence over expiryCount. */
   expiryDate?: string;
+  /** Count only monthly/quarterly (3rd Friday) expiries among the N most recent. */
+  standardOnly?: boolean;
 }
 
 /** Alerts for a set of symbols, bounded to one exact expiry or the N most recent distinct expiry_dt values across that symbol set. */
@@ -370,6 +377,7 @@ export async function getAlertsForSymbolsByExpiry(symbols: string[], opts: Alert
           WITH recent_expiries AS (
             SELECT DISTINCT expiry_dt FROM public.intra_us_scanner_eod
             WHERE symbol = ANY(${upperSymbols})
+              AND (NOT ${!!opts.standardOnly}::boolean OR (EXTRACT(DOW FROM expiry_dt) = 5 AND EXTRACT(DAY FROM expiry_dt) BETWEEN 15 AND 21))
             ORDER BY expiry_dt DESC
             LIMIT ${Math.min(opts.expiryCount ?? 6, 24)}
           )

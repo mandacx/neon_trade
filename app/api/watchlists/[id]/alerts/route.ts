@@ -4,6 +4,7 @@ import { FEATURE_WATCHLISTS, FEATURE_LEVELS, FEATURE_EARNINGS, hasFeature } from
 import { getWatchlistSymbols } from '@/lib/watchlists';
 import { getAlertsForSymbolsByExpiry, redactTickerAlerts } from '@/lib/scanAlerts';
 import { getEarningsEvents } from '@/lib/earnings';
+import { expiryAllowed, standardExpiryOnly, WEEKLY_EXPIRY_ERROR } from '@/lib/expiryAccess';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,11 +28,14 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   }
 
   const expiry = request.nextUrl.searchParams.get('expiry');
+  if (expiry && !expiryAllowed(ctx.features, expiry)) {
+    return NextResponse.json(WEEKLY_EXPIRY_ERROR, { status: 403 });
+  }
   const earningsEnabled = hasFeature(ctx.features, FEATURE_EARNINGS);
   // Earnings events (next 14 days + last 7) ride along for the widget's
   // Earnings section — a separate Pro feature from the level alerts.
   const [alerts, earningsEvents] = await Promise.all([
-    getAlertsForSymbolsByExpiry(symbols, expiry ? { expiryDate: expiry } : { expiryCount: 3 }),
+    getAlertsForSymbolsByExpiry(symbols, expiry ? { expiryDate: expiry } : { expiryCount: 3, standardOnly: standardExpiryOnly(ctx.features) }),
     earningsEnabled ? getEarningsEvents(symbols, { aheadDays: 14, backDays: 7 }) : Promise.resolve([]),
   ]);
   const latest = [...alerts].sort((a, b) => (a.loadDateTime < b.loadDateTime ? 1 : -1)).slice(0, WIDGET_LIMIT);

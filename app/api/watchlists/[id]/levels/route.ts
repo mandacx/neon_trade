@@ -5,6 +5,7 @@ import { getWatchlistSymbols } from '@/lib/watchlists';
 import { getNearestExpiryLatestForSymbols, getStockDataForSymbolsAtExpiry } from '@/lib/db';
 import { calculateLevels, findClosestLevel } from '@/lib/calculations';
 import { levelGate } from '@/lib/levelAccess';
+import { expiryAllowed, standardExpiryOnly, WEEKLY_EXPIRY_ERROR } from '@/lib/expiryAccess';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,9 +27,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   }
 
   const expiry = request.nextUrl.searchParams.get('expiry');
+  if (expiry && !expiryAllowed(ctx.features, expiry)) {
+    return NextResponse.json(WEEKLY_EXPIRY_ERROR, { status: 403 });
+  }
   const stockRows = expiry
     ? await getStockDataForSymbolsAtExpiry(symbols, expiry)
-    : await getNearestExpiryLatestForSymbols(symbols);
+    : await getNearestExpiryLatestForSymbols(symbols, standardExpiryOnly(ctx.features));
   const gate = levelGate(ctx.features);
 
   const rows = stockRows.map(data => {

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { guardOi, parseScreenParams, serverError } from '@/lib/oiTrackerApi';
+import { guardOi, parseScreenParams, scopeExpiry, serverError } from '@/lib/oiTrackerApi';
+import { filterByExpiry, isStandardExpiry, standardExpiryOnly } from '@/lib/expiryAccess';
 import { getOiScreen, getStockFullOi, getStrategyRows, getOiLoadDates } from '@/lib/oiTracker';
 import { detectStrategies } from '@/lib/oiStrategies';
 import { getOptionChainSnapshots, getSnapshotsMulti, type AlpacaOptionSnapshot } from '@/lib/alpaca';
@@ -49,7 +50,7 @@ function toLive(contract: string, s: AlpacaOptionSnapshot): LiveOption {
  * indices) or the call fails.
  */
 export async function GET(request: NextRequest, { params }: { params: Promise<{ symbol: string }> }) {
-  const { blocked } = await guardOi(true);
+  const { ctx, blocked } = await guardOi(true);
   if (blocked) return blocked;
   const symbol = (await params).symbol.toUpperCase();
   if (!/^[A-Z][A-Z0-9.\-]{0,9}$/.test(symbol)) return NextResponse.json({ success: false, error: 'Invalid symbol' }, { status: 400 });
@@ -64,10 +65,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const parsed = parseScreenParams(sp);
   if (typeof parsed === 'string') return NextResponse.json({ success: false, error: parsed }, { status: 400 });
   // The modal filters inside its own tables; only dates, expiry and type narrow the query.
-  const base = {
+  const base = scopeExpiry({
     from: parsed.from, to: parsed.to, symbols: [symbol], optType: parsed.optType,
     expiryFrom: parsed.expiryFrom, expiryTo: parsed.expiryTo, expiries: parsed.expiries, expiryKind: parsed.expiryKind,
-  };
+  }, ctx);
   const tol = Math.min(10, Math.max(0.5, Number(sp.get('tol')) || 3));
   const minLeg = Math.max(101, Math.trunc(Number(sp.get('minLeg')) || 200));
   const today = etDateOf(Date.now());
@@ -87,7 +88,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const chainKeys = Object.keys(chain);
     let live: { contracts: Record<string, LiveOption>; top: LiveOption[]; count: number } | null = null;
     if (chainKeys.length) {
-      const all = chainKeys.map(k => toLive(k, chain[k]));
+      // OCC symbol = root + YYMMDD + C/P + 8-digit strike, so the expiry is the 6 digits before the last 9 characters.
+      const occExpiry = (c: string) => `20${c.slice(-15, -13)}-${c.slice(-13, -11)}-${c.slice(-11, -9)}`;
+      const all = chainKeys
+        .filter(k => !standardExpiryOnly(ctx.features) || isStandardExpiry(occExpiry(k)))
+        .map(k => toLive(k, chain[k]));
       const inReport = new Set((contracts.rows as OiContractRow[]).map(r => r.contract));
       live = {
         contracts: Object.fromEntries(all.filter(o => inReport.has(o.contract)).map(o => [o.contract, o])),
@@ -112,7 +117,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         byExpiry: byExpiry.rows as OiGroupRow[],
         byStrike: byStrike.rows as OiGroupRow[],
         byDate: byDate.rows as OiGroupRow[],
-        fullOi,
+        fullOi: { ...fullOi, rows: filterByExpiry(ctx.features, fullOi.rows, r => r.expiry) },
         strategies: detectStrategies(stratRows, tol, minLeg).slice(0, 200),
         tol,
         minLeg,

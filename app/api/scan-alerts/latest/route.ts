@@ -5,6 +5,7 @@ import { requireFeatureApi } from '@/lib/routeGuards';
 import { hasFeature, FEATURE_EARNINGS, FEATURE_LEVELS, FEATURE_SCAN_ALERTS_LATEST, FEATURE_WATCHLISTS } from '@/lib/features';
 import { earningsBadge, getEarningsSummary } from '@/lib/earnings';
 import { getWatchlistsForUser, getWatchlistSymbols } from '@/lib/watchlists';
+import { expiryAllowed, filterExpiries, standardExpiryOnly, WEEKLY_EXPIRY_ERROR } from '@/lib/expiryAccess';
 
 // Latest scan alerts: always scoped to expiry_dt >= today, per the "future dated
 // expiries only" requirement for this page. `expiry` further narrows to one date.
@@ -29,14 +30,17 @@ export async function GET(request: NextRequest) {
         getSecuritiesFilterOptions(),
         watchlistsEnabled ? getWatchlistsForUser(ctx.userId) : Promise.resolve([]),
       ]);
-      return NextResponse.json({ success: true, data: { tradeDates, expiryDates, filterOptions, watchlists } });
+      return NextResponse.json({ success: true, data: { tradeDates, expiryDates: filterExpiries(ctx.features, expiryDates), filterOptions, watchlists } });
     }
 
     const tradeDate = searchParams.get('tradeDate') || (await getLatestScanTradeDate()) || undefined;
     const expiryDate = searchParams.get('expiry') || undefined;
+    if (expiryDate && !expiryAllowed(ctx.features, expiryDate)) {
+      return NextResponse.json(WEEKLY_EXPIRY_ERROR, { status: 403 });
+    }
 
     const [allAlerts, watchlistSymbols] = await Promise.all([
-      getScanAlerts({ tradeDate, expiryDate, futureExpiryOnly: true }),
+      getScanAlerts({ tradeDate, expiryDate, futureExpiryOnly: true, standardOnly: standardExpiryOnly(ctx.features) }),
       watchlistId && watchlistsEnabled ? getWatchlistSymbols(watchlistId, ctx.userId) : Promise.resolve(null),
     ]);
     // Restrict to a watchlist's symbols first, so the meta/earnings lookups and

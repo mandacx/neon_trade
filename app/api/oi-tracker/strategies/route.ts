@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { guardOi, parseScreenParams, scopeWatchlist, serverError } from '@/lib/oiTrackerApi';
+import { guardOi, parseScreenParams, scopeExpiry, scopeWatchlist, serverError } from '@/lib/oiTrackerApi';
 import { getStrategyRows } from '@/lib/oiTracker';
 import { detectStrategies } from '@/lib/oiStrategies';
 
@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
   const tol = Math.min(10, Math.max(0.5, Number(sp.get('tol')) || 3));
   const minLeg = Math.max(101, Math.trunc(Number(sp.get('minLeg')) || 500));
   try {
-    const rows = await getStrategyRows(scopeWatchlist({ ...params, minLeg }, ctx));
+    const rows = await getStrategyRows(scopeExpiry(scopeWatchlist({ ...params, minLeg }, ctx), ctx));
     const all = detectStrategies(rows, tol, minLeg);
     return NextResponse.json({
       success: true,

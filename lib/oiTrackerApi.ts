@@ -5,6 +5,7 @@
 import { NextResponse } from 'next/server';
 import { requireFeatureApi } from '@/lib/routeGuards';
 import { FEATURE_OI_TRACKER, FEATURE_WATCHLISTS, hasFeature } from '@/lib/features';
+import { standardExpiryOnly } from '@/lib/expiryAccess';
 import { checkRateLimit, rateLimitHeaders } from '@/lib/rateLimit';
 import { resolveLimit } from '@/lib/rateLimitConfig';
 import type { CurrentUserContext } from '@/lib/appUsers';
@@ -88,6 +89,11 @@ export function parseScreenParams(sp: URLSearchParams): OiScreenParams | string 
 export function scopeWatchlist<T extends { watchlistId?: string | null; userId?: string | null }>(params: T, ctx: CurrentUserContext): T {
   if (!params.watchlistId || !hasFeature(ctx.features, FEATURE_WATCHLISTS)) return { ...params, watchlistId: null };
   return { ...params, userId: ctx.userId };
+}
+
+/** Restrict a query to monthly/quarterly expiries when the viewer's plan says so (the query string cannot lift it). */
+export function scopeExpiry<T extends object>(params: T, ctx: CurrentUserContext): T & { standardOnly?: boolean } {
+  return standardExpiryOnly(ctx.features) ? { ...params, standardOnly: true } : params;
 }
 
 export function serverError(tag: string, error: unknown) {

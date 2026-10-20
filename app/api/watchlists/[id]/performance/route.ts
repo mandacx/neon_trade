@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireFeatureApi } from '@/lib/routeGuards';
 import { FEATURE_EARNINGS, FEATURE_PERFORMANCE, hasFeature } from '@/lib/features';
 import { getWatchlistDetail } from '@/lib/watchlists';
+import { standardExpiryOnly } from '@/lib/expiryAccess';
 import { getExpiryPerformanceForSymbols, summarizePerformanceRows, tagEarningsInWindow, splitByEarnings } from '@/lib/alertPerformance';
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -15,7 +16,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const expiryCountParam = Number(request.nextUrl.searchParams.get('expiryCount'));
   const expiryCount = Number.isFinite(expiryCountParam) && expiryCountParam > 0 ? expiryCountParam : undefined;
 
-  const baseRows = await getExpiryPerformanceForSymbols(watchlist.symbols, { expiryCount });
+  const baseRows = await getExpiryPerformanceForSymbols(watchlist.symbols, { expiryCount, standardOnly: standardExpiryOnly(ctx.features) });
   // Earnings (Pro): tag alerts whose window contained a report, and split the
   // stats — do levels hold through earnings as well as without?
   const earningsEnabled = hasFeature(ctx.features, FEATURE_EARNINGS);

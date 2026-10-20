@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getExpiryDates } from '@/lib/db';
+import { getCurrentUserContext } from '@/lib/appUsers';
+import { filterExpiries, standardExpiryOnly } from '@/lib/expiryAccess';
 
 export async function GET(
   request: NextRequest,
@@ -22,17 +24,20 @@ export async function GET(
     const all = searchParams.get('all') === 'true';
     const historical = searchParams.get('historical') === 'true';
 
-    const [expiryDates, historicalExpiryDates] = await Promise.all([
+    const [ctx, expiryDates, historicalExpiryDates] = await Promise.all([
+      getCurrentUserContext(),
       getExpiryDates(symbol, { historical: historical && !all }),
       all ? getExpiryDates(symbol, { historical: true }) : Promise.resolve(undefined),
     ]);
 
+    // Plans limited to monthly/quarterly expiries never see the weeklies (lib/expiryAccess.ts).
     return NextResponse.json({
       success: true,
       data: {
         symbol: symbol.toUpperCase(),
-        expiryDates,
-        ...(historicalExpiryDates ? { historicalExpiryDates } : {}),
+        expiryDates: filterExpiries(ctx.features, expiryDates),
+        ...(historicalExpiryDates ? { historicalExpiryDates: filterExpiries(ctx.features, historicalExpiryDates) } : {}),
+        standardExpiryOnly: standardExpiryOnly(ctx.features),
       },
     });
   } catch (error) {

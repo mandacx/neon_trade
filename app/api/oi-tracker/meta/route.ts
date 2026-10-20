@@ -6,6 +6,7 @@ import { getSecuritiesFilterOptions } from '@/lib/securitiesFilters';
 import { sql } from '@/lib/db';
 import { getWatchlistsForUser } from '@/lib/watchlists';
 import { FEATURE_WATCHLISTS, hasFeature } from '@/lib/features';
+import { filterExpiries, standardExpiryOnly } from '@/lib/expiryAccess';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,7 +29,7 @@ export async function GET() {
     ]);
     return NextResponse.json({
       success: true,
-      data: { loadDates, latest: loadDates[0] ?? null, expiries, filters, watchlists, maxLoads: MAX_LOADS, maxLoadsContract: MAX_LOADS_CONTRACT },
+      data: { loadDates, latest: loadDates[0] ?? null, expiries: filterExpiries(ctx.features, expiries), standardExpiryOnly: standardExpiryOnly(ctx.features), filters, watchlists, maxLoads: MAX_LOADS, maxLoadsContract: MAX_LOADS_CONTRACT },
     });
   } catch (error) {
     return serverError('meta', error);

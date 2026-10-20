@@ -48,7 +48,7 @@ function sanitizeStockData(data: any): StockData {
 /**
  * Get latest stock data for a symbol
  */
-export async function getLatestStockData(symbol: string): Promise<StockData | null> {
+export async function getLatestStockData(symbol: string, standardOnly = false): Promise<StockData | null> {
   try {
     const result = await sql`
       SELECT 
@@ -79,6 +79,7 @@ export async function getLatestStockData(symbol: string): Promise<StockData | nu
       -- (~3s) for a ticker we don't have. Symbols are stored uppercase, so
       -- the results are identical.
       WHERE upper(symbol) = ${symbol.toUpperCase()}
+        AND (NOT ${standardOnly}::boolean OR (EXTRACT(DOW FROM expiry_dt) = 5 AND EXTRACT(DAY FROM expiry_dt) BETWEEN 15 AND 21))
       ORDER BY trade_date DESC
       LIMIT 1
     `;
@@ -100,7 +101,8 @@ export async function getLatestStockData(symbol: string): Promise<StockData | nu
 export async function getHistoricalStockData(
   symbol: string,
   fromDate: string,
-  toDate: string
+  toDate: string,
+  standardOnly = false
 ): Promise<StockData[]> {
   try {
     const result = await sql`
@@ -127,6 +129,7 @@ export async function getHistoricalStockData(
       FROM public.eod_usmkts_price
       WHERE symbol = ${symbol.toUpperCase()}
         AND trade_date BETWEEN ${fromDate} AND ${toDate}
+        AND (NOT ${standardOnly}::boolean OR (EXTRACT(DOW FROM expiry_dt) = 5 AND EXTRACT(DAY FROM expiry_dt) BETWEEN 15 AND 21))
       ORDER BY trade_date ASC
     `;
 
@@ -142,7 +145,7 @@ export async function getHistoricalStockData(
  * delayed (non-Pro) viewers a stale-but-real row instead of nulling out a
  * blocked latest row (see lib/levelAccess.ts).
  */
-export async function getStockDataAsOf(symbol: string, asOf: string, expiryDate?: string | null): Promise<StockData | null> {
+export async function getStockDataAsOf(symbol: string, asOf: string, expiryDate?: string | null, standardOnly = false): Promise<StockData | null> {
   try {
     const result = expiryDate
       ? await sql`
@@ -200,6 +203,7 @@ export async function getStockDataAsOf(symbol: string, asOf: string, expiryDate?
           -- primary key covers symbol + expiry_dt + trade_date.)
           WHERE upper(symbol) = ${symbol.toUpperCase()}
             AND trade_date <= ${asOf}::date
+            AND (NOT ${standardOnly}::boolean OR (EXTRACT(DOW FROM expiry_dt) = 5 AND EXTRACT(DAY FROM expiry_dt) BETWEEN 15 AND 21))
           ORDER BY trade_date DESC
           LIMIT 1
         `;
@@ -502,7 +506,7 @@ export async function getStockDataByExpiry(symbol: string, expiryDate: string): 
  * contract). One query for the whole symbol set rather than N single-symbol
  * calls.
  */
-export async function getNearestExpiryLatestForSymbols(symbols: string[]): Promise<StockData[]> {
+export async function getNearestExpiryLatestForSymbols(symbols: string[], standardOnly = false): Promise<StockData[]> {
   if (symbols.length === 0) return [];
   const upper = symbols.map(s => s.toUpperCase());
   try {
@@ -511,6 +515,7 @@ export async function getNearestExpiryLatestForSymbols(symbols: string[]): Promi
         SELECT symbol, MIN(expiry_dt) AS expiry_dt
         FROM public.eod_usmkts_price
         WHERE symbol = ANY(${upper}) AND expiry_dt >= CURRENT_DATE
+          AND (NOT ${standardOnly}::boolean OR (EXTRACT(DOW FROM expiry_dt) = 5 AND EXTRACT(DAY FROM expiry_dt) BETWEEN 15 AND 21))
         GROUP BY symbol
       ),
       ranked AS (

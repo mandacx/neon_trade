@@ -81,11 +81,11 @@ export default async function UpgradePage({ searchParams }: { searchParams: Prom
 
                   <ul className="mt-3 space-y-1 text-xs">
                     {ALL_FEATURES.map(f => {
-                      const on = plan.features.includes(f.code);
+                      const on = f.restriction ? !plan.features.includes(f.code) : plan.features.includes(f.code);
                       return (
                         <li key={f.code} className="flex items-start gap-2">
                           <span className={on ? 'text-green-600' : 'text-gray-300'}>{on ? '✓' : '–'}</span>
-                          <span className={on ? 'text-gray-700' : 'text-gray-400'}>{f.label}</span>
+                          <span className={on ? 'text-gray-700' : 'text-gray-400'}>{f.restriction ? 'Weekly expiries' : f.label}</span>
                         </li>
                       );
                     })}

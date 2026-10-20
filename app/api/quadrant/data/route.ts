@@ -10,6 +10,7 @@ import { FEATURE_EARNINGS, FEATURE_QUADRANT, FEATURE_WATCHLISTS, hasFeature } fr
 import { earningsBadge, getEarningsSummary, todayET } from '@/lib/earnings';
 import { EARNINGS_FILTER_OPTIONS, earningsFilterMatches, type EarningsFilter } from '@/lib/earningsFilter';
 import { getWatchlistsForUser, getWatchlistSymbols } from '@/lib/watchlists';
+import { expiryAllowed, filterByExpiry, filterExpiries, WEEKLY_EXPIRY_ERROR } from '@/lib/expiryAccess';
 
 export async function GET(request: NextRequest) {
   const { ctx, blocked } = await requireFeatureApi(FEATURE_QUADRANT);
@@ -52,7 +53,7 @@ export async function GET(request: NextRequest) {
         success: true,
         data: {
           tradeDates,
-          expiryDates,
+          expiryDates: filterExpiries(ctx.features, expiryDates),
           filterOptions,
           watchlists,
           earningsEnabled,
@@ -63,7 +64,10 @@ export async function GET(request: NextRequest) {
     // The stock rows and the latest-date check are independent, as are the
     // live snapshots and the securities metadata below — each pair goes out
     // together instead of as four sequential round trips.
-    const [stocksData, [latestDate]] = await Promise.all([
+    if (expiryDate && !expiryAllowed(ctx.features, expiryDate)) {
+      return NextResponse.json(WEEKLY_EXPIRY_ERROR, { status: 403 });
+    }
+    const [rawStocksData, [latestDate]] = await Promise.all([
       date && expiryDate
         ? getAllStocksByDateAndExpiry(date, expiryDate)
         : date
@@ -71,6 +75,9 @@ export async function GET(request: NextRequest) {
           : getAllStocksLatest(),
       date ? getAvailableDates(1) : Promise.resolve([] as string[]),
     ]);
+
+    // Plans limited to monthly/quarterly expiries only see those rows (lib/expiryAccess.ts).
+    const stocksData = filterByExpiry(ctx.features, rawStocksData, d => d.EXPIRY_DT);
 
     // Every level is measured against one reference price per stock:
     //   latest load date -> live (regular session, shared 5-min cache) or the last regular
