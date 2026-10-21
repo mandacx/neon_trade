@@ -7,6 +7,15 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-21 — Stock chart: Call Low and Put High lines
+
+Requested: plot call low and put high on the chart, current and historical, whenever data exists.
+
+- `components/charts/TVChart.tsx`: two more level line series (`call_low`, `put_high`, colours from `getLevelColor`), fed from each day's `sevenLevels` (already returned by the levels route, so no API change); values of 0 ("no data") are skipped like the other levels. The dashed price lines for the current levels also include these two, taken from the newest loaded day. They obey the existing level-isolate filter and "Fit levels" toggle.
+- **Verified:** `tsc` clean. **Not verified:** not viewed in a browser. The level chips below the chart still list only the 5 ladder levels (extended ones are in the tooltip and now on the chart).
+
+---
+
 ## 2026-10-21 — Historical expiry chart showed another expiry's levels in the crosshair tooltip
 
 Reported: with a past expiry (QQQ 2026-10-19) selected, the tooltip on the 2026-10-21 bar listed Algo Levels, and the level lines/labels did not match the Price Levels History table.

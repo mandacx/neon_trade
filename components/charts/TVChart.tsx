@@ -358,6 +358,9 @@ export default function TVChart({
       { name: 'put_call_int', color: '#EAB308', title: 'Put/Call Int' },
       { name: 'put_int',  color: '#F97316', title: 'Put Int'   },
       { name: 'put_low',  color: '#EF4444', title: 'Put Low'   },
+      // Extended levels (not part of the closest-level ladder), plotted whenever the DB has a value.
+      { name: 'call_low', color: getLevelColor('call_low'), title: 'Call Low' },
+      { name: 'put_high', color: getLevelColor('put_high'), title: 'Put High' },
     ];
     const newLevelSeries: Record<string, ISeriesApi<'Line'>> = {};
     LEVEL_CONFIGS.forEach(cfg => {
@@ -832,7 +835,12 @@ export default function TVChart({
     });
     priceLineRefs.current = [];
 
-    levels.forEach(level => {
+    // `levels` is the 5-level ladder; add the extended levels of the newest loaded day (the same row).
+    let newestDay = '';
+    historicalLevelsRef.current?.forEach((_, d) => { if (d > newestDay) newestDay = d; });
+    const extended = (historicalLevelsRef.current?.get(newestDay)?.sevenLevels ?? [])
+      .filter(l => l.name === 'call_low' || l.name === 'put_high') as unknown as LevelCalculation[];
+    [...levels, ...(levels.length > 0 ? extended : [])].forEach(level => {
       const priceValue = typeof level.price === 'string' ? parseFloat(level.price) : level.price;
 
       if (!priceValue || isNaN(priceValue) || priceValue === 0) return;
@@ -869,7 +877,7 @@ export default function TVChart({
       });
       priceLineRefs.current = [];
     };
-  }, [levels, closestLevel]);
+  }, [levels, closestLevel, historicalLevels]);
 
   // Populate historical level line series — day-level data, broadcast flat
   // across every bar within that trading day (same reasoning as OI above).
@@ -883,7 +891,7 @@ export default function TVChart({
     }
 
     const buckets: Record<string, { time: any; value: number }[]> = {
-      call_high: [], call_int: [], put_call_int: [], put_int: [], put_low: [],
+      call_high: [], call_int: [], put_call_int: [], put_int: [], put_low: [], call_low: [], put_high: [],
     };
 
     // Only days with a real level (> 0; the DB stores "no data" as 0) get a point, so each line
@@ -891,7 +899,12 @@ export default function TVChart({
     processedBars.forEach(bar => {
       const dayData = historicalLevels.get(bar.dayKey);
       if (!dayData) return;
-      dayData.levels.forEach(level => {
+      // The 5 ladder levels plus the extended call_low / put_high from the DB's full set.
+      const all = [
+        ...dayData.levels,
+        ...(dayData.sevenLevels ?? []).filter(l => l.name === 'call_low' || l.name === 'put_high'),
+      ];
+      all.forEach(level => {
         const price = typeof level.price === 'string' ? parseFloat(level.price) : level.price;
         if (buckets[level.name] && Number.isFinite(price) && price > 0) {
           buckets[level.name].push({ time: bar.time as any, value: price });
