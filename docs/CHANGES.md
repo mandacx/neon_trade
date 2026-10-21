@@ -7,6 +7,18 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-21 — Historical expiry chart showed another expiry's levels in the crosshair tooltip
+
+Reported: with a past expiry (QQQ 2026-10-19) selected, the tooltip on the 2026-10-21 bar listed Algo Levels, and the level lines/labels did not match the Price Levels History table.
+
+- **Verified (DB):** `eod_usmkts_price` has no QQQ rows for expiry 2026-10-19 after trade date 2026-10-19, and the 10-19 row (put/call int 713.16, call int 730.69, ...) matches the table. The tooltip's 745.49 / 730.22 / 710.40 therefore came from a different expiry.
+- **Cause (by code reading; the trigger was not reproduced):** the levels effect in `components/stock/StockAnalysis.tsx` replaced `historicalLevels` / `levels` / OI only on a successful response with a body. A non-OK response (e.g. the 429 from the 10-a-minute range limit when clicking through expiries), an exception, or an empty history left the previous expiry's data in state, and the chart kept using it.
+- **Fix:** `levelsExpiry` records which expiry the map was loaded for and the chart only gets the map while it equals the selected expiry; every failure path (non-OK, exception, empty history) now clears map, price-line levels, closest level and OI.
+- **Verified:** `tsc` and eslint clean. **Not verified:** not run in a browser.
+- **Not changed (by design):** the stored `close` for load date D is session D-1's close (see 2026-10-16 entry), so the 10-19 row's close (709.80) differs from the 10-19 candle's close.
+
+---
+
 ## 2026-10-21 — Securities refresh: market caps, tiers, and 66 symbols that had no `securities` row
 
 Requested: re-check which market-cap tier each stock belongs in; SPCX was missing from mega.

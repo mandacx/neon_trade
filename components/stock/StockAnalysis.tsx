@@ -63,6 +63,8 @@ interface LevelsCoverage { symbol: string; expiry: string; from: string; to: str
 const coversRange = (c: LevelsCoverage | null, symbol: string, expiry: string, from: string, to: string) =>
   !!c && c.symbol === symbol && c.expiry === expiry && from >= c.from && to <= c.to;
 
+const NO_LEVELS = new Map<string, LevelHistoryEntry>();
+
 const SEVEN_LEVEL_ORDER = ['put_low', 'put_int', 'put_call_int', 'call_int', 'call_high', 'call_low', 'put_high'];
 
 // Column registries for the two tables below; each choice is saved per user (account when
@@ -318,6 +320,9 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
   const [levels, setLevels] = useState<LevelCalculation[]>([]);
   const [closestLevel, setClosestLevel] = useState<string>('');
   const [historicalLevels, setHistoricalLevels] = useState<Map<string, LevelHistoryEntry>>(new Map());
+  // The expiry `historicalLevels` was loaded for. The chart only gets the map while it matches the selected
+  // expiry, so a failed or slow fetch can never leave another expiry's levels in the crosshair tooltip.
+  const [levelsExpiry, setLevelsExpiry] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   // True while the levels/OI panel is refetching for a newly-selected expiry —
@@ -568,6 +573,7 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
             });
 
             setHistoricalLevels(levelsMap);
+            setLevelsExpiry(selectedExpiryRef.current || expiryData.data.expiryDates[0]);
             levelsCoverageRef.current = { symbol, expiry: selectedExpiryRef.current || expiryData.data.expiryDates[0], from, to };
 
             const oiDataFromLevels = histLevelsData.data.history
@@ -630,6 +636,15 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
     let cancelled = false;
     setLevelsRefreshing(true);
 
+    const clearLevels = () => {
+      setHistoricalLevels(new Map());
+      setLevelsExpiry(selectedExpiry);
+      levelsCoverageRef.current = null;
+      setLevels([]);
+      setClosestLevel('');
+      setOiData([]);
+    };
+
     const fetchHistoricalLevels = async () => {
       try {
         const dates = ohlcData.map(d => d.date).sort();
@@ -664,6 +679,7 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
             });
 
             setHistoricalLevels(levelsMap);
+            setLevelsExpiry(selectedExpiry);
             levelsCoverageRef.current = { symbol, expiry: selectedExpiry, from, to };
 
             const oiDataFromLevels = levelsData.data.history
@@ -677,20 +693,19 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
 
             setOiData(oiDataFromLevels);
 
-            if (latestLevels) {
-              setLevels(latestLevels.calculated || []);
-              setClosestLevel(latestLevels.closestLevel);
-            }
+            // No row for this expiry in the window: show nothing rather than the previous expiry's levels.
+            setLevels(latestLevels ? latestLevels.calculated || [] : []);
+            setClosestLevel(latestLevels ? latestLevels.closestLevel : '');
           } else {
-            setHistoricalLevels(new Map());
-            levelsCoverageRef.current = null;
-            setLevels([]);
-            setClosestLevel('');
-            setOiData([]);
+            clearLevels();
           }
+        } else {
+          // e.g. 429 rate limit: the data held belongs to the previous expiry, so drop it.
+          clearLevels();
         }
       } catch (err) {
         console.error('Error fetching historical levels:', err);
+        if (!cancelled) clearLevels();
       } finally {
         if (!cancelled) setLevelsRefreshing(false);
       }
@@ -1410,7 +1425,7 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
                 oiData={chartOiData}
                 levels={displayLevels}
                 closestLevel={closestLevelName}
-                historicalLevels={historicalLevels}
+                historicalLevels={levelsExpiry === selectedExpiry ? historicalLevels : NO_LEVELS}
                 scanAlerts={scanAlerts}
                 earningsEvents={earningsHistory ?? undefined}
                 selectedExpiry={selectedExpiry}
