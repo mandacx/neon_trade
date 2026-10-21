@@ -7,6 +7,28 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-21 — Securities refresh: market caps, tiers, and 66 symbols that had no `securities` row
+
+Requested: re-check which market-cap tier each stock belongs in; SPCX was missing from mega.
+
+- **Cause (verified):** SPCX (and 65 other symbols on the latest EOD load) had no row in `public.securities`, so every cap/sector/industry filter ignored them. The table is a one-off yfinance load from 2026-04-20 (owned by the sister app's loader); nothing in this repo wrote `market_cap`/`market_cap_tier`.
+- **New:** `scripts/refresh-securities.mjs` (dry run by default, `--apply` writes) + `scripts/fetch-market-caps.py` (yfinance, 3 workers, retries on 429; needs `pip install yfinance`). Updates `market_cap` + `market_cap_tier` of existing rows, inserts missing symbols (id = uuid, market_id 1, source `yfinance`), never deletes, never touches indices/weights/earnings columns. Lookups that fail are skipped, so re-running is safe and idempotent.
+- **Tier cutoffs:** mega ≥ $200B, large ≥ $10B, mid ≥ $2B, small ≥ $300M, micro ≥ $50M, else nano. mega/large/mid fit the existing data exactly; the small/micro/nano boundaries are the usual convention, **the original loader's rule was not seen**.
+- **Result (verified by query):** SPCX inserted as mega ($2.1T); 66 rows inserted, 0 symbols on the latest EOD load are now missing from `securities`; ~27 existing stocks changed tier (e.g. PANW, DELL, TMO, CRWD, MRVL, TD large→mega; PEP, MCD, TMUS mega→large). Tier counts: mega 69, large 402, mid 121, small 17, micro 2, none 33.
+- **Not done / follow-ups:** 26 ETFs/indices/delisted names (SPX, NDX, TQQQ, SOXL, CMA, SNV, ...) and the 7 new ETFs have no market cap and keep a NULL tier. 9 lookups still failed on the last pass (FR, DAL, BLDR, MS, FIVE, SYF, COHR, BR, TMF), so those caps are from earlier passes; re-run to refresh. New rows have no `indices`, `sp500_weight` or `nasdaq100_weight`, and MANE has no name. The sister app's loader may overwrite these rows on its next run. The script is manual: no cron, and new listings will go missing again until it is re-run (a candidate for the `market-catalog` cron).
+
+---
+
+## 2026-10-21 — Quadrant chart: vertical drag-to-pan was inverted
+
+Reported: dragging the quadrant background moved the stocks the opposite way vertically (drag down, stocks go up).
+
+- **Cause** (`components/charts/QuadrantChart.tsx`, `onMouseMove`): the Y axis is a normal (non-inverted) numeric axis, so dragging down must shift the visible window up (`+ddy`); the code used `-ddy`. X was already correct (`-ddx`). The wheel-zoom code correctly treats Y as top = max, which is why only pan was wrong. The component is shared with the scan-alerts latest/historical pages, so they get the fix too.
+- **Fix:** Y pan now adds `ddy` to the domain.
+- **Verified:** by reading the code and axis setup only. **Not verified:** not run in a browser; please drag on `/quadrant` and a scan-alerts page to confirm the stocks follow the mouse in both directions.
+
+---
+
 ## 2026-10-19 — Plan restriction: monthly & quarterly expiries only (no weeklies)
 
 Requested: let selected plans see only monthly and quarterly expiry data, switchable on and off. Decisions (asked): a **per-plan feature flag**, enforced **server-side on every expiry-aware route**.
