@@ -245,7 +245,9 @@ export default function QuadrantChart({ data, onStockClick, height = 600, title 
     const ddx = (dx / plotW) * (d.x[1] - d.x[0]);
     const ddy = (dy / plotH) * (d.y[1] - d.y[0]);
     setXDomain(clampDomain([d.x[0] - ddx, d.x[1] - ddx], DEFAULT_X));
-    setYDomain(clampDomain([d.y[0] - ddy, d.y[1] - ddy], DEFAULT_Y));
+    // Y axis is not inverted (higher y = higher on screen), so dragging down moves
+    // the window up in data terms: the opposite sign to X.
+    setYDomain(clampDomain([d.y[0] + ddy, d.y[1] + ddy], DEFAULT_Y));
   };
   const endDrag = () => {
     dragRef.current = null;
