@@ -7,6 +7,7 @@ import type { EarningsResult } from '@/types/earnings';
 import type { ExtendedQuote } from '@/lib/quote';
 import type { MarketSession } from '@/lib/marketSession';
 import ExtendedMove from '@/components/ui/ExtendedMove';
+import { clampChartHeight, DEFAULT_CHART_PREFS, type ChartPrefs } from '@/lib/chartPrefs';
 
 const EARNINGS_OUTCOME_COLOR: Record<NonNullable<EarningsResult['epsOutcome']>, string> = {
   beat: '#16a34a',
@@ -104,6 +105,14 @@ interface TVChartProps {
   // the page's collapse control for the whole block.
   toolbarEnd?: ReactNode;
   height?: number;
+  // Saved chart settings (toggles, period, timeframe overlay, height), read once at mount: the page
+  // renders the chart only after they are loaded. Changes go out through onSettingsChange, "Reset
+  // chart" through onResetSettings (which also resets what the page owns: interval and expiry).
+  settings?: ChartPrefs;
+  onSettingsChange?: (patch: Partial<ChartPrefs>) => void;
+  onResetSettings?: () => void;
+  // Drag handle on the bottom edge to change the chart height (saved). Off for the fixed-height embedded chart.
+  resizable?: boolean;
   onLoadMore?: (direction: 'past' | 'future', firstVisibleTime: string, lastVisibleTime: string) => void;
   isLoadingMore?: boolean;
 }
@@ -145,10 +154,14 @@ export default function TVChart({
   companyName,
   chips,
   height = 500,
+  settings,
+  onSettingsChange,
+  onResetSettings,
+  resizable = false,
   onLoadMore,
   isLoadingMore = false,
 }: TVChartProps) {
-  const [intervalsOpen, setIntervalsOpen] = useState(true);
+  const [intervalsOpen, setIntervalsOpen] = useState(settings?.intervalsOpen ?? true);
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
   const ohlcDisplayRef = useRef<HTMLDivElement>(null);
@@ -169,13 +182,22 @@ export default function TVChart({
   const earningsByDateRef = useRef<Map<string, EarningsResult>>(new Map());
   const dayKeyByTimeRef = useRef<Map<number, string>>(new Map());
   const [isLoading, setIsLoading] = useState(true);
-  const [selectedPeriod, setSelectedPeriod] = useState<string>('ALL');
-  const [showPrice, setShowPrice] = useState(true);
-  const [showOI, setShowOI] = useState(true);
+  const [selectedPeriod, setSelectedPeriod] = useState<string>(settings?.period ?? 'ALL');
+  const selectedPeriodRef = useRef(selectedPeriod);
+  selectedPeriodRef.current = selectedPeriod;
+  const applyPeriodRef = useRef<(period: string) => void>(() => {});
+  const [showPrice, setShowPrice] = useState(settings?.showPrice ?? true);
+  const [showOI, setShowOI] = useState(settings?.showOI ?? true);
   // Off: the price scale follows the visible candles' high/low only, so a far-away
   // level (often Put Low / Call High) can't squash the candles. On: levels widen it.
-  const [fitLevels, setFitLevels] = useState(false);
-  const fitLevelsRef = useRef(false);
+  const [fitLevels, setFitLevels] = useState(settings?.fitLevels ?? false);
+  const fitLevelsRef = useRef(settings?.fitLevels ?? false);
+  // "Alt" on: Call Low and Put High are hidden (lines, dashed price lines and the crosshair tooltip).
+  const [hideExtended, setHideExtended] = useState(settings?.hideExtended ?? false);
+  const hideExtendedRef = useRef(hideExtended);
+  hideExtendedRef.current = hideExtended;
+  const [chartHeight, setChartHeight] = useState(resizable && settings ? settings.height : height);
+  const persist = (patch: Partial<ChartPrefs>) => onSettingsChange?.(patch);
   const [activeLevelFilter, setActiveLevelFilter] = useState<string | null>(null);
   const [isEnlarged, setIsEnlarged] = useState(false);
   const loadingMoreRef = useRef(false);
@@ -369,6 +391,8 @@ export default function TVChart({
         lineWidth: 1,
         lineType: 2, // curved; days without data are simply skipped, the line runs to the next point
         title: cfg.title,
+        // A rebuilt chart (e.g. after an interval switch) must start with "Alt" honoured.
+        visible: !(hideExtendedRef.current && (cfg.name === 'call_low' || cfg.name === 'put_high')),
         priceScaleId: 'right',
         lastValueVisible: true,
         priceLineVisible: false,
@@ -505,7 +529,9 @@ export default function TVChart({
         if (historicalData && historicalData.levels && historicalData.levels.length > 0) {
           dateLevels = historicalData.levels;
           dateClosestLevel = historicalData.closestLevel;
-          dateExtendedLevels = (historicalData.sevenLevels ?? []).filter(l => l.name === 'put_high' || l.name === 'call_low');
+          dateExtendedLevels = hideExtendedRef.current
+            ? []
+            : (historicalData.sevenLevels ?? []).filter(l => l.name === 'put_high' || l.name === 'call_low');
           hasHistoricalData = true;
         }
       }
@@ -757,7 +783,10 @@ export default function TVChart({
     fittedRangeRef.current = first === null ? null : { first, last: last as number };
     const replaced = first !== null && (!prev || first > prev.first || (last as number) < prev.last);
     if (replaced && chartRef.current) {
-      fitBarsCapped(chartRef.current, processedBars.length);
+      // Re-apply the chosen period (1M, 3M, ...), not just "all", so the highlighted button matches the
+      // view after a new symbol / interval, and the saved period applies on open.
+      if (selectedPeriodRef.current === 'ALL') fitBarsCapped(chartRef.current, processedBars.length);
+      else applyPeriodRef.current(selectedPeriodRef.current);
     }
   }, [processedBars, volumeByTime, isLoading, isLoadingMore, showPrice]);
 
@@ -840,7 +869,7 @@ export default function TVChart({
     historicalLevelsRef.current?.forEach((_, d) => { if (d > newestDay) newestDay = d; });
     const extended = (historicalLevelsRef.current?.get(newestDay)?.sevenLevels ?? [])
       .filter(l => l.name === 'call_low' || l.name === 'put_high') as unknown as LevelCalculation[];
-    [...levels, ...(levels.length > 0 ? extended : [])].forEach(level => {
+    [...levels, ...(levels.length > 0 && !hideExtended ? extended : [])].forEach(level => {
       const priceValue = typeof level.price === 'string' ? parseFloat(level.price) : level.price;
 
       if (!priceValue || isNaN(priceValue) || priceValue === 0) return;
@@ -877,7 +906,7 @@ export default function TVChart({
       });
       priceLineRefs.current = [];
     };
-  }, [levels, closestLevel, historicalLevels]);
+  }, [levels, closestLevel, historicalLevels, hideExtended]);
 
   // Populate historical level line series — day-level data, broadcast flat
   // across every bar within that trading day (same reasoning as OI above).
@@ -1030,9 +1059,10 @@ export default function TVChart({
   useEffect(() => {
     const refs = levelSeriesRefs.current;
     Object.entries(refs).forEach(([name, s]) => {
-      s.applyOptions({ visible: activeLevelFilter === null || activeLevelFilter === name });
+      const hiddenByAlt = hideExtended && (name === 'call_low' || name === 'put_high');
+      s.applyOptions({ visible: !hiddenByAlt && (activeLevelFilter === null || activeLevelFilter === name) });
     });
-  }, [activeLevelFilter]);
+  }, [activeLevelFilter, hideExtended]);
 
   // Handle visibility toggles
   useEffect(() => {
@@ -1110,6 +1140,44 @@ export default function TVChart({
       from: firstIdx - 0.5,
       to: bars.length - 1 + (count * FREE_RIGHT_FRACTION) / (1 - FREE_RIGHT_FRACTION),
     });
+  };
+
+  applyPeriodRef.current = handlePeriodChange;
+
+  // Back to the default setup. The page also resets the interval and expiry it owns (onResetSettings).
+  const handleResetSettings = () => {
+    const D = DEFAULT_CHART_PREFS;
+    setShowPrice(D.showPrice);
+    setShowOI(D.showOI);
+    setFitLevels(D.fitLevels);
+    setHideExtended(D.hideExtended);
+    setIntervalsOpen(D.intervalsOpen);
+    if (resizable) setChartHeight(D.height);
+    handlePeriodChange(D.period);
+    onResetSettings?.();
+  };
+
+  // Drag the bottom edge to resize; the height is saved when the drag ends.
+  const startResize = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const target = e.currentTarget;
+    target.setPointerCapture(e.pointerId);
+    const startY = e.clientY;
+    const startH = chartHeight;
+    let latest = startH;
+    const onMove = (ev: PointerEvent) => {
+      latest = clampChartHeight(startH + ev.clientY - startY);
+      setChartHeight(latest);
+    };
+    const onUp = () => {
+      target.removeEventListener('pointermove', onMove);
+      target.removeEventListener('pointerup', onUp);
+      target.removeEventListener('pointercancel', onUp);
+      if (latest !== startH) persist({ height: latest });
+    };
+    target.addEventListener('pointermove', onMove);
+    target.addEventListener('pointerup', onUp);
+    target.addEventListener('pointercancel', onUp);
   };
 
   const displayPrice = livePrice ?? currentPrice;
@@ -1195,7 +1263,7 @@ export default function TVChart({
       <div
         ref={chartContainerRef}
         className={`relative w-full lg:flex-1 lg:min-w-0 bg-white rounded-lg border border-gray-200 shadow-sm ${isEnlarged ? 'min-h-0' : ''}`}
-        style={isEnlarged ? undefined : { height: `${height}px` }}
+        style={isEnlarged ? undefined : { height: `${chartHeight}px` }}
       >
         {/* Chart controls — top right, inset past the price scale so they
             don't cover its labels. */}
@@ -1203,7 +1271,7 @@ export default function TVChart({
             {/* Visibility Toggles */}
             <div className="flex items-center gap-2 border-r border-gray-300 pr-2">
               <button
-                onClick={() => setShowPrice(!showPrice)}
+                onClick={() => { setShowPrice(!showPrice); persist({ showPrice: !showPrice }); }}
                 className={`px-2 py-1 text-[11px] font-medium rounded transition-colors ${
                   showPrice
                     ? 'bg-green-600 text-white'
@@ -1213,7 +1281,7 @@ export default function TVChart({
                 Price
               </button>
               <button
-                onClick={() => setShowOI(!showOI)}
+                onClick={() => { setShowOI(!showOI); persist({ showOI: !showOI }); }}
                 className={`px-2 py-1 text-[11px] font-medium rounded transition-colors ${
                   showOI
                     ? 'bg-orange-600 text-white'
@@ -1223,7 +1291,19 @@ export default function TVChart({
                 OI
               </button>
               <button
-                onClick={() => setFitLevels(v => !v)}
+                onClick={() => { setHideExtended(!hideExtended); persist({ hideExtended: !hideExtended }); }}
+                aria-pressed={hideExtended}
+                title={hideExtended ? 'Alt on: Call Low and Put High are hidden. Click to show them' : 'Alt off: Call Low and Put High are shown. Click to hide them'}
+                className={`px-2 py-1 text-[11px] font-medium rounded transition-colors ${
+                  hideExtended
+                    ? 'bg-slate-700 text-white'
+                    : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                }`}
+              >
+                Alt
+              </button>
+              <button
+                onClick={() => { setFitLevels(v => !v); persist({ fitLevels: !fitLevels }); }}
                 title={fitLevels ? 'Price scale includes every level' : 'Price scale fits the candles; turn on to bring all levels into view'}
                 className={`px-2 py-1 text-[11px] font-medium rounded transition-colors ${
                   fitLevels
@@ -1240,7 +1320,7 @@ export default function TVChart({
               {['1D', '1W', '1M', '3M', '6M', '1Y', 'YTD', 'ALL'].map((period) => (
                 <button
                   key={period}
-                  onClick={() => handlePeriodChange(period)}
+                  onClick={() => { handlePeriodChange(period); persist({ period: period as ChartPrefs['period'] }); }}
                   className={`px-2 py-1 text-[11px] font-medium rounded transition-colors ${
                     selectedPeriod === period
                       ? 'bg-blue-600 text-white'
@@ -1252,6 +1332,16 @@ export default function TVChart({
               ))}
             </div>
 
+            {onResetSettings && (
+              <button
+                onClick={handleResetSettings}
+                title="Reset the chart to the default setup (toggles, interval, expiry, period, height)"
+                aria-label="Reset chart settings"
+                className="flex items-center justify-center w-7 h-7 rounded text-gray-500 bg-gray-100 hover:bg-gray-200 hover:text-gray-700 transition-colors"
+              >
+                ↺
+              </button>
+            )}
             <button
               onClick={() => setIsEnlarged(v => !v)}
               title={isEnlarged ? 'Shrink chart' : 'Enlarge chart'}
@@ -1263,12 +1353,23 @@ export default function TVChart({
             {toolbarEnd}
         </div>
 
+        {resizable && !isEnlarged && (
+          <div
+            onPointerDown={startResize}
+            onDoubleClick={() => { setChartHeight(DEFAULT_CHART_PREFS.height); persist({ height: DEFAULT_CHART_PREFS.height }); }}
+            title="Drag to change the chart height (double-click for the default)"
+            className="absolute bottom-0 left-1/2 -translate-x-1/2 w-28 h-2.5 z-20 cursor-ns-resize touch-none flex items-center justify-center group"
+          >
+            <span className="h-0.5 w-10 rounded bg-gray-300 group-hover:bg-gray-500 transition-colors" />
+          </div>
+        )}
+
         {/* Interval selector — top left, collapsible down to a single button. */}
         {(headerExtra || isLoadingMore) && (
           <div className="absolute top-2 left-2 z-20 flex items-center gap-1.5 bg-white/90 backdrop-blur-sm border border-gray-200 rounded-md shadow-sm px-1.5 py-1">
             <button
               type="button"
-              onClick={() => setIntervalsOpen(v => !v)}
+              onClick={() => { setIntervalsOpen(!intervalsOpen); persist({ intervalsOpen: !intervalsOpen }); }}
               aria-expanded={intervalsOpen}
               aria-label={intervalsOpen ? 'Collapse timeframes' : 'Expand timeframes'}
               title={intervalsOpen ? 'Collapse timeframes' : 'Show timeframes'}

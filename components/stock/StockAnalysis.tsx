@@ -19,6 +19,7 @@ import { pollDelayMs } from '@/lib/pollDelay';
 import ExtendedMove from '@/components/ui/ExtendedMove';
 import ColumnsMenu from '@/components/ui/ColumnsMenu';
 import { useColumnPrefs } from '@/components/ui/useColumnPrefs';
+import { useChartPrefs } from '@/components/charts/useChartPrefs';
 import ColRow from '@/components/ui/ColRow';
 import type { ColumnMeta } from '@/lib/tableColumns';
 import { format, subDays } from 'date-fns';
@@ -337,7 +338,13 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
   const [historicalExpiryDates, setHistoricalExpiryDates] = useState<string[]>([]);
   const [expandedYears, setExpandedYears] = useState<Set<string>>(new Set());
   const [isInitialLoad, setIsInitialLoad] = useState(true);
-  const [chartInterval, setChartInterval] = useState<SelectableInterval>('daily');
+  // The chart's saved settings (interval, expiry, toggles, period, height; lib/chartPrefs.ts). The data load
+  // below waits until they are known, so its first requests already use the saved interval and expiry
+  // instead of loading the defaults and then reloading.
+  const chartPrefs = useChartPrefs();
+  const [chartInterval, setChartInterval] = useState<SelectableInterval>(() => chartPrefs.prefs.interval);
+  const [prefsApplied, setPrefsApplied] = useState(chartPrefs.ready);
+  const savedExpiryRef = useRef<string | null>(chartPrefs.ready ? chartPrefs.prefs.expiry : null);
   // Full snapshot, not just the price — the header shows today's change and
   // day range, and the levels panel rebases onto the live price (see
   // displayLevels below).
@@ -463,8 +470,26 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
   useEffect(() => { selectedExpiryRef.current = selectedExpiry; }, [selectedExpiry]);
   useEffect(() => { chartIntervalRef.current = chartInterval; }, [chartInterval]);
 
+  // Saved settings arrived: take the interval and expiry in one render with `prefsApplied`, so the load
+  // below runs once with them.
   useEffect(() => {
-    if (!symbol) return;
+    if (!chartPrefs.ready || prefsApplied) return;
+    savedExpiryRef.current = chartPrefs.prefs.expiry;
+    chartIntervalRef.current = chartPrefs.prefs.interval;
+    setChartInterval(chartPrefs.prefs.interval);
+    setPrefsApplied(true);
+  }, [chartPrefs.ready, chartPrefs.prefs, prefsApplied]);
+
+  /** "Reset chart" (the chart resets its own toggles, period and height): back to the daily interval and the nearest expiry. */
+  function resetChartSettings() {
+    chartPrefs.reset();
+    savedExpiryRef.current = null;
+    setChartInterval('daily');
+    if (expiryMode === 'current' && expiryDates.length > 0) setSelectedExpiry(expiryDates[0]);
+  }
+
+  useEffect(() => {
+    if (!symbol || !prefsApplied) return;
 
     const fetchData = async () => {
       windowEpochRef.current++;
@@ -478,6 +503,11 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
         // Track initial loaded range
         loadedRangesRef.current = [{ from, to }];
 
+        // The expiry to open on: the user's current one, else their saved pick if this stock still lists it,
+        // else the nearest. Resolved once per load so the levels request and the page agree.
+        const pickExpiry = (dates: string[]) =>
+          selectedExpiryRef.current || (savedExpiryRef.current && dates.includes(savedExpiryRef.current) ? savedExpiryRef.current : dates[0]);
+
         // The levels-history request only needs the expiry (and the window we
         // already know), so it is chained off the expiry-dates response and
         // runs alongside OHLC instead of waiting for it. The window is the
@@ -489,7 +519,7 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
         const histLevelsPromise = expiryPromise.then(expiryData => {
           const dates: string[] = expiryData?.success ? expiryData.data.expiryDates : [];
           if (dates.length === 0) return null;
-          const expiryToUse = selectedExpiryRef.current || dates[0];
+          const expiryToUse = pickExpiry(dates);
           // Already loaded (e.g. switching interval: the new window is inside the one we hold): keep it.
           if (coversRange(levelsCoverageRef.current, symbol, expiryToUse, from, to)) return null;
           return fetch(`/api/stocks/${symbol}/levels?expiry=${expiryToUse}&range=true&from=${from}&to=${to}`)
@@ -551,7 +581,7 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
         // interval switches — only default to the nearest expiry on true first load.
         if (expiryData?.success && expiryData.data.expiryDates.length > 0) {
           setExpiryDates(expiryData.data.expiryDates);
-          setSelectedExpiry(selectedExpiryRef.current || expiryData.data.expiryDates[0]);
+          setSelectedExpiry(pickExpiry(expiryData.data.expiryDates));
 
           if (histLevelsData?.success && histLevelsData.data && histLevelsData.data.history) {
             const levelsMap = new Map();
@@ -574,8 +604,9 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
             });
 
             setHistoricalLevels(levelsMap);
-            setLevelsExpiry(selectedExpiryRef.current || expiryData.data.expiryDates[0]);
-            levelsCoverageRef.current = { symbol, expiry: selectedExpiryRef.current || expiryData.data.expiryDates[0], from, to };
+            const levelsFor = pickExpiry(expiryData.data.expiryDates);
+            setLevelsExpiry(levelsFor);
+            levelsCoverageRef.current = { symbol, expiry: levelsFor, from, to };
 
             const oiDataFromLevels = histLevelsData.data.history
               .filter((item: any) => item.oi != null)
@@ -605,7 +636,7 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
     };
 
     fetchData();
-  }, [symbol, chartInterval]);
+  }, [symbol, chartInterval, prefsApplied]);
 
   // Fetch historical levels data when expiry date changes (skip initial load)
   useEffect(() => {
@@ -1159,7 +1190,11 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
     return (
       <button
         key={date}
-        onClick={() => setSelectedExpiry(date)}
+        onClick={() => {
+          setSelectedExpiry(date);
+          // Remember the pick for the next visit. A past (historical) expiry isn't remembered: it can't be the default.
+          if (expiryMode === 'current') chartPrefs.save({ expiry: date });
+        }}
         title={spansEarnings ? `${date} — after earnings on ${earnings!.next!.date}` : date}
         aria-pressed={isActive}
         className={`px-2 py-0.5 rounded-sm text-xs font-medium border transition-all ${
@@ -1349,7 +1384,7 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
       {INTERVAL_ORDER.map((iv) => (
         <button
           key={iv}
-          onClick={() => setChartInterval(iv)}
+          onClick={() => { setChartInterval(iv); chartPrefs.save({ interval: iv }); }}
           className={`px-2 py-1 text-[11px] font-medium rounded transition-colors ${
             chartInterval === iv
               ? 'bg-green-600 text-white'
@@ -1451,6 +1486,10 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
                 headerBelow={headerBelow}
                 toolbarEnd={collapseButton}
                 height={embedded ? 520 : 600}
+                resizable={!embedded}
+                settings={chartPrefs.prefs}
+                onSettingsChange={chartPrefs.save}
+                onResetSettings={resetChartSettings}
                 onLoadMore={handleLoadMore}
                 isLoadingMore={isLoadingMore}
               />

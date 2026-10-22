@@ -5,9 +5,11 @@
  * or write another's preferences.
  *
  * Keys: `cols.<tableId>` = the hidden column ids, order and widths of one table
- * (ColumnPrefs, lib/tableColumns.ts). Add another kind of preference by extending validatorFor().
+ * (ColumnPrefs, lib/tableColumns.ts). `chart.settings` = the stock chart's toggles, interval,
+ * expiry, period and height (ChartPrefs, lib/chartPrefs.ts). Add another kind of preference by extending validatorFor().
  */
 import { sql } from '@/lib/db';
+import { CHART_PREF_KEY, normalizeChartPrefs } from '@/lib/chartPrefs';
 import { normalizeColumnPrefs, TABLE_IDS } from '@/lib/tableColumns';
 
 type Validator = (v: unknown) => unknown | null;
@@ -16,6 +18,7 @@ type Validator = (v: unknown) => unknown | null;
 const columnPrefs: Validator = v => normalizeColumnPrefs(v);
 
 function validatorFor(key: string): Validator | null {
+  if (key === CHART_PREF_KEY) return normalizeChartPrefs;
   const m = /^cols\.([A-Za-z0-9]+)$/.exec(key);
   if (m && (TABLE_IDS as readonly string[]).includes(m[1])) return columnPrefs;
   return null;

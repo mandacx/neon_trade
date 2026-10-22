@@ -7,6 +7,20 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-21 — Stock chart: "Alt" toggle, saved chart settings, resizable height, reset
+
+Requested: an Alt button beside Price / OI that hides Call Low and Put High when on; save the chart's settings (other buttons, date/interval selection, height) per user and use them to load the right data first time; a reset to defaults.
+
+- **Alt** (`TVChart.tsx`): on = Call Low and Put High are not drawn (level lines, dashed price lines and the crosshair tooltip rows); off (default) = shown, as before. Folded into the level-isolate visibility effect, and new level series start with it applied (a chart rebuilt after an interval switch would otherwise show them).
+- **Saved settings:** one pref `chart.settings` in `nt_user_prefs` (localStorage `chartprefs` when signed out): interval, expiry, period (1D…ALL), Price, OI, Fit levels, Alt, chart height (360-1200 px), timeframe overlay open/closed. Validator `normalizeChartPrefs` in `lib/chartPrefs.ts` (invalid fields fall back to defaults); registered in `lib/userPrefs.ts`. Hook `components/charts/useChartPrefs.ts`: one GET per page load (module cache, so the watchlist chart remounting per symbol doesn't refetch), debounced 600 ms PUT, flush on unmount.
+- **Fewer API calls:** `StockAnalysis` waits for the saved settings before its first load, so the OHLC request uses the saved interval and the levels request the saved expiry, rather than loading daily/nearest and reloading. Signed in this costs one small prefs GET up front; signed out, none. The saved expiry is used only if the stock still lists it (else the nearest); past (historical-mode) expiries aren't saved. The saved period is re-applied whenever the data window is replaced (open, symbol, interval switch), which also fixes the highlighted period button not matching the view after an interval switch.
+- **Height:** drag the grip at the bottom of the chart (double-click = default); saved when the drag ends. Not on the embedded watchlist chart (fixed 520).
+- **Reset:** the ↺ button in the chart toolbar returns toggles, period, height, interval (daily) and expiry (nearest) to the defaults and deletes the saved pref.
+- **Verified:** `tsc` and eslint (0 errors) pass; `normalizeChartPrefs` run on good/clamped/invalid input. **Not verified:** nothing run in a browser: the Alt toggle on live data, the resize drag, saving/loading signed in vs out, the request count on open (expected: no duplicate OHLC/levels load), reset.
+- **Follow-ups:** the resize handle overlaps the bottom ~10 px of the time axis around the centre; the embedded chart shares interval/expiry/toggles with the main chart by design.
+
+---
+
 ## 2026-10-21 — Tables: reorder and resize columns (saved), reset, and Earnings "Refresh quotes"
 
 Requested: let users move and resize table columns on every page, saved like the show/hide choice, with a reset; add a quotes refresh to the Earnings page.
