@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getHistoricalBars, convertIntervalToTimeframe, ChartInterval } from '@/lib/alpaca';
 import type { AlpacaBar } from '@/lib/alpaca';
 import { getBarsForChart } from '@/lib/tradier';
+import { getDailyBars, toVendorBars } from '@/lib/dailyBars';
 import { usTradingDayKey } from '@/lib/utils';
 import { format, subDays } from 'date-fns';
 
@@ -33,13 +34,22 @@ export async function GET(
     // the bars come from Tradier instead.
     let bars: AlpacaBar[] = [];
     let alpacaError: unknown = null;
-    try {
-      bars = await getHistoricalBars(symbol, timeframe, from, to);
-    } catch (err) {
-      alpacaError = err;
-    }
     let source: 'alpaca' | 'tradier' = 'alpaca';
-    if (bars.length === 0) {
+    if (interval === 'daily') {
+      // Daily bars: past days come from our own table (filled from Alpaca once), only today is fetched live.
+      // lib/dailyBars.ts also does the Tradier fallback for indices.
+      const daily = await getDailyBars(symbol, from, to);
+      if (daily.bars.length === 0 && daily.error) throw daily.error;
+      bars = toVendorBars(daily.bars);
+      source = daily.source;
+    } else {
+      try {
+        bars = await getHistoricalBars(symbol, timeframe, from, to);
+      } catch (err) {
+        alpacaError = err;
+      }
+    }
+    if (bars.length === 0 && interval !== 'daily') {
       try {
         const fallback = await getBarsForChart(symbol, interval, from, to);
         if (fallback.length > 0) {

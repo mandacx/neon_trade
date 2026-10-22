@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { isAuthorizedCron } from '@/lib/cronAuth';
 import { catchUpMarketCatalog } from '@/lib/marketCatalog';
 import { captureOptionBars } from '@/lib/optionVolume';
+import { warmDailyBars } from '@/lib/dailyBars';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -35,7 +36,9 @@ function centralNow(date: Date) {
  *
  * After the catalog, the same run captures option volume for the latest
  * options load (lib/optionVolume.ts; resumable, so a day that doesn't fit in
- * one run finishes on the next).
+ * one run finishes on the next). Before that it tops up the stored daily stock
+ * bars for every tracked symbol (lib/dailyBars.ts: one or two Alpaca requests a
+ * day; the first runs also backfill a year of history, resumable, 20s budget).
  */
 export async function GET(request: NextRequest) {
   if (!isAuthorizedCron(request)) {
@@ -54,6 +57,14 @@ export async function GET(request: NextRequest) {
   try {
     const results = await catchUpMarketCatalog(now.day);
     console.log('[cron/market-catalog]', JSON.stringify(results));
+    let dailyBars: unknown;
+    try {
+      dailyBars = await warmDailyBars({ deadline: started + 20_000 });
+      console.log('[cron/market-catalog] daily bars', JSON.stringify(dailyBars));
+    } catch (error) {
+      console.error('[cron/market-catalog] daily bars top-up failed', error);
+      dailyBars = { error: error instanceof Error ? error.message : 'Unknown error' };
+    }
     let optionVolume: unknown;
     try {
       optionVolume = await captureOptionBars({ deadline: started + 50_000 });
@@ -62,7 +73,7 @@ export async function GET(request: NextRequest) {
       console.error('[cron/market-catalog] option volume capture failed', error);
       optionVolume = { error: error instanceof Error ? error.message : 'Unknown error' };
     }
-    return NextResponse.json({ success: true, data: results, optionVolume });
+    return NextResponse.json({ success: true, data: results, dailyBars, optionVolume });
   } catch (error) {
     console.error('[cron/market-catalog] catch-up failed', error);
     return NextResponse.json(

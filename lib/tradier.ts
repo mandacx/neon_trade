@@ -205,7 +205,7 @@ export async function getBarsForChart(symbol: string, interval: ChartInterval, f
 }
 
 /** UTC ISO instant of 00:00 America/New_York on a 'YYYY-MM-DD' date (04:00Z in EDT, 05:00Z in EST). */
-function easternMidnightIso(date: string): string {
+export function easternMidnightIso(date: string): string {
   const [y, m, d] = date.split('-').map(Number);
   const hourET = (ms: number) =>
     Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', hour12: false }).format(new Date(ms))) % 24;

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getLatestStockData, getHistoricalStockData, getStockDataByExpiry, getStockDataAsOf, sql } from '@/lib/db';
 import { calculateLevels, findClosestLevel } from '@/lib/calculations';
 import { formatPercentage } from '@/lib/utils';
+import { getDayBars, referenceClose } from '@/lib/dayBars';
 import { format, subDays } from 'date-fns';
 import { getSessionUser, getUserContextFor } from '@/lib/appUsers';
 import { levelGate, levelAccessFor, LEVEL_RANGE_RATE, LEVEL_POINT_RATE, DELAYED_RANGE_DAYS } from '@/lib/levelAccess';
@@ -78,6 +79,8 @@ export async function GET(
       // fetch the full requested range and clamp the response after the fact.
       const { from, to, clamped } = gate.clampRange(requestedFrom, requestedTo);
 
+      // Each row's own-session bar, fetched alongside the database read (see lib/dayBars.ts).
+      const barsPromise = getDayBars(symbol, from, to);
       let historicalData;
       if (expiryDate) {
         // Fetch historical data for specific expiry
@@ -131,7 +134,15 @@ export async function GET(
         historicalData = await getHistoricalStockData(symbol, from, to, stdOnly);
       }
 
-      const processedData = historicalData.map(data => {
+      const dayBars = await barsPromise;
+      const processedData = historicalData.map(rawData => {
+        // The stored CLOSE of load date D is session D-1's close, so the levels were a day behind the candle
+        // drawn for D. Measure them against D's own close instead (the bar), like the quadrant page. A row with
+        // no usable bar (today before the open, a failed fetch, a split-sized gap) keeps the stored close.
+        const bar = dayBars.get(rawData.TRADE_DATE);
+        const refClose = referenceClose(bar, Number(rawData.CLOSE));
+        const data = refClose ? { ...rawData, CLOSE: refClose } : rawData;
+        const barFields = { eodClose: rawData.CLOSE, open: refClose ? bar!.open : null, high: refClose ? bar!.high : null, low: refClose ? bar!.low : null };
         // `oi`/`close` are deliberately outside the gate — the stock page's
         // OI chart and price axis are built from this same response and must
         // keep working on every plan.
@@ -149,6 +160,7 @@ export async function GET(
           return {
             date: data.TRADE_DATE,
             close: data.CLOSE,
+            ...barFields,
             levels: { put_low: null, put_int: null, put_call_int: null, call_int: null, call_high: null },
             calculated: [],
             closestLevel: null,
@@ -180,6 +192,7 @@ export async function GET(
         return {
           date: data.TRADE_DATE,
           close: data.CLOSE,
+          ...barFields,
           levels: {
             put_low: data.put_LOW,
             put_int: data.PUT_INT,

@@ -210,6 +210,27 @@ export async function getDailyBarsMulti(symbols: string[], start: string, end: s
   return out;
 }
 
+/**
+ * Split-adjusted daily bars (full OHLCV) for up to ~100 symbols in one paged request series
+ * (Alpaca returns at most 10,000 bars a page across all the symbols). Unlike getDailyBarsMulti this
+ * THROWS on a failed request, so a caller storing the result never mistakes a failure for "no bars".
+ */
+export async function getDailyBarsChunk(symbols: string[], start: string, end: string): Promise<Record<string, AlpacaBar[]>> {
+  const out: Record<string, AlpacaBar[]> = {};
+  let pageToken: string | undefined;
+  for (let page = 0; page < 20; page++) {
+    const params: Record<string, string | number> = {
+      symbols: symbols.map(s => s.toUpperCase()).join(','), timeframe: '1Day', adjustment: 'split', feed: 'iex', limit: 10000, start, end,
+    };
+    if (pageToken) params.page_token = pageToken;
+    const response = await alpacaClient.get<AlpacaHistoryResponse>('/v2/stocks/bars', { params });
+    for (const [sym, bars] of Object.entries(response.data?.bars ?? {})) (out[sym] ??= []).push(...bars);
+    pageToken = response.data?.next_page_token;
+    if (!pageToken) return out;
+  }
+  throw new Error('Alpaca daily bars: too many pages');
+}
+
 export type ChartInterval = '1min' | '5min' | '15min' | '30min' | '1hour' | 'daily' | 'weekly' | 'monthly';
 
 /**

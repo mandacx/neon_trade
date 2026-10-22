@@ -50,7 +50,14 @@ type SevenLevel = { name: string; price: number; value: number };
 type LevelHistoryEntry = {
   levels: LevelCalculation[];
   closestLevel: string;
+  /** The date's own session close (the candle's close) when known: the levels' proximity is measured against it. Else the stored close. */
   close: number;
+  /** The stored EOD close for this load date (the previous session's close). */
+  eodClose?: number;
+  /** The date's own session open / high / low (null when the bar is unknown). */
+  open?: number | null;
+  high?: number | null;
+  low?: number | null;
   sevenLevels: SevenLevel[];
   oi?: { callOi: number; putOi: number; oiDiff: number } | null;
   ratios?: { upc: number; ucpr: number };
@@ -73,7 +80,11 @@ const SEVEN_LEVEL_ORDER = ['put_low', 'put_int', 'put_call_int', 'call_int', 'ca
 // signed in, this browser otherwise) through the Columns menu.
 const PRICE_HISTORY_COLUMNS: ColumnMeta[] = [
   { id: 'date', label: 'Date', required: true },
-  { id: 'close', label: 'Close' },
+  { id: 'open', label: 'Open' },
+  { id: 'high', label: 'High' },
+  { id: 'low', label: 'Low' },
+  { id: 'close', label: 'Close', hint: 'Close of that date (the candle close); level distances are measured against it' },
+  { id: 'eodClose', label: 'EOD close', hint: 'Stored close for this load date (the previous session close)', defaultOff: true },
   ...SEVEN_LEVEL_ORDER.map(name => ({ id: name, label: getLevelDisplayName(name) })),
   { id: 'callOi', label: 'Call OI' },
   { id: 'putOi', label: 'Put OI' },
@@ -593,6 +604,10 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
                 levels: item.calculated,
                 closestLevel: item.closestLevel,
                 close: item.close,
+                eodClose: item.eodClose,
+                open: item.open,
+                high: item.high,
+                low: item.low,
                 sevenLevels: item.sevenLevels || [],
                 oi: item.oi,
                 ratios: item.ratios,
@@ -700,6 +715,10 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
                 levels: item.calculated,
                 closestLevel: item.closestLevel,
                 close: item.close,
+                eodClose: item.eodClose,
+                open: item.open,
+                high: item.high,
+                low: item.low,
                 sevenLevels: item.sevenLevels || [],
                 oi: item.oi,
                 ratios: item.ratios,
@@ -850,6 +869,10 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
               levels: item.calculated,
               closestLevel: item.closestLevel,
               close: item.close,
+              eodClose: item.eodClose,
+              open: item.open,
+              high: item.high,
+              low: item.low,
               sevenLevels: item.sevenLevels || [],
               oi: item.oi,
               ratios: item.ratios,
@@ -1020,6 +1043,10 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
                     levels: item.calculated || [],
                     closestLevel: item.closestLevel || '',
                     close: item.close,
+                    eodClose: item.eodClose,
+                    open: item.open,
+                    high: item.high,
+                    low: item.low,
                     sevenLevels: item.sevenLevels || [],
                     oi: item.oi,
                     ratios: item.ratios,
@@ -1087,6 +1114,17 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
     }
     return stockData?.closestLevel?.name || closestLevel || '';
   }, [displayLevels, stockData, closestLevel]);
+
+  // The newest loaded row's reference close (its own session's close when known, see lib/dayBars.ts). The levels
+  // shown without a live price (a historical expiry, or no quote) are measured against it, so the Analysis line
+  // names this price rather than the stored previous-session close.
+  const latestRefClose = useMemo(() => {
+    let day = '';
+    let close: number | undefined;
+    if (levelsExpiry !== selectedExpiry) return undefined;
+    historicalLevels.forEach((e, d) => { if (d > day && e.close > 0) { day = d; close = e.close; } });
+    return close;
+  }, [historicalLevels, levelsExpiry, selectedExpiry]);
 
   const candleData = useMemo(() => ohlcData.map(d => ({
     time: d.timestamp,
@@ -1335,7 +1373,7 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
         {/* Name the basis explicitly — the distance is measured from the
             live price or the EOD close, and the two disagree intra-day. */}
         The {basisPrice !== undefined && quote?.market.session === 'regular' ? 'live' : 'closing'} price of{' '}
-        {formatCurrency(basisPrice ?? stockData?.close)} is closest to the{' '}
+        {formatCurrency(basisPrice ?? latestRefClose ?? stockData?.close)} is closest to the{' '}
         <strong className="text-blue-700">{getLevelDisplayName(closestLevelName)}</strong>{' '}
         level at {formatCurrency(closestLvl.price)}, with a distance
         of {formatPercentage(closestLvl.value)}.{' '}
@@ -1582,7 +1620,11 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
                     <thead className="[&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-white [&_th]:shadow-[inset_0_-1px_0_0_#e5e7eb]">
                       <ColRow layout={phCols.layout} header className="text-gray-500">
                         <th data-col="date" className="sticky text-left py-1.5 pr-3 font-medium">Date</th>
-                        {ph('close') && (<th data-col="close" className="sticky text-right py-1.5 px-2 font-medium">Close</th>)}
+                        {ph('open') && (<th data-col="open" className="sticky text-right py-1.5 px-2 font-medium">Open</th>)}
+                        {ph('high') && (<th data-col="high" className="sticky text-right py-1.5 px-2 font-medium">High</th>)}
+                        {ph('low') && (<th data-col="low" className="sticky text-right py-1.5 px-2 font-medium">Low</th>)}
+                        {ph('close') && (<th data-col="close" className="sticky text-right py-1.5 px-2 font-medium" title="The date's own close; level distances are measured against it">Close</th>)}
+                        {ph('eodClose') && (<th data-col="eodClose" className="sticky text-right py-1.5 px-2 font-medium" title="Stored close for this load date (the previous session's close)">EOD close</th>)}
                         {SEVEN_LEVEL_ORDER.filter(name => ph(name)).map((name) => (
                           <th key={name} data-col={name} className="sticky text-right py-1.5 px-2 font-medium">
                             {getLevelDisplayName(name)}
@@ -1605,7 +1647,11 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
                         return (
                           <ColRow layout={phCols.layout} key={row.date} className="border-b border-gray-100 last:border-0 hover:bg-gray-50">
                             <td data-col="date" className="py-1.5 pr-3 text-gray-600">{row.date}</td>
+                            {ph('open') && (<td data-col="open" className="text-right py-1.5 px-2 text-gray-600">{row.open != null ? formatCurrency(row.open) : '—'}</td>)}
+                            {ph('high') && (<td data-col="high" className="text-right py-1.5 px-2 text-gray-600">{row.high != null ? formatCurrency(row.high) : '—'}</td>)}
+                            {ph('low') && (<td data-col="low" className="text-right py-1.5 px-2 text-gray-600">{row.low != null ? formatCurrency(row.low) : '—'}</td>)}
                             {ph('close') && (<td data-col="close" className="text-right py-1.5 px-2 font-semibold">{formatCurrency(row.close)}</td>)}
+                            {ph('eodClose') && (<td data-col="eodClose" className="text-right py-1.5 px-2 text-gray-400">{row.eodClose != null ? formatCurrency(row.eodClose) : '—'}</td>)}
                             {SEVEN_LEVEL_ORDER.filter(name => ph(name)).map((name) => {
                               const lvl = levelsByName.get(name);
                               const isClosest = !!closest && lvl && closest.name === lvl.name;
