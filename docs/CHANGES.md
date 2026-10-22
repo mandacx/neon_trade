@@ -7,6 +7,15 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-22 — OI tracker: underlying Close column
+
+Requested: the underlying's close price in the OI flow contract table, between Type and Mny %.
+
+- `app/oi-tracker/page.tsx`: new "Close" column (`r.close`, already on `OiContractRow` as the report's underlying close from the last load in range; shows "—" when 0). No query change. The stock modal's Contracts tab is unchanged.
+- **Verified:** `tsc` clean. **Not verified:** not viewed in a browser; the report's `close` for load date D is presumed to be the previous session's close like `eod_usmkts_price` (unverified for `us_opt_chg_rpt`).
+
+---
+
 ## 2026-10-22 — OI tracker: Trade date column, and SPX / NDX / SPY / QQQ excluded by default (toggle)
 
 Requested: a trade-date column for when the OI change took place; a way to leave out SPX, NDX, SPY, QQQ, on by default.

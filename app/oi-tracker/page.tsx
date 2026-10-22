@@ -174,6 +174,7 @@ export default function OiTrackerPage() {
     { key: 'expiry', label: 'Expiry', type: 'date', value: r => r.expiry, render: r => <ExpiryCell expiry={r.expiry} dte={r.dte} /> },
     { key: 'strike', label: 'Strike', type: 'number', value: r => r.strike, render: r => <b>{fmtStrike(r.strike)}</b> },
     { key: 'type', label: 'Type', type: 'text', value: r => r.optType, render: r => <TypeBadge t={r.optType} /> },
+    { key: 'close', label: 'Close', type: 'number', value: r => r.close, render: r => (r.close > 0 ? r.close.toFixed(2) : '—'), title: 'Underlying close from the OI report (last load in the range)' },
     { key: 'mny', label: 'Mny %', type: 'number', value: r => r.moneynessPct, render: r => <span className={r.itm ? 'text-blue-700 font-semibold' : 'text-gray-500'}>{r.moneynessPct.toFixed(1)}%</span>, title: '(strike − underlying close) / close; blue = in the money' },
     { key: 'oi', label: 'OI', type: 'number', value: r => r.oi, render: r => r.oi.toLocaleString() },
     { key: 'chg', label: multiDay ? 'OI chg (sum)' : 'OI chg', type: 'number', value: r => r.oiChg, render: r => <SignedCount v={r.oiChg} /> },
