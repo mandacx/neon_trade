@@ -79,6 +79,7 @@ export default function StockOiModal({ symbol, loadDates, to, initialRange = '1'
   const trackRow = (r: OiContractRow) => setTrack({ legs: [{ underlying: r.underlying, contract: r.contract, optType: r.optType, strike: r.strike, expiry: r.expiry, oiChg: r.oiChg, ltp: r.ltp, hint: r.hint }] });
 
   const contractCols: Column<Row>[] = [
+    { key: 'tradeDate', label: 'Trade date', type: 'date', value: r => r.tradeDate, render: r => <span className="text-xs text-gray-700">{r.tradeDate}</span>, title: 'The trading session that produced the OI change (the day before the load date); the latest one in the range' },
     { key: 'expiry', label: 'Expiry', type: 'date', value: r => r.expiry, render: r => <ExpiryCell expiry={r.expiry} dte={r.dte} /> },
     { key: 'strike', label: 'Strike', type: 'number', value: r => r.strike, render: r => <span className="font-semibold">{fmtStrike(r.strike)}</span> },
     { key: 'type', label: 'Type', type: 'text', value: r => r.optType, render: r => <TypeBadge t={r.optType} /> },

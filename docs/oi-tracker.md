@@ -166,7 +166,7 @@ All routes use `requireFeatureApi(FEATURE_OI_TRACKER)`, via `guardOi()` in `lib/
 - **Strategies:** tolerance slider and minimum leg size.
 - **My tracked**
 
-Controls: a period card (load date, range 1/5/10/20/60 loads or custom), the filters above, "Rank by" and a row limit. KPI cards show contracts changed, opened, closed, net, call vs put $, and volume (with capture coverage).
+Controls: a period card (load date, range 1/5/10/20/60 loads or custom), the filters above, "Rank by" and a row limit. **SPX · NDX · SPY · QQQ** are excluded by default (an Excluded/Included toggle in the filters, remembered in the browser; `exclude` query param; ignored when symbols are typed). Contract tables have a **Trade date** column: the session behind the OI change (the load date minus one trading day); over a range, last and first. KPI cards show contracts changed, opened, closed, net, call vs put $, and volume (with capture coverage).
 
 **`components/oi/DataTable.tsx`** is a reusable table used by every tab and the modal:
 - sorting

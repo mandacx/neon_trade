@@ -45,6 +45,10 @@ export interface OiContractRow {
   days: number;
   firstLoad: string;
   lastLoad: string;
+  /** The trading session whose activity produced the OI change (the day before the load date); the latest one in the range. */
+  tradeDate: string;
+  /** The earliest such session in the range (equals tradeDate for a single load). */
+  firstTradeDate: string;
   hint: SideHint | null;
 }
 

@@ -7,6 +7,17 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-22 — OI tracker: Trade date column, and SPX / NDX / SPY / QQQ excluded by default (toggle)
+
+Requested: a trade-date column for when the OI change took place; a way to leave out SPX, NDX, SPY, QQQ, on by default.
+
+- **Trade date** = the trading *session* whose activity produced the change, i.e. the day before the report's load date (see "OI change on load date D reflects session D−1" in `docs/oi-tracker.md`), not the load date. `OiContractRow` gains `tradeDate` (latest session in the range) and `firstTradeDate`; `lib/oiTracker.ts` carries `m.session` through the `r`/`a` CTEs (`MIN/MAX(session)`). The contract table shows "Trade date"; over several days it shows "Trade date (last)" plus "Trade date (first)", since rows are summed per contract. Also in the stock modal's Contracts tab. Grouped views are unchanged (the "By date" grouping already lists load dates).
+- **Exclusion:** `exclude=SPX,NDX,SPY,QQQ` query param (`excludeSymbols` in `OiScreenParams`, `NOT (symbol_und = ANY(...))` in SQL), sent by the page for the OI flow, By stock and Strategies tabs, so KPIs and rankings drop them too. A filter-bar toggle "SPX · NDX · SPY · QQQ: Excluded / Included", **Excluded by default**; the choice is kept in this browser (`localStorage` `oiTracker.excludeBig`) and read before the first request, so it causes no second load. Ignored while a symbol list is typed in (explicit symbols win). The stock modal is a single symbol and unaffected; matching is exact (SPXS, SPXL etc. stay in).
+- **Verified (live DB, 2026-10-22 load):** SPX/QQQ/SPY/NDX are the underlying names in `us_opt_chg_rpt`; contracts 13,814 → 10,961 with the exclusion; `tradeDate` is 2026-10-21 for the 10-22 load; a 4-load range gives first/last sessions per contract. `tsc` clean, eslint 0 errors.
+- **Not verified:** not viewed in a browser (column placement, toggle, remembered choice).
+
+---
+
 ## 2026-10-21 — Stock chart: "Alt" toggle, saved chart settings, resizable height, reset
 
 Requested: an Alt button beside Price / OI that hides Call Low and Put High when on; save the chart's settings (other buttons, date/interval selection, height) per user and use them to load the right data first time; a reset to defaults.

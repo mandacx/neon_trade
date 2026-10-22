@@ -27,6 +27,9 @@ interface Meta {
 const GROUP_TABLE_ID: Record<Exclude<OiGroupBy, 'contract'>, string> = {
   underlying: 'oiFlowUnderlying', expiry: 'oiFlowExpiry', strike: 'oiFlowStrike', date: 'oiFlowDate',
 };
+/** Underlyings whose index/ETF flow dwarfs single stocks; excluded by default (toggle in the filters). */
+const EXCLUDED_SYMBOLS = ['SPX', 'NDX', 'SPY', 'QQQ'];
+const EXCLUDE_BIG_KEY = 'oiTracker.excludeBig';
 const RANGES: Array<[string, string]> = [['1', '1 day'], ['5', '5D'], ['10', '10D'], ['20', '20D'], ['60', '60D'], ['custom', 'Custom']];
 const RANK_BY: Array<[string, string]> = [
   ['abs_chg_value', '|Chg $|'], ['abs_chg', '|OI chg|'], ['chg', 'OI opened'], ['oi_value', 'OI $'], ['vol', 'Volume'],
@@ -79,7 +82,16 @@ export default function OiTrackerPage() {
   const [track, setTrack] = useState<{ legs: TrackLegInput[]; label?: string } | null>(null);
   const [trackedKey, setTrackedKey] = useState(0);
 
+  // The index/ETF giants are left out unless the user switches them back on (remembered in this browser).
+  // It is read before the first screen request, which waits for `meta`, so the choice never causes a second load.
+  const [excludeBig, setExcludeBig] = useState(true);
+  const setExcludeBigSaved = (v: boolean) => {
+    setExcludeBig(v);
+    try { localStorage.setItem(EXCLUDE_BIG_KEY, v ? '1' : '0'); } catch { /* storage blocked */ }
+  };
+
   useEffect(() => {
+    try { if (localStorage.getItem(EXCLUDE_BIG_KEY) === '0') setExcludeBig(false); } catch { /* storage blocked */ }
     fetch('/api/oi-tracker/meta')
       .then(r => r.json())
       .then(j => {
@@ -108,8 +120,10 @@ export default function OiTrackerPage() {
     if (sector) p.set('sector', sector);
     if (indexCode) p.set('index', indexCode);
     if (watchlistId) p.set('watchlist', watchlistId);
+    // Typing symbols in is explicit (SPY included on purpose), so the exclusion only applies to the open screen.
+    if (excludeBig && !symbols) p.set('exclude', EXCLUDED_SYMBOLS.join(','));
     return p;
-  }, [from, to, symbols, optType, expiryKind, expiry, dteMin, dteMax, sector, indexCode, watchlistId]);
+  }, [from, to, symbols, optType, expiryKind, expiry, dteMin, dteMax, sector, indexCode, watchlistId, excludeBig]);
 
   const screenGroup: OiGroupBy = tab === 'stocks' ? 'underlying' : groupBy;
   useEffect(() => {
@@ -155,6 +169,8 @@ export default function OiTrackerPage() {
 
   const contractCols: Column<OiContractRow>[] = [
     { key: 'symbol', label: 'Symbol', type: 'text', value: r => r.underlying, render: r => <span className="font-bold text-gray-900 text-xs">{r.underlying}</span> },
+    { key: 'tradeDate', label: multiDay ? 'Trade date (last)' : 'Trade date', type: 'date', value: r => r.tradeDate, render: r => <span className="text-xs text-gray-700">{r.tradeDate}</span>, title: 'The trading session whose activity produced the OI change (the day before the report\'s load date). Several days in range: the latest one.' },
+    ...(multiDay ? [{ key: 'firstTradeDate', label: 'Trade date (first)', type: 'date', value: (r: OiContractRow) => r.firstTradeDate, render: (r: OiContractRow) => <span className="text-xs text-gray-500">{r.firstTradeDate}</span>, title: 'The earliest session in the range where this contract changed' } as Column<OiContractRow>] : []),
     { key: 'expiry', label: 'Expiry', type: 'date', value: r => r.expiry, render: r => <ExpiryCell expiry={r.expiry} dte={r.dte} /> },
     { key: 'strike', label: 'Strike', type: 'number', value: r => r.strike, render: r => <b>{fmtStrike(r.strike)}</b> },
     { key: 'type', label: 'Type', type: 'text', value: r => r.optType, render: r => <TypeBadge t={r.optType} /> },
@@ -320,6 +336,14 @@ export default function OiTrackerPage() {
                       </div>
                     </>
                   )}
+                  <div title={symbols ? 'Ignored while a symbol list is typed in' : `Leave out ${EXCLUDED_SYMBOLS.join(', ')}: their volume dwarfs single stocks`}>
+                    <label className={labelClass}>{EXCLUDED_SYMBOLS.join(' · ')}</label>
+                    <Segmented<'excluded' | 'included'>
+                      value={excludeBig ? 'excluded' : 'included'}
+                      onChange={v => setExcludeBigSaved(v === 'excluded')}
+                      options={[['excluded', 'Excluded'], ['included', 'Included']]}
+                    />
+                  </div>
                   {meta.watchlists.length > 0 && (
                     <div>
                       <label className={labelClass}>Watchlist</label>

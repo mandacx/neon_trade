@@ -29,6 +29,8 @@ export interface OiScreenParams {
   to: string;
   groupBy: OiGroupBy;
   symbols?: string[] | null;
+  /** Underlyings to leave out (e.g. SPX, NDX, SPY, QQQ). Applied in SQL after every other symbol filter. */
+  excludeSymbols?: string[] | null;
   optType?: OptType | null;
   expiryFrom?: string | null;
   expiryTo?: string | null;
@@ -171,6 +173,7 @@ function buildBase(p: OiScreenParams, loads: string[], sessions: string[], symbo
 
   const where: string[] = [`r.load_dt = ANY(${loadsP}::date[])`];
   if (symbols) where.push(`r.symbol_und = ANY(${$(symbols)}::text[])`);
+  if (p.excludeSymbols?.length) where.push(`NOT (r.symbol_und = ANY(${$(p.excludeSymbols)}::text[]))`);
   if (p.optType) where.push(`TRIM(r.opt_type) = ${$(p.optType)}`);
   if (p.expiryFrom) where.push(`r.expiry_dt >= ${$(p.expiryFrom)}::date`);
   if (p.expiryTo) where.push(`r.expiry_dt <= ${$(p.expiryTo)}::date`);
@@ -200,7 +203,7 @@ function buildBase(p: OiScreenParams, loads: string[], sessions: string[], symbo
   const text = `
     WITH m AS (SELECT * FROM unnest(${loadsP}::date[], ${sessP}::date[]) AS m(load_dt, session)),
     r AS (
-      SELECT ${occSql('r')} AS symbol, r.symbol_und, r.expiry_dt, TRIM(r.opt_type) AS t, r.strike_pr, r.load_dt,
+      SELECT ${occSql('r')} AS symbol, r.symbol_und, r.expiry_dt, TRIM(r.opt_type) AS t, r.strike_pr, r.load_dt, m.session,
              COALESCE(r.ltp, 0) AS ltp, COALESCE(r.oi, 0) AS oi, COALESCE(r.oi_chg, 0) AS oi_chg, COALESCE(r.close, 0) AS close,
              b.v, b.o AS bo, b.c AS bc, (b.contract IS NOT NULL) AS has_bar
       FROM public.us_opt_chg_rpt r
@@ -218,7 +221,8 @@ function buildBase(p: OiScreenParams, loads: string[], sessions: string[], symbo
         (array_agg(bo ORDER BY load_dt DESC))[1] AS sess_open,
         (array_agg(bc ORDER BY load_dt DESC))[1] AS sess_close,
         SUM(v) FILTER (WHERE has_bar) AS vol,
-        COUNT(*)::int AS days, MIN(load_dt)::text AS first_load, MAX(load_dt)::text AS last_load
+        COUNT(*)::int AS days, MIN(load_dt)::text AS first_load, MAX(load_dt)::text AS last_load,
+        MIN(session)::text AS first_session, MAX(session)::text AS last_session
       FROM r
       GROUP BY symbol, symbol_und, expiry_dt, t, strike_pr${dateCol}
     ),
@@ -267,6 +271,8 @@ function toContractRow(r: any, to: string): OiContractRow {
     days: num(r.days),
     firstLoad: r.first_load,
     lastLoad: r.last_load,
+    tradeDate: r.last_session,
+    firstTradeDate: r.first_session,
     hint: suggestSide(chg, sessOpen, sessClose),
   };
 }
