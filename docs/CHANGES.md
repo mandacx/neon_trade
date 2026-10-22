@@ -7,6 +7,15 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-22 — Stock page: live quote in the header for historical expiries too
+
+Reported: with Historical expiry selected, the header price was the last stored EOD `close` (`stockData.close`), not the live ticker quote.
+
+- The header price, Live / At close tag, day change, day range and extended-hours move (chart header and the collapsed bar) now use the live quote in every mode. New `TVChart` prop `quotePrice`; `livePrice` (still current-mode only, `basisPrice`) keeps driving what must stay tied to the expiry: the last-candle live nudge, the closest-level marker, the levels rebased onto the live price and the Analysis line. So a historical expiry's candles and levels are untouched.
+- **Verified:** `tsc` clean. **Not verified:** not viewed in a browser. In historical mode the Analysis line still measures the stored close, so it can differ from the header price.
+
+---
+
 ## 2026-10-22 — OI tracker: underlying Close column
 
 Requested: the underlying's close price in the OI flow contract table, between Type and Mny %.

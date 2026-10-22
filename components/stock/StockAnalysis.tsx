@@ -1434,16 +1434,16 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
             <div className="mb-8 space-y-3">
               <div className="flex flex-wrap items-center gap-x-4 gap-y-2 bg-white rounded-lg shadow-md px-3 py-2">
                 <span className="text-xl font-bold">{symbol.toUpperCase()}</span>
-                {(basisPrice ?? stockData?.close) !== undefined && (
-                  <span className="text-base text-gray-600">{formatCurrency(basisPrice ?? stockData?.close)}</span>
+                {(livePrice ?? stockData?.close) !== undefined && (
+                  <span className="text-base text-gray-600">{formatCurrency(livePrice ?? stockData?.close)}</span>
                 )}
-                {basisPrice !== undefined && quote?.change != null && (
+                {livePrice !== undefined && quote?.change != null && (
                   <span className={`text-xs font-bold ${quote.change >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                     {quote.change >= 0 ? '+' : '−'}{formatCurrency(Math.abs(quote.change))}
                     {quote.changePercent != null && ` (${quote.changePercent >= 0 ? '+' : '−'}${Math.abs(quote.changePercent).toFixed(2)}%)`}
                   </span>
                 )}
-                {basisPrice !== undefined && quote?.ext && <ExtendedMove ext={quote.ext} full />}
+                {livePrice !== undefined && quote?.ext && <ExtendedMove ext={quote.ext} full />}
                 {!embedded && <div className="ml-2">{jumpButtons}</div>}
                 {collapseButton}
               </div>
@@ -1467,13 +1467,14 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
                 selectedExpiry={selectedExpiry}
                 isIntraday={isIntradayInterval(chartInterval)}
                 livePrice={basisPrice}
-                marketSession={basisPrice !== undefined ? quote?.market.session : undefined}
-                extended={basisPrice !== undefined ? quote?.ext : undefined}
+                quotePrice={livePrice}
+                marketSession={livePrice !== undefined ? quote?.market.session : undefined}
+                extended={livePrice !== undefined ? quote?.ext : undefined}
                 currentPrice={stockData?.close}
-                dayChange={basisPrice !== undefined ? quote?.change : undefined}
-                dayChangePercent={basisPrice !== undefined ? quote?.changePercent : undefined}
-                dayHigh={basisPrice !== undefined ? quote?.dayHigh : undefined}
-                dayLow={basisPrice !== undefined ? quote?.dayLow : undefined}
+                dayChange={livePrice !== undefined ? quote?.change : undefined}
+                dayChangePercent={livePrice !== undefined ? quote?.changePercent : undefined}
+                dayHigh={livePrice !== undefined ? quote?.dayHigh : undefined}
+                dayLow={livePrice !== undefined ? quote?.dayLow : undefined}
                 companyName={security?.name}
                 chips={[security?.industry ?? security?.sector, formatMarketCap(security?.marketCap ?? null)]}
                 headerExtra={intervalSelector}

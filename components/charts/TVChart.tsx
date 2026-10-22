@@ -78,6 +78,8 @@ interface TVChartProps {
   isIntraday?: boolean;
   /** Live in the regular session; the last regular close outside it. */
   livePrice?: number;
+  /** The live quote for the header price in any mode (historical expiries too); falls back to livePrice. Never moves the candles. */
+  quotePrice?: number;
   /** Drives the Live / At close tag and whether the last candle follows ticks. */
   marketSession?: MarketSession;
   /** Pre-market / after-hours move from the regular close (shown under the day change). */
@@ -140,6 +142,7 @@ export default function TVChart({
   selectedExpiry,
   isIntraday = false,
   livePrice,
+  quotePrice,
   marketSession,
   extended,
   currentPrice,
@@ -1180,7 +1183,10 @@ export default function TVChart({
     target.addEventListener('pointercancel', onUp);
   };
 
-  const displayPrice = livePrice ?? currentPrice;
+  // The header shows the live quote in every mode; `livePrice` (current-expiry mode only) is what the chart's
+  // own overlays (last-candle nudge, closest-level marker) are measured against.
+  const headerQuote = quotePrice ?? livePrice;
+  const displayPrice = headerQuote ?? currentPrice;
 
   return (
     <div
@@ -1201,7 +1207,7 @@ export default function TVChart({
               {displayPrice !== undefined && (
                 <span className="text-lg text-gray-600">{formatCurrency(displayPrice)}</span>
               )}
-              {livePrice !== undefined && (marketSession === 'regular' ? (
+              {headerQuote !== undefined && (marketSession === 'regular' ? (
                 <span className="inline-flex items-center gap-1 text-[10px] font-bold text-green-600 uppercase tracking-wide">
                   <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
                   Live
