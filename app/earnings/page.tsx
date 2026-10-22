@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import Header from '@/components/layout/Header';
 import { getLevelDisplayName } from '@/lib/utils';
 import { addDaysET } from '@/lib/earningsFilter';
@@ -8,6 +8,7 @@ import { fmtMoneyCompact } from '@/lib/format';
 import { EARNINGS_COLUMNS } from '@/lib/earningsColumns';
 import ColumnsMenu from '@/components/ui/ColumnsMenu';
 import { useColumnPrefs } from '@/components/ui/useColumnPrefs';
+import ColRow from '@/components/ui/ColRow';
 import type { EarningsOutcome, EarningsRangeRow } from '@/types/earnings';
 import type { ExtendedQuote } from '@/lib/quote';
 import ExtendedMove from '@/components/ui/ExtendedMove';
@@ -82,6 +83,12 @@ export default function EarningsPage() {
   const [to, setTo] = useState(() => addDaysET(easternToday(), 7));
   const [rows, setRows] = useState<Row[] | null>(null);
   const [loading, setLoading] = useState(true);
+  // "Refresh quotes": re-reads the list (live quotes and reactions) in place, keeping the table on screen.
+  const [reloadKey, setReloadKey] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshFailed, setRefreshFailed] = useState(false);
+  const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
+  const softReload = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [levelRows, setLevelRows] = useState<LevelRow[] | null>(null);
   const [expiries, setExpiries] = useState<string[]>([]);
@@ -119,18 +126,27 @@ export default function EarningsPage() {
     if (!customReady) return;
     const ctl = new AbortController();
     const qs = mode === 'custom' ? `mode=custom&from=${from}&to=${to}` : `mode=${mode}&days=${days}`;
-    setLoading(true);
-    setError(null);
-    fetch(`/api/earnings/list?${qs}`, { signal: ctl.signal })
+    const soft = softReload.current;
+    softReload.current = false;
+    if (soft) { setRefreshing(true); setRefreshFailed(false); } else { setLoading(true); setError(null); }
+    fetch(`/api/earnings/list?${qs}`, { signal: ctl.signal, cache: 'no-store' })
       .then(res => res.json())
       .then(json => {
-        if (json.success) setRows(json.data.rows);
+        if (json.success) { setRows(json.data.rows); setUpdatedAt(new Date()); }
+        else if (soft) setRefreshFailed(true); // keep what is on screen
         else { setRows([]); setError(json.error ?? 'Could not load earnings.'); }
         setLoading(false);
+        setRefreshing(false);
       })
-      .catch(e => { if (e.name !== 'AbortError') { setRows([]); setError('Could not load earnings.'); setLoading(false); } });
+      .catch(e => {
+        if (e.name === 'AbortError') return;
+        if (soft) setRefreshFailed(true);
+        else { setRows([]); setError('Could not load earnings.'); }
+        setLoading(false);
+        setRefreshing(false);
+      });
     return () => ctl.abort();
-  }, [mode, days, from, to, customReady]);
+  }, [mode, days, from, to, customReady, reloadKey]);
 
   // Levels at one monthly expiry for the whole levels universe (rebased onto each row's LTP below).
   useEffect(() => {
@@ -302,7 +318,7 @@ export default function EarningsPage() {
     },
   };
   // Registry order, filtered to the saved choice; Ext. hrs also needs a row with a print.
-  const shownCols = EARNINGS_COLUMNS.map(c => c.id).filter(id => cols.isShown(id) && (id !== 'ext' || showExt));
+  const shownCols = cols.ordered(EARNINGS_COLUMNS.map(c => c.id)).filter(id => cols.isShown(id) && (id !== 'ext' || showExt));
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -478,7 +494,21 @@ export default function EarningsPage() {
         </div>
 
         {/* Table */}
-        <div className="flex justify-end mb-2">
+        <div className="flex items-center justify-end gap-2 mb-2">
+          {refreshFailed && <span className="text-[11px] text-red-600">Refresh failed; showing the previous quotes</span>}
+          {updatedAt && !refreshFailed && (
+            <span className="text-[11px] text-gray-400 tabular-nums" title="When the quotes on screen were fetched">
+              Quotes as of {updatedAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' })}
+            </span>
+          )}
+          <button
+            onClick={() => { softReload.current = true; setReloadKey(k => k + 1); }}
+            disabled={refreshing || loading || !customReady}
+            title="Fetch fresh quotes and price reactions from the market data API"
+            className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 bg-white rounded-lg text-xs font-semibold text-gray-700 hover:bg-gray-50 shadow-sm whitespace-nowrap disabled:opacity-50"
+          >
+            <span className={refreshing ? 'inline-block animate-spin' : 'inline-block'}>⟳</span> {refreshing ? 'Refreshing…' : 'Refresh quotes'}
+          </button>
           <ColumnsMenu metas={EARNINGS_COLUMNS} {...cols.menu} notes={showExt ? undefined : { ext: 'no after-hours prints right now' }} />
         </div>
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-x-auto">
@@ -494,19 +524,19 @@ export default function EarningsPage() {
           ) : (
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-200">
-                <tr className="text-left">
-                  {shownCols.map(id => <th key={id} className={`${th}${colDefs[id].right ? ' text-right' : ''}`}>{colDefs[id].head}</th>)}
-                </tr>
+                <ColRow layout={cols.layout} header className="text-left">
+                  {shownCols.map(id => <th key={id} data-col={id} className={`${th}${colDefs[id].right ? ' text-right' : ''}`}>{colDefs[id].head}</th>)}
+                </ColRow>
               </thead>
               <tbody>
                 {sorted.map(r => (
-                  <tr key={`${r.symbol}-${r.date}-${r.kind}`} onClick={() => openChart(r.symbol)}
+                  <ColRow layout={cols.layout} key={`${r.symbol}-${r.date}-${r.kind}`} onClick={() => openChart(r.symbol)}
                     className="border-b border-gray-50 last:border-0 hover:bg-blue-50/40 cursor-pointer">
                     {shownCols.map(id => {
                       const c = colDefs[id];
-                      return <td key={id} className={`${td}${c.right ? ' text-right' : ''}${c.cellClass ? ` ${c.cellClass}` : ''}`} title={c.title?.(r)}>{c.cell(r)}</td>;
+                      return <td key={id} data-col={id} className={`${td}${c.right ? ' text-right' : ''}${c.cellClass ? ` ${c.cellClass}` : ''}`} title={c.title?.(r)}>{c.cell(r)}</td>;
                     })}
-                  </tr>
+                  </ColRow>
                 ))}
               </tbody>
             </table>

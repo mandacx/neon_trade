@@ -7,6 +7,7 @@ import { EARNINGS_FILTER_OPTIONS } from '@/lib/earningsFilter';
 import { useSearchParams } from 'next/navigation';
 import QuadrantChart from '@/components/charts/QuadrantChart';
 import Header from '@/components/layout/Header';
+import ColRow from '@/components/ui/ColRow';
 import ColumnsMenu from '@/components/ui/ColumnsMenu';
 import { useColumnPrefs } from '@/components/ui/useColumnPrefs';
 import type { ColumnMeta } from '@/lib/tableColumns';
@@ -360,48 +361,48 @@ function QuadrantPageInner() {
                 <div className={`overflow-x-auto ${cols.hideUntilReady}`}>
                   <table className="w-full">
                     <thead className="bg-gray-50 border-b border-gray-200">
-                      <tr>
-                        <th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Symbol</th>
-                        {show('name') && (<th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Name</th>)}
-                        {show('ltp') && (<th className="px-4 py-2 text-right text-[10px] font-semibold text-gray-500 uppercase" title="Live during market hours, otherwise that day's close">Price</th>)}
-                        {show('close') && (<th className="px-4 py-2 text-right text-[10px] font-semibold text-gray-500 uppercase" title="The close stored in the EOD table: the session before the load date">Prev close</th>)}
-                        {show('level') && (<th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Closest Level</th>)}
-                        {show('distance') && (<th className="px-4 py-2 text-right text-[10px] font-semibold text-gray-500 uppercase">Distance</th>)}
-                        {earningsEnabled && show('earnings') && <th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Next Earnings</th>}
+                      <ColRow layout={cols.layout} header>
+                        <th data-col="symbol" className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Symbol</th>
+                        {show('name') && (<th data-col="name" className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Name</th>)}
+                        {show('ltp') && (<th data-col="ltp" className="px-4 py-2 text-right text-[10px] font-semibold text-gray-500 uppercase" title="Live during market hours, otherwise that day's close">Price</th>)}
+                        {show('close') && (<th data-col="close" className="px-4 py-2 text-right text-[10px] font-semibold text-gray-500 uppercase" title="The close stored in the EOD table: the session before the load date">Prev close</th>)}
+                        {show('level') && (<th data-col="level" className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Closest Level</th>)}
+                        {show('distance') && (<th data-col="distance" className="px-4 py-2 text-right text-[10px] font-semibold text-gray-500 uppercase">Distance</th>)}
+                        {earningsEnabled && show('earnings') && <th data-col="earnings" className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Next Earnings</th>}
                         {hasSecurityFilters && (
                           <>
-                            {show('sector') && (<th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Sector</th>)}
-                            {show('capTier') && (<th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Cap Tier</th>)}
+                            {show('sector') && (<th data-col="sector" className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Sector</th>)}
+                            {show('capTier') && (<th data-col="capTier" className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Cap Tier</th>)}
                           </>
                         )}
                         <th className="px-4 py-2 text-center text-[10px] font-semibold text-gray-500 uppercase">Action</th>
-                      </tr>
+                      </ColRow>
                     </thead>
                     <tbody className="divide-y divide-gray-50">
                       {filteredStocks.slice(0, 50).map((stock) => (
-                        <tr key={stock.symbol} className="hover:bg-gray-50">
-                          <td className="px-4 py-2 text-sm font-bold">{stock.symbol}</td>
-                          {show('name') && (<td className="px-4 py-2 text-xs text-gray-600 max-w-[160px] truncate" title={(stock as any).name || ''}>
+                        <ColRow layout={cols.layout} key={stock.symbol} className="hover:bg-gray-50">
+                          <td data-col="symbol" className="px-4 py-2 text-sm font-bold">{stock.symbol}</td>
+                          {show('name') && (<td data-col="name" className="px-4 py-2 text-xs text-gray-600 max-w-[160px] truncate" title={(stock as any).name || ''}>
                             {(stock as any).name || '—'}
                           </td>)}
-                          {show('ltp') && (<td className="px-4 py-2 text-xs text-right font-mono">
+                          {show('ltp') && (<td data-col="ltp" className="px-4 py-2 text-xs text-right font-mono">
                             {stock.refPrice != null && stock.refSource !== 'stored' ? `$${stock.refPrice.toFixed(2)}` : '—'}
                           </td>)}
-                          {show('close') && (<td className="px-4 py-2 text-xs text-right font-mono text-gray-500">${stock.close.toFixed(2)}</td>)}
-                          {show('level') && (<td className="px-4 py-2 text-xs">
+                          {show('close') && (<td data-col="close" className="px-4 py-2 text-xs text-right font-mono text-gray-500">${stock.close.toFixed(2)}</td>)}
+                          {show('level') && (<td data-col="level" className="px-4 py-2 text-xs">
                             <span className="px-2 py-0.5 rounded text-[10px] font-semibold text-white"
                               style={{ backgroundColor: LEVEL_COLORS[stock.closestLevel] || '#6b7280' }}>
                               {stock.closestLevel.replace(/_/g, ' ').toUpperCase()}
                             </span>
                           </td>)}
-                          {show('distance') && (<td className="px-4 py-2 text-xs text-right font-mono">
+                          {show('distance') && (<td data-col="distance" className="px-4 py-2 text-xs text-right font-mono">
                             {stock.closestValue > 0 ? '+' : ''}{(stock.closestValue * 100).toFixed(2)}%
                           </td>)}
-                          {earningsEnabled && show('earnings') && <td className="px-4 py-2"><EarningsBadgeCell badge={stock.earnings} /></td>}
+                          {earningsEnabled && show('earnings') && <td data-col="earnings" className="px-4 py-2"><EarningsBadgeCell badge={stock.earnings} /></td>}
                           {hasSecurityFilters && (
                             <>
-                              {show('sector') && (<td className="px-4 py-2 text-xs text-gray-500">{(stock as any).sector || '—'}</td>)}
-                              {show('capTier') && (<td className="px-4 py-2 text-xs text-gray-500">{(stock as any).marketCapTier || '—'}</td>)}
+                              {show('sector') && (<td data-col="sector" className="px-4 py-2 text-xs text-gray-500">{(stock as any).sector || '—'}</td>)}
+                              {show('capTier') && (<td data-col="capTier" className="px-4 py-2 text-xs text-gray-500">{(stock as any).marketCapTier || '—'}</td>)}
                             </>
                           )}
                           <td className="px-4 py-2 text-center">
@@ -412,7 +413,7 @@ function QuadrantPageInner() {
                               View →
                             </button>
                           </td>
-                        </tr>
+                        </ColRow>
                       ))}
                     </tbody>
                   </table>

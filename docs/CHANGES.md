@@ -7,6 +7,22 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-21 — Tables: reorder and resize columns (saved), reset, and Earnings "Refresh quotes"
+
+Requested: let users move and resize table columns on every page, saved like the show/hide choice, with a reset; add a quotes refresh to the Earnings page.
+
+- **Storage:** `cols.<tableId>` in `nt_user_prefs` (or localStorage when signed out) now holds `{ hidden, order, widths }` (`ColumnPrefs`, `lib/tableColumns.ts`; `normalizeColumnPrefs` validates on server and client, clamps widths to 40-1200 px). Older saves (a bare list of hidden ids) are read as `{hidden}`. Ids missing from `order` follow the saved ones in the table's own order, so new columns appear without a migration. One GET/PUT per table, as before.
+- **Hook** (`components/ui/useColumnPrefs.ts`): adds `layout`, `order`, `ordered(ids)`; `menu` now carries `order`/`onOrder`; reset clears visibility, order and widths (DELETE).
+- **`components/ui/ColRow.tsx` (new):** a `<tr>` that reorders its cells and applies widths. Cells of registry columns carry `data-col="<id>"`; only those cells are permuted, within the positions they hold (action/remove cells stay put). Header rows get a resize handle on each cell's right edge (double-click resets that column; a click without movement does not pin a width) and cells can be dragged onto another header to reorder. Resized columns clip long cell text with an ellipsis.
+- **Columns menu:** drag or ▲▼ to reorder, "Reset columns".
+- **Converted tables:** earnings, performance (both), scan alerts latest/historical, quadrant, watchlists, watchlist chart panel (its own colgroup/localStorage resizing was replaced by the shared system, so its old saved widths `watchlistWChart.colWidths` are no longer read), stock page earnings history, price levels history and option chain, OI tracker `DataTable` (all OI tables with a `tableId`).
+- **Earnings page:** "Refresh quotes" button re-fetches `/api/earnings/list` (fresh quotes and reactions, `cache: no-store`) in place without the full-page spinner, shows "Quotes as of hh:mm:ss", keeps the old rows and says so if a refresh fails.
+- **To add to a new table:** `data-col` on every registry `<th>`/`<td>`, `<ColRow layout={cols.layout}>` for the header (`header`) and body rows; a header cell that must stay sticky needs `sticky` in its own className (ColRow otherwise sets `position: relative`).
+- **Verified:** `tsc`, eslint (0 errors) and `npm run build` pass. A server-render test of `ColRow` (order permutation within slots, fragments, falsy cells, widths, handles) and of `normalizeColumnPrefs`/`resolveOrder` (legacy list, clamping, bad input). **Not verified:** nothing was exercised in a browser: drag-to-reorder, resize, sticky headers on the stock tables and watchlist panel, the Refresh button, and signed-in saving/loading of the new shape.
+- **Follow-ups:** the Symbol column of tables whose registry omits it stays first; the watchlist chart panel keeps `table-layout: fixed`, so very wide saved totals scroll horizontally.
+
+---
+
 ## 2026-10-21 — Stock chart: Call Low and Put High lines
 
 Requested: plot call low and put high on the chart, current and historical, whenever data exists.

@@ -19,6 +19,7 @@ import { pollDelayMs } from '@/lib/pollDelay';
 import ExtendedMove from '@/components/ui/ExtendedMove';
 import ColumnsMenu from '@/components/ui/ColumnsMenu';
 import { useColumnPrefs } from '@/components/ui/useColumnPrefs';
+import ColRow from '@/components/ui/ColRow';
 import type { ColumnMeta } from '@/lib/tableColumns';
 import { format, subDays } from 'date-fns';
 
@@ -1539,20 +1540,20 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
                         border-b: preflight sets border-collapse:collapse, and
                         collapsed borders don't travel with a sticky cell. */}
                     <thead className="[&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-white [&_th]:shadow-[inset_0_-1px_0_0_#e5e7eb]">
-                      <tr className="text-gray-500">
-                        <th className="text-left py-1.5 pr-3 font-medium">Date</th>
-                        {ph('close') && (<th className="text-right py-1.5 px-2 font-medium">Close</th>)}
+                      <ColRow layout={phCols.layout} header className="text-gray-500">
+                        <th data-col="date" className="sticky text-left py-1.5 pr-3 font-medium">Date</th>
+                        {ph('close') && (<th data-col="close" className="sticky text-right py-1.5 px-2 font-medium">Close</th>)}
                         {SEVEN_LEVEL_ORDER.filter(name => ph(name)).map((name) => (
-                          <th key={name} className="text-right py-1.5 px-2 font-medium">
+                          <th key={name} data-col={name} className="sticky text-right py-1.5 px-2 font-medium">
                             {getLevelDisplayName(name)}
                           </th>
                         ))}
-                        {ph('callOi') && (<th className="text-right py-1.5 px-2 font-medium">Call OI</th>)}
-                        {ph('putOi') && (<th className="text-right py-1.5 px-2 font-medium">Put OI</th>)}
-                        {ph('oiDiff') && (<th className="text-right py-1.5 px-2 font-medium">OI Diff</th>)}
-                        {ph('upc') && (<th className="text-right py-1.5 pl-2 font-medium">UPC</th>)}
-                        {ph('ucpr') && (<th className="text-right py-1.5 pl-2 font-medium">UCPR</th>)}
-                      </tr>
+                        {ph('callOi') && (<th data-col="callOi" className="sticky text-right py-1.5 px-2 font-medium">Call OI</th>)}
+                        {ph('putOi') && (<th data-col="putOi" className="sticky text-right py-1.5 px-2 font-medium">Put OI</th>)}
+                        {ph('oiDiff') && (<th data-col="oiDiff" className="sticky text-right py-1.5 px-2 font-medium">OI Diff</th>)}
+                        {ph('upc') && (<th data-col="upc" className="sticky text-right py-1.5 pl-2 font-medium">UPC</th>)}
+                        {ph('ucpr') && (<th data-col="ucpr" className="sticky text-right py-1.5 pl-2 font-medium">UCPR</th>)}
+                      </ColRow>
                     </thead>
                     <tbody>
                       {priceHistoryRows.map((row) => {
@@ -1562,15 +1563,16 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
                         const levelsByName = new Map(row.sevenLevels.map(l => [l.name, l]));
 
                         return (
-                          <tr key={row.date} className="border-b border-gray-100 last:border-0 hover:bg-gray-50">
-                            <td className="py-1.5 pr-3 text-gray-600">{row.date}</td>
-                            {ph('close') && (<td className="text-right py-1.5 px-2 font-semibold">{formatCurrency(row.close)}</td>)}
+                          <ColRow layout={phCols.layout} key={row.date} className="border-b border-gray-100 last:border-0 hover:bg-gray-50">
+                            <td data-col="date" className="py-1.5 pr-3 text-gray-600">{row.date}</td>
+                            {ph('close') && (<td data-col="close" className="text-right py-1.5 px-2 font-semibold">{formatCurrency(row.close)}</td>)}
                             {SEVEN_LEVEL_ORDER.filter(name => ph(name)).map((name) => {
                               const lvl = levelsByName.get(name);
                               const isClosest = !!closest && lvl && closest.name === lvl.name;
                               return (
                                 <td
                                   key={name}
+                                  data-col={name}
                                   className={`text-right py-1.5 px-2 font-mono ${
                                     isClosest ? 'bg-blue-50 text-blue-700 font-bold rounded' : ''
                                   }`}
@@ -1584,12 +1586,12 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
                                 </td>
                               );
                             })}
-                            {ph('callOi') && (<td className="text-right py-1.5 px-2 text-gray-600">{row.oi?.callOi?.toLocaleString() ?? '—'}</td>)}
-                            {ph('putOi') && (<td className="text-right py-1.5 px-2 text-gray-600">{row.oi?.putOi?.toLocaleString() ?? '—'}</td>)}
-                            {ph('oiDiff') && (<td className="text-right py-1.5 px-2 text-gray-600">{row.oi?.oiDiff?.toLocaleString() ?? '—'}</td>)}
-                            {ph('upc') && (<td className="text-right py-1.5 pl-2 text-gray-600">{row.ratios?.upc ?? '—'}</td>)}
-                            {ph('ucpr') && (<td className="text-right py-1.5 pl-2 text-gray-600">{row.ratios?.ucpr ?? '—'}</td>)}
-                          </tr>
+                            {ph('callOi') && (<td data-col="callOi" className="text-right py-1.5 px-2 text-gray-600">{row.oi?.callOi?.toLocaleString() ?? '—'}</td>)}
+                            {ph('putOi') && (<td data-col="putOi" className="text-right py-1.5 px-2 text-gray-600">{row.oi?.putOi?.toLocaleString() ?? '—'}</td>)}
+                            {ph('oiDiff') && (<td data-col="oiDiff" className="text-right py-1.5 px-2 text-gray-600">{row.oi?.oiDiff?.toLocaleString() ?? '—'}</td>)}
+                            {ph('upc') && (<td data-col="upc" className="text-right py-1.5 pl-2 text-gray-600">{row.ratios?.upc ?? '—'}</td>)}
+                            {ph('ucpr') && (<td data-col="ucpr" className="text-right py-1.5 pl-2 text-gray-600">{row.ratios?.ucpr ?? '—'}</td>)}
+                          </ColRow>
                         );
                       })}
                     </tbody>
@@ -1662,16 +1664,16 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
                   <div className={`overflow-auto max-h-[65vh] ${ocCols.hideUntilReady}`}>
                     <table className="w-full text-xs whitespace-nowrap">
                       <thead className="[&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-white [&_th]:shadow-[inset_0_-1px_0_0_#e5e7eb]">
-                        <tr className="text-gray-500 align-bottom">
-                          <th className="text-left py-1.5 pr-3 font-medium">Symbol</th>
-                          {oc('expiry') && (<th className="text-left py-1.5 px-2 font-medium">Expiry</th>)}
-                          {oc('loadDate') && (<th className="text-left py-1.5 px-2 font-medium">
+                        <ColRow layout={ocCols.layout} header className="text-gray-500 align-bottom">
+                          <th data-col="symbol" className="sticky text-left py-1.5 pr-3 font-medium">Symbol</th>
+                          {oc('expiry') && (<th data-col="expiry" className="sticky text-left py-1.5 px-2 font-medium">Expiry</th>)}
+                          {oc('loadDate') && (<th data-col="loadDate" className="sticky text-left py-1.5 px-2 font-medium">
                             <OptChainSortLabel label="Trade Date" align="left" active={optChainSortKey === 'loadDate'} dir={optChainSortDir} onClick={() => handleOptChainSort('loadDate')} />
                           </th>)}
-                          {oc('cmp') && (<th className="text-right py-1.5 px-2 font-medium">
+                          {oc('cmp') && (<th data-col="cmp" className="sticky text-right py-1.5 px-2 font-medium">
                             <OptChainSortLabel label="CMP" active={optChainSortKey === 'close'} dir={optChainSortDir} onClick={() => handleOptChainSort('close')} />
                           </th>)}
-                          {oc('strike') && (<th className="text-right py-1.5 px-2 font-medium">
+                          {oc('strike') && (<th data-col="strike" className="sticky text-right py-1.5 px-2 font-medium">
                             <OptChainSortLabel label="Strike Price" active={optChainSortKey === 'strike'} dir={optChainSortDir} onClick={() => handleOptChainSort('strike')} />
                             <input
                               value={optChainColFilters.strike}
@@ -1680,7 +1682,7 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
                               className="mt-1 w-full px-1.5 py-0.5 border border-gray-200 rounded text-[11px] text-right font-normal focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
                             />
                           </th>)}
-                          {oc('optType') && (<th className="text-left py-1.5 px-2 font-medium">
+                          {oc('optType') && (<th data-col="optType" className="sticky text-left py-1.5 px-2 font-medium">
                             <OptChainSortLabel label="Opt Typ" align="left" active={optChainSortKey === 'optType'} dir={optChainSortDir} onClick={() => handleOptChainSort('optType')} />
                             <select
                               value={optChainTypeFilter}
@@ -1692,53 +1694,54 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
                               <option value="put">Put</option>
                             </select>
                           </th>)}
-                          {oc('ltp') && (<th className="text-right py-1.5 px-2 font-medium">
+                          {oc('ltp') && (<th data-col="ltp" className="sticky text-right py-1.5 px-2 font-medium">
                             <OptChainSortLabel label="Opt LTP" active={optChainSortKey === 'ltp'} dir={optChainSortDir} onClick={() => handleOptChainSort('ltp')} />
                           </th>)}
-                          {oc('oi') && (<th className="text-right py-1.5 px-2 font-medium">
+                          {oc('oi') && (<th data-col="oi" className="sticky text-right py-1.5 px-2 font-medium">
                             <OptChainSortLabel label="Open Int" active={optChainSortKey === 'oi'} dir={optChainSortDir} onClick={() => handleOptChainSort('oi')} />
                           </th>)}
-                          {oc('oiChg') && (<th className="text-right py-1.5 px-2 font-medium">
+                          {oc('oiChg') && (<th data-col="oiChg" className="sticky text-right py-1.5 px-2 font-medium">
                             <OptChainSortLabel label="Chg Open Int" active={optChainSortKey === 'oiChg'} dir={optChainSortDir} onClick={() => handleOptChainSort('oiChg')} />
                           </th>)}
-                          {oc('absOiChg') && (<th className="text-right py-1.5 px-2 font-medium">
+                          {oc('absOiChg') && (<th data-col="absOiChg" className="sticky text-right py-1.5 px-2 font-medium">
                             <OptChainSortLabel label="ABS Chg Open Int" active={optChainSortKey === 'absOiChg'} dir={optChainSortDir} onClick={() => handleOptChainSort('absOiChg')} />
                           </th>)}
-                          {oc('chgPrice') && (<th className="text-right py-1.5 px-2 font-medium">
+                          {oc('chgPrice') && (<th data-col="chgPrice" className="sticky text-right py-1.5 px-2 font-medium">
                             <OptChainSortLabel label="Chg Open Int Price" active={optChainSortKey === 'chgOpenIntPrice'} dir={optChainSortDir} onClick={() => handleOptChainSort('chgOpenIntPrice')} />
                           </th>)}
-                          {oc('absChgPrice') && (<th className="text-right py-1.5 pl-2 font-medium">
+                          {oc('absChgPrice') && (<th data-col="absChgPrice" className="sticky text-right py-1.5 pl-2 font-medium">
                             <OptChainSortLabel label="ABS Chg Open Int Price" active={optChainSortKey === 'absChgOpenIntPrice'} dir={optChainSortDir} onClick={() => handleOptChainSort('absChgOpenIntPrice')} />
                           </th>)}
-                        </tr>
+                        </ColRow>
                       </thead>
                       <tbody>
                         {visibleOptChainRows.map((r, i) => {
                           const chgOpenIntPrice = r.chgOpenIntPrice;
                           return (
-                            <tr
+                            <ColRow
+                              layout={ocCols.layout}
                               key={`${r.loadDate}-${r.optType}-${r.strike}-${i}`}
                               onClick={() => setSelectedOptContract({ strike: r.strike, optType: r.optType })}
                               title="View option contract chart"
                               className="border-b border-gray-100 last:border-0 hover:bg-blue-50 cursor-pointer"
                             >
-                              <td className="py-1.5 pr-3 text-gray-600">{symbol.toUpperCase()}</td>
-                              {oc('expiry') && (<td className="py-1.5 px-2 text-gray-600">{selectedExpiry}</td>)}
-                              {oc('loadDate') && (<td className="py-1.5 px-2 text-gray-600">{r.loadDate}</td>)}
-                              {oc('cmp') && (<td className="text-right py-1.5 px-2 text-gray-600">{r.close}</td>)}
-                              {oc('strike') && (<td className="text-right py-1.5 px-2 font-mono">{r.strike}</td>)}
-                              {oc('optType') && (<td className={`py-1.5 px-2 font-semibold capitalize ${r.optType === 'call' ? 'text-green-600' : 'text-red-600'}`}>{r.optType}</td>)}
-                              {oc('ltp') && (<td className="text-right py-1.5 px-2 text-gray-600">{r.ltp}</td>)}
-                              {oc('oi') && (<td className="text-right py-1.5 px-2 text-gray-600">{r.oi.toLocaleString()}</td>)}
-                              {oc('oiChg') && (<td className={`text-right py-1.5 px-2 font-semibold ${r.oiChg > 0 ? 'text-green-600' : r.oiChg < 0 ? 'text-red-600' : 'text-gray-500'}`}>
+                              <td data-col="symbol" className="py-1.5 pr-3 text-gray-600">{symbol.toUpperCase()}</td>
+                              {oc('expiry') && (<td data-col="expiry" className="py-1.5 px-2 text-gray-600">{selectedExpiry}</td>)}
+                              {oc('loadDate') && (<td data-col="loadDate" className="py-1.5 px-2 text-gray-600">{r.loadDate}</td>)}
+                              {oc('cmp') && (<td data-col="cmp" className="text-right py-1.5 px-2 text-gray-600">{r.close}</td>)}
+                              {oc('strike') && (<td data-col="strike" className="text-right py-1.5 px-2 font-mono">{r.strike}</td>)}
+                              {oc('optType') && (<td data-col="optType" className={`py-1.5 px-2 font-semibold capitalize ${r.optType === 'call' ? 'text-green-600' : 'text-red-600'}`}>{r.optType}</td>)}
+                              {oc('ltp') && (<td data-col="ltp" className="text-right py-1.5 px-2 text-gray-600">{r.ltp}</td>)}
+                              {oc('oi') && (<td data-col="oi" className="text-right py-1.5 px-2 text-gray-600">{r.oi.toLocaleString()}</td>)}
+                              {oc('oiChg') && (<td data-col="oiChg" className={`text-right py-1.5 px-2 font-semibold ${r.oiChg > 0 ? 'text-green-600' : r.oiChg < 0 ? 'text-red-600' : 'text-gray-500'}`}>
                                 {r.oiChg > 0 ? '+' : ''}{r.oiChg.toLocaleString()}
                               </td>)}
-                              {oc('absOiChg') && (<td className="text-right py-1.5 px-2 text-gray-600">{Math.abs(r.oiChg).toLocaleString()}</td>)}
-                              {oc('chgPrice') && (<td className={`text-right py-1.5 px-2 font-semibold ${chgOpenIntPrice > 0 ? 'text-green-600' : chgOpenIntPrice < 0 ? 'text-red-600' : 'text-gray-500'}`}>
+                              {oc('absOiChg') && (<td data-col="absOiChg" className="text-right py-1.5 px-2 text-gray-600">{Math.abs(r.oiChg).toLocaleString()}</td>)}
+                              {oc('chgPrice') && (<td data-col="chgPrice" className={`text-right py-1.5 px-2 font-semibold ${chgOpenIntPrice > 0 ? 'text-green-600' : chgOpenIntPrice < 0 ? 'text-red-600' : 'text-gray-500'}`}>
                                 {chgOpenIntPrice > 0 ? '+' : ''}{chgOpenIntPrice.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                               </td>)}
-                              {oc('absChgPrice') && (<td className="text-right py-1.5 pl-2 text-gray-600">{Math.abs(chgOpenIntPrice).toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>)}
-                            </tr>
+                              {oc('absChgPrice') && (<td data-col="absChgPrice" className="text-right py-1.5 pl-2 text-gray-600">{Math.abs(chgOpenIntPrice).toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>)}
+                            </ColRow>
                           );
                         })}
                         {visibleOptChainRows.length === 0 && (

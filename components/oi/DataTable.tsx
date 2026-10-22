@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { parseHumanNumber } from '@/lib/format';
 import ColumnsMenu from '@/components/ui/ColumnsMenu';
 import { useColumnPrefs } from '@/components/ui/useColumnPrefs';
+import ColRow from '@/components/ui/ColRow';
 
 /**
  * Generic client-side table for the OI tracker: click-to-sort headers, a
@@ -120,7 +121,15 @@ export default function DataTable<T>({
 }) {
   const metas = allColumns.filter(c => c.label).map(c => ({ id: c.key, label: c.label, hint: c.title }));
   const prefs = useColumnPrefs(tableId ?? null, metas);
-  const columns = tableId ? allColumns.filter(c => !c.label || prefs.isShown(c.key)) : allColumns;
+  const columns = useMemo(() => {
+    if (!tableId) return allColumns;
+    const shown = allColumns.filter(c => !c.label || prefs.isShown(c.key));
+    // Labelled columns follow the user's order; unlabelled ones keep their place.
+    const labelled = shown.filter(c => c.label).sort((a, b) => prefs.order.indexOf(a.key) - prefs.order.indexOf(b.key));
+    return shown.map(c => (c.label ? labelled.shift()! : c));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tableId, allColumns, prefs.menu.hidden, prefs.order]);
+  const layout = tableId ? prefs.layout : undefined;
 
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState<Record<string, Filter>>({});
@@ -197,13 +206,13 @@ export default function DataTable<T>({
       <div className={`overflow-auto ${prefs.hideUntilReady}`} style={{ maxHeight }}>
         <table className="w-full text-sm">
           <thead className="sticky top-0 z-20">
-            <tr className="border-b border-gray-200">
+            <ColRow layout={layout} header className="border-b border-gray-200">
               {columns.map(c => {
                 const active = sort?.key === c.key;
                 const fActive = isActive(filters[c.key]);
                 const right = (c.align ?? (c.type === 'number' ? 'right' : 'left')) === 'right';
                 return (
-                  <th key={c.key} className={`${th} ${right ? 'text-right' : 'text-left'}`} title={c.title}>
+                  <th key={c.key} data-col={c.label ? c.key : undefined} className={`${th} ${right ? 'text-right' : 'text-left'}`} title={c.title}>
                     <div className={`relative flex items-center gap-1 ${right ? 'justify-end' : ''}`}>
                       {c.sortable === false ? <span>{c.label}</span> : (
                         <button onClick={() => toggleSort(c.key, c.type)} className="flex items-center gap-1 hover:text-gray-800">
@@ -225,23 +234,23 @@ export default function DataTable<T>({
                   </th>
                 );
               })}
-            </tr>
+            </ColRow>
           </thead>
           <tbody>
             {sorted.length === 0 ? (
               <tr><td colSpan={columns.length} className="p-8 text-center text-sm text-gray-400">{emptyText}</td></tr>
             ) : sorted.slice(0, shown).map(r => (
-              <tr key={rowKey(r)} onClick={onRowClick ? () => onRowClick(r) : undefined}
+              <ColRow layout={layout} key={rowKey(r)} onClick={onRowClick ? () => onRowClick(r) : undefined}
                 className={`border-b border-gray-50 last:border-0 ${onRowClick ? 'cursor-pointer hover:bg-blue-50/40' : ''} ${rowClassName?.(r) ?? ''}`}>
                 {columns.map(c => {
                   const right = (c.align ?? (c.type === 'number' ? 'right' : 'left')) === 'right';
                   return (
-                    <td key={c.key} className={`${td} ${right ? 'text-right tabular-nums' : ''} ${c.align === 'center' ? 'text-center' : ''} ${c.className ?? 'text-xs'}`}>
+                    <td key={c.key} data-col={c.label ? c.key : undefined} className={`${td} ${right ? 'text-right tabular-nums' : ''} ${c.align === 'center' ? 'text-center' : ''} ${c.className ?? 'text-xs'}`}>
                       {c.render ? c.render(r) : (c.value(r) ?? '—')}
                     </td>
                   );
                 })}
-              </tr>
+              </ColRow>
             ))}
           </tbody>
         </table>

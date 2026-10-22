@@ -92,6 +92,7 @@ Column naming is inconsistent between the DB (`snake_case`) and the `StockData` 
 - Tracked positions are in `lib/oiTracked.ts` and `nt_oi_tracked`. **They are private: every query filters on `user_id`.** `visibility` is reserved for a future social feature and is always `private`.
 
 **Column selection (every user-facing table).** Each table has a "⚙ Columns" menu (`components/ui/ColumnsMenu.tsx`) driven by `useColumnPrefs(tableId, columns)` (`components/ui/useColumnPrefs.ts`):
+- Users can also reorder (drag headers or the menu) and resize columns; `useColumnPrefs` saves `{ hidden, order, widths }` together and `components/ui/ColRow.tsx` applies them: put `data-col="<id>"` on every registry `<th>`/`<td>` and render header/body rows as `<ColRow layout={cols.layout}>`. The menu's "Reset columns" clears all three.
 - Signed in, the *hidden* column ids are saved per user in `nt_user_prefs` under `cols.<tableId>` via `/api/prefs/[key]` (`lib/userPrefs.ts` validates the key against `TABLE_IDS` in `lib/tableColumns.ts`); signed out (the public stock page) they go to localStorage.
 - To add the menu to a table: give it a registry of `ColumnMeta`, add its id to `TABLE_IDS`, wrap its `<th>`/`<td>` in `cols.isShown(id)` and render `<ColumnsMenu />` (the OI `DataTable` does this itself when given a `tableId`).
 - Admin pages are deliberately excluded.

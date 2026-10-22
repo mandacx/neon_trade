@@ -7,6 +7,7 @@ import AddSymbolInput from '@/components/watchlists/AddSymbolInput';
 import { getLevelDisplayName } from '@/lib/utils';
 import ExtendedMove from '@/components/ui/ExtendedMove';
 import { pollDelayMs, type MarketClock } from '@/lib/pollDelay';
+import ColRow from '@/components/ui/ColRow';
 import ColumnsMenu from '@/components/ui/ColumnsMenu';
 import { useColumnPrefs } from '@/components/ui/useColumnPrefs';
 import type { ColumnMeta } from '@/lib/tableColumns';
@@ -30,27 +31,12 @@ const CHART_COLUMNS: ColumnMeta[] = [
 ];
 
 // Starting widths (px) sized so all six columns fit the 460px panel with no
-// horizontal scrollbar; the user can drag any header edge to rebalance them.
+// horizontal scrollbar; the user can drag any header edge to rebalance them
+// (saved with the other column prefs, see useColumnPrefs).
 // (The earnings column only shows for viewers with the earnings feature, and the
 // extended-hours column only while some row has a pre-market / after-hours print.)
 const DEFAULT_COL_WIDTHS: Record<SortKey, number> = { symbol: 62, lastPrice: 68, change: 70, changePercent: 62, ext: 62, level: 120, earnings: 54 };
 const REMOVE_COL_WIDTH = 28;
-const MIN_COL_WIDTH = 44;
-const COL_WIDTHS_STORAGE_KEY = 'watchlistWChart.colWidths';
-
-function loadColWidths(): Record<SortKey, number> {
-  try {
-    const saved = JSON.parse(localStorage.getItem(COL_WIDTHS_STORAGE_KEY) ?? 'null');
-    if (saved && typeof saved === 'object') {
-      const merged = { ...DEFAULT_COL_WIDTHS };
-      (Object.keys(merged) as SortKey[]).forEach(k => {
-        if (typeof saved[k] === 'number' && saved[k] >= MIN_COL_WIDTH) merged[k] = saved[k];
-      });
-      return merged;
-    }
-  } catch { /* storage unavailable or corrupt — fall back to defaults */ }
-  return { ...DEFAULT_COL_WIDTHS };
-}
 
 const labelClass = 'block text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1';
 const controlClass = 'w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs text-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white';
@@ -100,10 +86,8 @@ export default function WatchlistViewPage() {
   const [symbol, setSymbol] = useState<string | null>(null);
   const [newListName, setNewListName] = useState('');
   const [busy, setBusy] = useState(false);
-  const [colWidths, setColWidths] = useState<Record<SortKey, number>>(DEFAULT_COL_WIDTHS);
   // Columns the user switched off: loaded with the page, saved to their account.
   const cols = useColumnPrefs('watchlistChart', CHART_COLUMNS);
-  const dragRef = useRef<{ key: SortKey; startX: number; startWidth: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const selected = lists.find(l => l.id === selectedId) ?? null;
@@ -149,59 +133,6 @@ export default function WatchlistViewPage() {
       return sortDir === 'asc' ? cmp : -cmp;
     });
   }, [rows, search, levelFilter, levelBySymbol, sortKey, sortDir, earningsEnabled, earningsFilter, earningsFrom, earningsTo, selectedExpiry]);
-
-  // Read saved widths after mount (not in the initial state) so server and
-  // client render the same markup.
-  useEffect(() => { setColWidths(loadColWidths()); }, []);
-
-  function persistColWidths(widths: Record<SortKey, number>) {
-    try { localStorage.setItem(COL_WIDTHS_STORAGE_KEY, JSON.stringify(widths)); } catch { /* ignore */ }
-  }
-
-  function startResize(e: React.PointerEvent<HTMLDivElement>, key: SortKey) {
-    e.preventDefault();
-    e.stopPropagation();
-    e.currentTarget.setPointerCapture(e.pointerId);
-    dragRef.current = { key, startX: e.clientX, startWidth: colWidths[key] };
-  }
-  function moveResize(e: React.PointerEvent<HTMLDivElement>) {
-    const drag = dragRef.current;
-    if (!drag) return;
-    const width = Math.max(MIN_COL_WIDTH, Math.round(drag.startWidth + e.clientX - drag.startX));
-    setColWidths(prev => ({ ...prev, [drag.key]: width }));
-  }
-  function endResize(e: React.PointerEvent<HTMLDivElement>) {
-    if (!dragRef.current) return;
-    dragRef.current = null;
-    e.currentTarget.releasePointerCapture(e.pointerId);
-    setColWidths(prev => { persistColWidths(prev); return prev; });
-  }
-  function resetColWidth(key: SortKey) {
-    setColWidths(prev => {
-      const next = { ...prev, [key]: DEFAULT_COL_WIDTHS[key] };
-      persistColWidths(next);
-      return next;
-    });
-  }
-
-  // Drag handle on a header cell's right edge. Double-click resets the column.
-  function resizeHandle(key: SortKey) {
-    return (
-      <div
-        role="separator"
-        aria-orientation="vertical"
-        aria-label={`Resize ${key} column`}
-        title="Drag to resize · double-click to reset"
-        onPointerDown={e => startResize(e, key)}
-        onPointerMove={moveResize}
-        onPointerUp={endResize}
-        onPointerCancel={endResize}
-        onDoubleClick={() => resetColWidth(key)}
-        onClick={e => e.stopPropagation()}
-        className="absolute right-0 top-0 h-full w-2 cursor-col-resize touch-none select-none after:absolute after:right-0.5 after:top-1/4 after:h-1/2 after:w-px after:bg-gray-300 hover:after:bg-blue-500 hover:after:w-0.5"
-      />
-    );
-  }
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
@@ -401,7 +332,8 @@ export default function WatchlistViewPage() {
   const on = (k: SortKey) => COLUMN_ORDER.includes(k);
   const menuColumns = CHART_COLUMNS.filter(c => c.id !== 'earnings' || earningsEnabled);
   const colSpan = COLUMN_ORDER.length + (canEdit ? 1 : 0);
-  const tableWidth = COLUMN_ORDER.reduce((sum, k) => sum + colWidths[k], 0) + (canEdit ? REMOVE_COL_WIDTH : 0);
+  const widthOf = (k: SortKey) => cols.layout.widths[k] ?? DEFAULT_COL_WIDTHS[k];
+  const tableWidth = COLUMN_ORDER.reduce((sum, k) => sum + widthOf(k), 0) + (canEdit ? REMOVE_COL_WIDTH : 0);
 
   return (
     <>
@@ -525,45 +457,42 @@ export default function WatchlistViewPage() {
             {/* Scrolls inside the panel; header row sticks to the top. */}
             <div ref={tableScrollRef} className={`overflow-auto flex-1 min-h-0 max-h-[60vh] lg:max-h-none ${cols.hideUntilReady}`}>
               <table className="text-xs" style={{ tableLayout: 'fixed', width: tableWidth }}>
-                <colgroup>
-                  {COLUMN_ORDER.map(k => <col key={k} style={{ width: colWidths[k] }} />)}
-                  {canEdit && <col style={{ width: REMOVE_COL_WIDTH }} />}
-                </colgroup>
                 <thead className="[&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-gray-50 [&_th]:shadow-[inset_0_-1px_0_0_#f3f4f6]">
-                  <tr className="text-left text-[10px] font-semibold text-gray-500 uppercase">
-                    <th className={`${th} relative`}><SortHeader label="Symbol" active={sortKey === 'symbol'} dir={sortDir} onClick={() => toggleSort('symbol')} />{resizeHandle('symbol')}</th>
-                    {on('lastPrice') && <th className={`${th} text-right relative`}><SortHeader label="Last Price" align="right" active={sortKey === 'lastPrice'} dir={sortDir} onClick={() => toggleSort('lastPrice')} />{resizeHandle('lastPrice')}</th>}
-                    {on('change') && <th className={`${th} text-right relative`}><SortHeader label="Change" align="right" active={sortKey === 'change'} dir={sortDir} onClick={() => toggleSort('change')} />{resizeHandle('change')}</th>}
-                    {on('changePercent') && <th className={`${th} text-right relative`}><SortHeader label="Chg %" align="right" active={sortKey === 'changePercent'} dir={sortDir} onClick={() => toggleSort('changePercent')} />{resizeHandle('changePercent')}</th>}
-                    {on('ext') && <th className={`${th} text-right relative`}><SortHeader label="Ext." align="right" active={sortKey === 'ext'} dir={sortDir} onClick={() => toggleSort('ext')} />{resizeHandle('ext')}</th>}
-                    {on('level') && <th className={`${th} text-right relative`}><SortHeader label="Nearest Level" align="right" active={sortKey === 'level'} dir={sortDir} onClick={() => toggleSort('level')} />{resizeHandle('level')}</th>}
-                    {on('earnings') && <th className={`${th} text-right relative`}><SortHeader label="Earn" align="right" active={sortKey === 'earnings'} dir={sortDir} onClick={() => toggleSort('earnings')} />{resizeHandle('earnings')}</th>}
-                    {canEdit && <th className={th}></th>}
-                  </tr>
+                  <ColRow layout={cols.layout} header className="text-left text-[10px] font-semibold text-gray-500 uppercase">
+                    <th data-col="symbol" style={{ width: DEFAULT_COL_WIDTHS.symbol }} className={`${th} sticky`}><SortHeader label="Symbol" active={sortKey === 'symbol'} dir={sortDir} onClick={() => toggleSort('symbol')} /></th>
+                    {on('lastPrice') && <th data-col="lastPrice" style={{ width: DEFAULT_COL_WIDTHS.lastPrice }} className={`${th} text-right sticky`}><SortHeader label="Last Price" align="right" active={sortKey === 'lastPrice'} dir={sortDir} onClick={() => toggleSort('lastPrice')} /></th>}
+                    {on('change') && <th data-col="change" style={{ width: DEFAULT_COL_WIDTHS.change }} className={`${th} text-right sticky`}><SortHeader label="Change" align="right" active={sortKey === 'change'} dir={sortDir} onClick={() => toggleSort('change')} /></th>}
+                    {on('changePercent') && <th data-col="changePercent" style={{ width: DEFAULT_COL_WIDTHS.changePercent }} className={`${th} text-right sticky`}><SortHeader label="Chg %" align="right" active={sortKey === 'changePercent'} dir={sortDir} onClick={() => toggleSort('changePercent')} /></th>}
+                    {on('ext') && <th data-col="ext" style={{ width: DEFAULT_COL_WIDTHS.ext }} className={`${th} text-right sticky`}><SortHeader label="Ext." align="right" active={sortKey === 'ext'} dir={sortDir} onClick={() => toggleSort('ext')} /></th>}
+                    {on('level') && <th data-col="level" style={{ width: DEFAULT_COL_WIDTHS.level }} className={`${th} text-right sticky`}><SortHeader label="Nearest Level" align="right" active={sortKey === 'level'} dir={sortDir} onClick={() => toggleSort('level')} /></th>}
+                    {on('earnings') && <th data-col="earnings" style={{ width: DEFAULT_COL_WIDTHS.earnings }} className={`${th} text-right sticky`}><SortHeader label="Earn" align="right" active={sortKey === 'earnings'} dir={sortDir} onClick={() => toggleSort('earnings')} /></th>}
+                    {canEdit && <th className={th} style={{ width: REMOVE_COL_WIDTH }}></th>}
+                  </ColRow>
                 </thead>
                 <tbody>
                   {visibleRows.map(r => {
                     const isSelected = symbol === r.symbol;
                     return (
-                      <tr
+                      <ColRow
+                        layout={cols.layout}
                         key={r.symbol}
                         data-symbol={r.symbol}
                         onClick={() => setSymbol(r.symbol)}
                         aria-selected={isSelected}
                         className={`border-b border-gray-50 cursor-pointer transition-colors ${isSelected ? 'bg-blue-50' : 'hover:bg-blue-50/40'}`}
                       >
-                        <td className={`${th} overflow-hidden`} title={r.name}>
+                        <td data-col="symbol" className={`${th} overflow-hidden`} title={r.name}>
                           <div className="flex items-center gap-1.5 whitespace-nowrap">
                             <ChangeDot change={r.change} />
                             <span className="font-semibold text-gray-900">{r.symbol}</span>
                           </div>
                         </td>
-                        {on('lastPrice') && <td className={`${th} text-right font-semibold text-gray-800 tabular-nums overflow-hidden`}>{fmtPrice(r.lastPrice)}</td>}
-                        {on('change') && <td className={`${th} text-right overflow-hidden`}><ChangeCell change={r.change} /></td>}
-                        {on('changePercent') && <td className={`${th} text-right overflow-hidden`}><ChangePercentCell changePercent={r.changePercent} /></td>}
-                        {on('ext') && <td className={`${th} text-right overflow-hidden`}>{r.ext ? <ExtendedMove ext={r.ext} /> : <span className="text-gray-300">—</span>}</td>}
-                        {on('level') && <td className={`${th} overflow-hidden`}><LevelCell level={levelBySymbol.get(r.symbol)} compact /></td>}
-                        {on('earnings') && <td className={`${th} text-right overflow-hidden`}><NextEarningsCell earnings={r.earnings} compact /></td>}
+                        {on('lastPrice') && <td data-col="lastPrice" className={`${th} text-right font-semibold text-gray-800 tabular-nums overflow-hidden`}>{fmtPrice(r.lastPrice)}</td>}
+                        {on('change') && <td data-col="change" className={`${th} text-right overflow-hidden`}><ChangeCell change={r.change} /></td>}
+                        {on('changePercent') && <td data-col="changePercent" className={`${th} text-right overflow-hidden`}><ChangePercentCell changePercent={r.changePercent} /></td>}
+                        {on('ext') && <td data-col="ext" className={`${th} text-right overflow-hidden`}>{r.ext ? <ExtendedMove ext={r.ext} /> : <span className="text-gray-300">—</span>}</td>}
+                        {on('level') && <td data-col="level" className={`${th} overflow-hidden`}><LevelCell level={levelBySymbol.get(r.symbol)} compact /></td>}
+                        {on('earnings') && <td data-col="earnings" className={`${th} text-right overflow-hidden`}><NextEarningsCell earnings={r.earnings} compact /></td>}
                         {canEdit && (
                           <td className={`${th} text-right`}>
                             <button
@@ -576,7 +505,7 @@ export default function WatchlistViewPage() {
                             </button>
                           </td>
                         )}
-                      </tr>
+                      </ColRow>
                     );
                   })}
                   {rowsLoading && !rows && (

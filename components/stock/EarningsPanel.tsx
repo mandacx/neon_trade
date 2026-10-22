@@ -7,6 +7,7 @@ import {
 } from '@/components/watchlists/watchlistShared';
 import ColumnsMenu from '@/components/ui/ColumnsMenu';
 import { useColumnPrefs } from '@/components/ui/useColumnPrefs';
+import ColRow from '@/components/ui/ColRow';
 import type { ColumnMeta } from '@/lib/tableColumns';
 
 /**
@@ -116,38 +117,38 @@ export function EarningsHistoryTable({ history, loading }: { history: EarningsRe
         <div className={`overflow-x-auto ${cols.hideUntilReady}`}>
           <table className="w-full text-xs">
             <thead>
-              <tr className="text-left text-[10px] font-semibold text-gray-500 uppercase bg-gray-50 border-b border-gray-100">
-                <th className="px-2 py-1.5">Reported</th>
-                {show('time') && (<th className="px-2 py-1.5">Time</th>)}
-                {show('period') && (<th className="px-2 py-1.5">Period</th>)}
-                {show('epsEst') && (<th className="px-2 py-1.5 text-right">EPS est</th>)}
-                {show('epsAct') && (<th className="px-2 py-1.5 text-right">EPS actual</th>)}
-                {show('surprise') && (<th className="px-2 py-1.5 text-right">Surprise</th>)}
-                {show('epsResult') && (<th className="px-2 py-1.5">EPS</th>)}
-                {show('salesEst') && (<th className="px-2 py-1.5 text-right">Sales est</th>)}
-                {show('salesAct') && (<th className="px-2 py-1.5 text-right">Sales actual</th>)}
-                {show('salesResult') && (<th className="px-2 py-1.5">Sales</th>)}
-              </tr>
+              <ColRow layout={cols.layout} header className="text-left text-[10px] font-semibold text-gray-500 uppercase bg-gray-50 border-b border-gray-100">
+                <th data-col="reported" className="px-2 py-1.5">Reported</th>
+                {show('time') && (<th data-col="time" className="px-2 py-1.5">Time</th>)}
+                {show('period') && (<th data-col="period" className="px-2 py-1.5">Period</th>)}
+                {show('epsEst') && (<th data-col="epsEst" className="px-2 py-1.5 text-right">EPS est</th>)}
+                {show('epsAct') && (<th data-col="epsAct" className="px-2 py-1.5 text-right">EPS actual</th>)}
+                {show('surprise') && (<th data-col="surprise" className="px-2 py-1.5 text-right">Surprise</th>)}
+                {show('epsResult') && (<th data-col="epsResult" className="px-2 py-1.5">EPS</th>)}
+                {show('salesEst') && (<th data-col="salesEst" className="px-2 py-1.5 text-right">Sales est</th>)}
+                {show('salesAct') && (<th data-col="salesAct" className="px-2 py-1.5 text-right">Sales actual</th>)}
+                {show('salesResult') && (<th data-col="salesResult" className="px-2 py-1.5">Sales</th>)}
+              </ColRow>
             </thead>
             <tbody>
               {history.map(q => (
-                <tr key={q.date} className="border-b border-gray-50">
-                  <td className="px-2 py-1.5 font-medium text-gray-800 whitespace-nowrap">{fmtExpiry(q.date)}</td>
-                  {show('time') && (<td className="px-2 py-1.5 text-gray-500">{earningsTimeShort(q.time) || '—'}</td>)}
-                  {show('period') && (<td className="px-2 py-1.5 text-gray-500">
+                <ColRow layout={cols.layout} key={q.date} className="border-b border-gray-50">
+                  <td data-col="reported" className="px-2 py-1.5 font-medium text-gray-800 whitespace-nowrap">{fmtExpiry(q.date)}</td>
+                  {show('time') && (<td data-col="time" className="px-2 py-1.5 text-gray-500">{earningsTimeShort(q.time) || '—'}</td>)}
+                  {show('period') && (<td data-col="period" className="px-2 py-1.5 text-gray-500">
                     {q.period ?? (q.fiscalDateEnding ? `FQ end ${fmtShortDate(q.fiscalDateEnding)}` : '—')}
                     {q.epsAdjusted && <span className="ml-1 text-[10px] text-gray-400">adj.</span>}
                   </td>)}
-                  {show('epsEst') && (<td className="px-2 py-1.5 text-right tabular-nums text-gray-600">{fmtEps(q.epsEstimate)}</td>)}
-                  {show('epsAct') && (<td className="px-2 py-1.5 text-right tabular-nums font-semibold text-gray-800">{fmtEps(q.epsActual)}</td>)}
-                  {show('surprise') && (<td className="px-2 py-1.5 text-right tabular-nums text-gray-600">
+                  {show('epsEst') && (<td data-col="epsEst" className="px-2 py-1.5 text-right tabular-nums text-gray-600">{fmtEps(q.epsEstimate)}</td>)}
+                  {show('epsAct') && (<td data-col="epsAct" className="px-2 py-1.5 text-right tabular-nums font-semibold text-gray-800">{fmtEps(q.epsActual)}</td>)}
+                  {show('surprise') && (<td data-col="surprise" className="px-2 py-1.5 text-right tabular-nums text-gray-600">
                     {q.epsSurprisePct == null ? '—' : `${q.epsSurprisePct > 0 ? '+' : ''}${q.epsSurprisePct.toFixed(1)}%`}
                   </td>)}
-                  {show('epsResult') && (<td className="px-2 py-1.5"><OutcomeText outcome={q.epsOutcome} /></td>)}
-                  {show('salesEst') && (<td className="px-2 py-1.5 text-right tabular-nums text-gray-600">{fmtSales(q.salesEstimate)}</td>)}
-                  {show('salesAct') && (<td className="px-2 py-1.5 text-right tabular-nums text-gray-800">{fmtSales(q.salesActual)}</td>)}
-                  {show('salesResult') && (<td className="px-2 py-1.5"><OutcomeText outcome={q.salesOutcome} /></td>)}
-                </tr>
+                  {show('epsResult') && (<td data-col="epsResult" className="px-2 py-1.5"><OutcomeText outcome={q.epsOutcome} /></td>)}
+                  {show('salesEst') && (<td data-col="salesEst" className="px-2 py-1.5 text-right tabular-nums text-gray-600">{fmtSales(q.salesEstimate)}</td>)}
+                  {show('salesAct') && (<td data-col="salesAct" className="px-2 py-1.5 text-right tabular-nums text-gray-800">{fmtSales(q.salesActual)}</td>)}
+                  {show('salesResult') && (<td data-col="salesResult" className="px-2 py-1.5"><OutcomeText outcome={q.salesOutcome} /></td>)}
+                </ColRow>
               ))}
             </tbody>
           </table>

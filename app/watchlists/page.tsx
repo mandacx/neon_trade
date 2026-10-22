@@ -7,6 +7,7 @@ import { pollDelayMs, type MarketClock } from '@/lib/pollDelay';
 import Header from '@/components/layout/Header';
 import AddSymbolInput from '@/components/watchlists/AddSymbolInput';
 import AlertsWidget from '@/components/watchlists/AlertsWidget';
+import ColRow from '@/components/ui/ColRow';
 import ColumnsMenu from '@/components/ui/ColumnsMenu';
 import { useColumnPrefs } from '@/components/ui/useColumnPrefs';
 import type { ColumnMeta } from '@/lib/tableColumns';
@@ -533,33 +534,34 @@ export default function WatchlistsPage() {
             <div className={`overflow-x-auto ${cols.hideUntilReady}`}>
             <table className="w-full text-sm">
               <thead>
-                <tr className="text-left text-[11px] font-semibold text-gray-500 uppercase bg-gray-50 border-b border-gray-100">
-                  <th className={cellPad}><SortHeader label="Symbol" active={sortKey === 'symbol'} dir={sortDir} onClick={() => toggleSort('symbol')} /></th>
-                  {colOn('lastPrice') && <th className={`${cellPad} text-right`}><SortHeader label="Last Price" align="right" active={sortKey === 'lastPrice'} dir={sortDir} onClick={() => toggleSort('lastPrice')} /></th>}
-                  {colOn('change') && <th className={`${cellPad} text-right`}><SortHeader label="Change" align="right" active={sortKey === 'change'} dir={sortDir} onClick={() => toggleSort('change')} /></th>}
-                  {colOn('changePercent') && <th className={`${cellPad} text-right`}><SortHeader label="Change %" align="right" active={sortKey === 'changePercent'} dir={sortDir} onClick={() => toggleSort('changePercent')} /></th>}
-                  {showExt && colOn('ext') && <th className={`${cellPad} text-right`}><SortHeader label="Ext. Hrs" align="right" active={sortKey === 'ext'} dir={sortDir} onClick={() => toggleSort('ext')} /></th>}
-                  {colOn('open') && <th className={`${cellPad} text-right`}><SortHeader label="Open" align="right" active={sortKey === 'open'} dir={sortDir} onClick={() => toggleSort('open')} /></th>}
-                  {colOn('dayLow') && <th className={`${cellPad} text-right`}><SortHeader label="Day Low" align="right" active={sortKey === 'dayLow'} dir={sortDir} onClick={() => toggleSort('dayLow')} /></th>}
-                  {colOn('dayHigh') && <th className={`${cellPad} text-right`}><SortHeader label="Day High" align="right" active={sortKey === 'dayHigh'} dir={sortDir} onClick={() => toggleSort('dayHigh')} /></th>}
-                  {colOn('volume') && <th className={`${cellPad} text-right`}><SortHeader label="Volume" align="right" active={sortKey === 'volume'} dir={sortDir} onClick={() => toggleSort('volume')} /></th>}
-                  {colOn('level') && <th className={`${cellPad} text-right`}><SortHeader label="Nearest Level" align="right" active={sortKey === 'level'} dir={sortDir} onClick={() => toggleSort('level')} /></th>}
-                  {colOn('nextEarnings') && <th className={`${cellPad} text-right`}><SortHeader label="Next Earnings" align="right" active={sortKey === 'nextEarnings'} dir={sortDir} onClick={() => toggleSort('nextEarnings')} /></th>}
-                  {colOn('lastResult') && <th className={`${cellPad} text-right`}><SortHeader label="Last Result" align="right" active={sortKey === 'lastResult'} dir={sortDir} onClick={() => toggleSort('lastResult')} /></th>}
+                <ColRow layout={cols.layout} header className="text-left text-[11px] font-semibold text-gray-500 uppercase bg-gray-50 border-b border-gray-100">
+                  <th data-col="symbol" className={cellPad}><SortHeader label="Symbol" active={sortKey === 'symbol'} dir={sortDir} onClick={() => toggleSort('symbol')} /></th>
+                  {colOn('lastPrice') && <th data-col="lastPrice" className={`${cellPad} text-right`}><SortHeader label="Last Price" align="right" active={sortKey === 'lastPrice'} dir={sortDir} onClick={() => toggleSort('lastPrice')} /></th>}
+                  {colOn('change') && <th data-col="change" className={`${cellPad} text-right`}><SortHeader label="Change" align="right" active={sortKey === 'change'} dir={sortDir} onClick={() => toggleSort('change')} /></th>}
+                  {colOn('changePercent') && <th data-col="changePercent" className={`${cellPad} text-right`}><SortHeader label="Change %" align="right" active={sortKey === 'changePercent'} dir={sortDir} onClick={() => toggleSort('changePercent')} /></th>}
+                  {showExt && colOn('ext') && <th data-col="ext" className={`${cellPad} text-right`}><SortHeader label="Ext. Hrs" align="right" active={sortKey === 'ext'} dir={sortDir} onClick={() => toggleSort('ext')} /></th>}
+                  {colOn('open') && <th data-col="open" className={`${cellPad} text-right`}><SortHeader label="Open" align="right" active={sortKey === 'open'} dir={sortDir} onClick={() => toggleSort('open')} /></th>}
+                  {colOn('dayLow') && <th data-col="dayLow" className={`${cellPad} text-right`}><SortHeader label="Day Low" align="right" active={sortKey === 'dayLow'} dir={sortDir} onClick={() => toggleSort('dayLow')} /></th>}
+                  {colOn('dayHigh') && <th data-col="dayHigh" className={`${cellPad} text-right`}><SortHeader label="Day High" align="right" active={sortKey === 'dayHigh'} dir={sortDir} onClick={() => toggleSort('dayHigh')} /></th>}
+                  {colOn('volume') && <th data-col="volume" className={`${cellPad} text-right`}><SortHeader label="Volume" align="right" active={sortKey === 'volume'} dir={sortDir} onClick={() => toggleSort('volume')} /></th>}
+                  {colOn('level') && <th data-col="level" className={`${cellPad} text-right`}><SortHeader label="Nearest Level" align="right" active={sortKey === 'level'} dir={sortDir} onClick={() => toggleSort('level')} /></th>}
+                  {colOn('nextEarnings') && <th data-col="nextEarnings" className={`${cellPad} text-right`}><SortHeader label="Next Earnings" align="right" active={sortKey === 'nextEarnings'} dir={sortDir} onClick={() => toggleSort('nextEarnings')} /></th>}
+                  {colOn('lastResult') && <th data-col="lastResult" className={`${cellPad} text-right`}><SortHeader label="Last Result" align="right" active={sortKey === 'lastResult'} dir={sortDir} onClick={() => toggleSort('lastResult')} /></th>}
                   {canEdit && <th className={cellPad}></th>}
-                </tr>
+                </ColRow>
               </thead>
               <tbody>
                 {sortedRows.map(r => {
                   const isSelected = selectedSymbol === r.symbol;
                   return (
-                  <tr
+                  <ColRow
+                    layout={cols.layout}
                     key={r.symbol}
                     onClick={() => setSelectedSymbol(prev => prev === r.symbol ? null : r.symbol)}
                     title={isSelected ? 'Click to clear alert filter' : 'Click to filter alerts for this symbol'}
                     className={`border-b border-gray-50 cursor-pointer transition-colors ${isSelected ? 'bg-blue-50 hover:bg-blue-50' : 'hover:bg-blue-50/40'}`}
                   >
-                    <td className={cellPad}>
+                    <td data-col="symbol" className={cellPad}>
                       <Link
                         href={`/stock/${encodeURIComponent(r.symbol)}`}
                         target="_blank"
@@ -573,29 +575,29 @@ export default function WatchlistsPage() {
                       </Link>
                       {!thin && <div className="text-[11px] text-gray-400 truncate max-w-[220px] pl-3">{r.name}</div>}
                     </td>
-                    {colOn('lastPrice') && <td className={`${cellPad} text-right font-semibold text-gray-800 tabular-nums`}>
+                    {colOn('lastPrice') && <td data-col="lastPrice" className={`${cellPad} text-right font-semibold text-gray-800 tabular-nums`}>
                       <Link href={`/stock/${encodeURIComponent(r.symbol)}`} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="hover:underline">
                         {fmtPrice(r.lastPrice)}
                       </Link>
                     </td>}
-                    {colOn('change') && <td className={`${cellPad} text-right`}>
+                    {colOn('change') && <td data-col="change" className={`${cellPad} text-right`}>
                       <Link href={`/stock/${encodeURIComponent(r.symbol)}`} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="inline-block hover:underline">
                         <ChangeCell change={r.change} />
                       </Link>
                     </td>}
-                    {colOn('changePercent') && <td className={`${cellPad} text-right`}>
+                    {colOn('changePercent') && <td data-col="changePercent" className={`${cellPad} text-right`}>
                       <Link href={`/stock/${encodeURIComponent(r.symbol)}`} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="inline-block hover:underline">
                         <ChangePercentCell changePercent={r.changePercent} />
                       </Link>
                     </td>}
-                    {showExt && colOn('ext') && <td className={`${cellPad} text-right`}>{r.ext ? <ExtendedMove ext={r.ext} /> : <span className="text-xs text-gray-300">—</span>}</td>}
-                    {colOn('open') && <td className={`${cellPad} text-right text-gray-600 tabular-nums`}>{fmtPrice(r.open)}</td>}
-                    {colOn('dayLow') && <td className={`${cellPad} text-right text-gray-600 tabular-nums`}>{fmtPrice(r.dayLow)}</td>}
-                    {colOn('dayHigh') && <td className={`${cellPad} text-right text-gray-600 tabular-nums`}>{fmtPrice(r.dayHigh)}</td>}
-                    {colOn('volume') && <td className={`${cellPad} text-right text-gray-600 tabular-nums`}>{fmtVolume(r.volume)}</td>}
-                    {colOn('level') && <td className={cellPad}><LevelCell level={levelBySymbol.get(r.symbol)} compact={thin} /></td>}
-                    {colOn('nextEarnings') && <td className={`${cellPad} text-right`}><NextEarningsCell earnings={r.earnings} compact={thin} /></td>}
-                    {colOn('lastResult') && <td className={`${cellPad} text-right`}><LastResultBadge earnings={r.earnings} /></td>}
+                    {showExt && colOn('ext') && <td data-col="ext" className={`${cellPad} text-right`}>{r.ext ? <ExtendedMove ext={r.ext} /> : <span className="text-xs text-gray-300">—</span>}</td>}
+                    {colOn('open') && <td data-col="open" className={`${cellPad} text-right text-gray-600 tabular-nums`}>{fmtPrice(r.open)}</td>}
+                    {colOn('dayLow') && <td data-col="dayLow" className={`${cellPad} text-right text-gray-600 tabular-nums`}>{fmtPrice(r.dayLow)}</td>}
+                    {colOn('dayHigh') && <td data-col="dayHigh" className={`${cellPad} text-right text-gray-600 tabular-nums`}>{fmtPrice(r.dayHigh)}</td>}
+                    {colOn('volume') && <td data-col="volume" className={`${cellPad} text-right text-gray-600 tabular-nums`}>{fmtVolume(r.volume)}</td>}
+                    {colOn('level') && <td data-col="level" className={cellPad}><LevelCell level={levelBySymbol.get(r.symbol)} compact={thin} /></td>}
+                    {colOn('nextEarnings') && <td data-col="nextEarnings" className={`${cellPad} text-right`}><NextEarningsCell earnings={r.earnings} compact={thin} /></td>}
+                    {colOn('lastResult') && <td data-col="lastResult" className={`${cellPad} text-right`}><LastResultBadge earnings={r.earnings} /></td>}
                     {canEdit && (
                       <td className={`${cellPad} text-right`}>
                         <button
@@ -609,7 +611,7 @@ export default function WatchlistsPage() {
                         </button>
                       </td>
                     )}
-                  </tr>
+                  </ColRow>
                   );
                 })}
                 {rowsLoading && (

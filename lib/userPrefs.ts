@@ -4,24 +4,20 @@
  * Every statement filters on user_id inside the SQL, so one user can never read
  * or write another's preferences.
  *
- * Keys: `cols.<tableId>` = the list of hidden column ids for one table
- * (lib/tableColumns.ts). Add another kind of preference by extending validatorFor().
+ * Keys: `cols.<tableId>` = the hidden column ids, order and widths of one table
+ * (ColumnPrefs, lib/tableColumns.ts). Add another kind of preference by extending validatorFor().
  */
 import { sql } from '@/lib/db';
-import { COLUMN_ID_RE, MAX_SAVED_COLUMNS, TABLE_IDS } from '@/lib/tableColumns';
+import { normalizeColumnPrefs, TABLE_IDS } from '@/lib/tableColumns';
 
 type Validator = (v: unknown) => unknown | null;
 
-/** A list of distinct, well-formed column ids (never more than MAX_SAVED_COLUMNS). */
-const hiddenColumns: Validator = v => {
-  if (!Array.isArray(v) || v.length > MAX_SAVED_COLUMNS) return null;
-  if (!v.every(x => typeof x === 'string' && COLUMN_ID_RE.test(x))) return null;
-  return [...new Set(v as string[])];
-};
+/** Hidden ids, order and widths for one table (an older bare list of hidden ids is upgraded). */
+const columnPrefs: Validator = v => normalizeColumnPrefs(v);
 
 function validatorFor(key: string): Validator | null {
   const m = /^cols\.([A-Za-z0-9]+)$/.exec(key);
-  if (m && (TABLE_IDS as readonly string[]).includes(m[1])) return hiddenColumns;
+  if (m && (TABLE_IDS as readonly string[]).includes(m[1])) return columnPrefs;
   return null;
 }
 

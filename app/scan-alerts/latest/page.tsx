@@ -4,6 +4,7 @@ import { useEffect, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import QuadrantChart from '@/components/charts/QuadrantChart';
 import Header from '@/components/layout/Header';
+import ColRow from '@/components/ui/ColRow';
 import ColumnsMenu from '@/components/ui/ColumnsMenu';
 import { useColumnPrefs } from '@/components/ui/useColumnPrefs';
 import type { ColumnMeta } from '@/lib/tableColumns';
@@ -293,48 +294,48 @@ function ScanAlertsLatestInner() {
                 <div className={`overflow-x-auto ${cols.hideUntilReady}`}>
                   <table className="w-full">
                     <thead className="bg-gray-50 border-b border-gray-200">
-                      <tr>
-                        <th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Symbol</th>
-                        {show('name') && (<th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Name</th>)}
-                        {show('lastPrice') && (<th className="px-4 py-2 text-right text-[10px] font-semibold text-gray-500 uppercase">Last Price</th>)}
-                        {show('chg') && (<th className="px-4 py-2 text-right text-[10px] font-semibold text-gray-500 uppercase">Chg</th>)}
-                        {show('alert') && (<th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Alert</th>)}
-                        {show('expiry') && (<th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Expiry</th>)}
-                        {earningsEnabled && show('earnings') && <th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Earnings</th>}
-                        {show('loaded') && (<th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Loaded</th>)}
+                      <ColRow layout={cols.layout} header>
+                        <th data-col="symbol" className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Symbol</th>
+                        {show('name') && (<th data-col="name" className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Name</th>)}
+                        {show('lastPrice') && (<th data-col="lastPrice" className="px-4 py-2 text-right text-[10px] font-semibold text-gray-500 uppercase">Last Price</th>)}
+                        {show('chg') && (<th data-col="chg" className="px-4 py-2 text-right text-[10px] font-semibold text-gray-500 uppercase">Chg</th>)}
+                        {show('alert') && (<th data-col="alert" className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Alert</th>)}
+                        {show('expiry') && (<th data-col="expiry" className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Expiry</th>)}
+                        {earningsEnabled && show('earnings') && <th data-col="earnings" className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Earnings</th>}
+                        {show('loaded') && (<th data-col="loaded" className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Loaded</th>)}
                         {hasSecurityFilters && (
                           <>
-                            {show('sector') && (<th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Sector</th>)}
-                            {show('capTier') && (<th className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Cap Tier</th>)}
+                            {show('sector') && (<th data-col="sector" className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Sector</th>)}
+                            {show('capTier') && (<th data-col="capTier" className="px-4 py-2 text-left text-[10px] font-semibold text-gray-500 uppercase">Cap Tier</th>)}
                           </>
                         )}
                         <th className="px-4 py-2 text-center text-[10px] font-semibold text-gray-500 uppercase">Action</th>
-                      </tr>
+                      </ColRow>
                     </thead>
                     <tbody className="divide-y divide-gray-50">
                       {filteredAlerts.slice(0, 50).map((a) => (
-                        <tr key={`${a.symbol}-${a.expiryDate}-${a.loadDateTime}`} className="hover:bg-gray-50">
-                          <td className="px-4 py-2 text-sm font-bold">{a.symbol}</td>
-                          {show('name') && (<td className="px-4 py-2 text-xs text-gray-600 max-w-[160px] truncate" title={(a as any).name || ''}>
+                        <ColRow layout={cols.layout} key={`${a.symbol}-${a.expiryDate}-${a.loadDateTime}`} className="hover:bg-gray-50">
+                          <td data-col="symbol" className="px-4 py-2 text-sm font-bold">{a.symbol}</td>
+                          {show('name') && (<td data-col="name" className="px-4 py-2 text-xs text-gray-600 max-w-[160px] truncate" title={(a as any).name || ''}>
                             {(a as any).name || '—'}
                           </td>)}
-                          {show('lastPrice') && (<td className="px-4 py-2 text-xs text-right font-mono">${a.close.toFixed(2)}</td>)}
-                          {show('chg') && (<td className={`px-4 py-2 text-xs text-right font-mono font-semibold ${a.chg >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          {show('lastPrice') && (<td data-col="lastPrice" className="px-4 py-2 text-xs text-right font-mono">${a.close.toFixed(2)}</td>)}
+                          {show('chg') && (<td data-col="chg" className={`px-4 py-2 text-xs text-right font-mono font-semibold ${a.chg >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                             {a.chg >= 0 ? '+' : ''}{a.chg.toFixed(2)}
                           </td>)}
-                          {show('alert') && (<td className="px-4 py-2 text-xs">
+                          {show('alert') && (<td data-col="alert" className="px-4 py-2 text-xs">
                             <span className="px-2 py-0.5 rounded text-[10px] font-semibold text-white"
                               style={{ backgroundColor: getLevelColor(a.closestLevel) }}>
                               {getLevelDisplayName(a.closestLevel).toUpperCase()}
                             </span>
                           </td>)}
-                          {show('expiry') && (<td className="px-4 py-2 text-xs text-gray-500">{a.expiryDate}</td>)}
-                          {earningsEnabled && show('earnings') && <td className="px-4 py-2"><EarningsBadgeCell badge={a.earnings} /></td>}
-                          {show('loaded') && (<td className="px-4 py-2 text-xs text-gray-400">{a.loadDateTime}</td>)}
+                          {show('expiry') && (<td data-col="expiry" className="px-4 py-2 text-xs text-gray-500">{a.expiryDate}</td>)}
+                          {earningsEnabled && show('earnings') && <td data-col="earnings" className="px-4 py-2"><EarningsBadgeCell badge={a.earnings} /></td>}
+                          {show('loaded') && (<td data-col="loaded" className="px-4 py-2 text-xs text-gray-400">{a.loadDateTime}</td>)}
                           {hasSecurityFilters && (
                             <>
-                              {show('sector') && (<td className="px-4 py-2 text-xs text-gray-500">{(a as any).sector || '—'}</td>)}
-                              {show('capTier') && (<td className="px-4 py-2 text-xs text-gray-500">{(a as any).marketCapTier || '—'}</td>)}
+                              {show('sector') && (<td data-col="sector" className="px-4 py-2 text-xs text-gray-500">{(a as any).sector || '—'}</td>)}
+                              {show('capTier') && (<td data-col="capTier" className="px-4 py-2 text-xs text-gray-500">{(a as any).marketCapTier || '—'}</td>)}
                             </>
                           )}
                           <td className="px-4 py-2 text-center">
@@ -345,7 +346,7 @@ function ScanAlertsLatestInner() {
                               View →
                             </button>
                           </td>
-                        </tr>
+                        </ColRow>
                       ))}
                     </tbody>
                   </table>

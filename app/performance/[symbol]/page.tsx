@@ -6,6 +6,7 @@ import Link from 'next/link';
 import Header from '@/components/layout/Header';
 import ColumnsMenu from '@/components/ui/ColumnsMenu';
 import { useColumnPrefs } from '@/components/ui/useColumnPrefs';
+import ColRow from '@/components/ui/ColRow';
 import type { ColumnMeta } from '@/lib/tableColumns';
 import { getLevelDisplayName, getLevelColor, formatCurrency, formatPercentage, OUTCOME_LABEL, OUTCOME_CLASS, PerformanceOutcome } from '@/lib/utils';
 
@@ -88,40 +89,40 @@ export default function PerformanceDetailPage() {
               <div className={`bg-white rounded-xl border border-gray-200 overflow-x-auto ${cols.hideUntilReady}`}>
                 <table className="w-full text-xs">
                   <thead>
-                    <tr className="border-b border-gray-100 text-[10px] font-semibold text-gray-400 uppercase tracking-wide">
-                      <th className="text-left px-3 py-2">Date</th>
-                      {show('level') && (<th className="text-left px-3 py-2">Level</th>)}
-                      {show('direction') && (<th className="text-left px-3 py-2">Direction</th>)}
-                      {show('trigger') && (<th className="text-right px-3 py-2">Trigger</th>)}
-                      {show('expiry') && (<th className="text-left px-3 py-2">Expiry</th>)}
-                      {show('close') && (<th className="text-right px-3 py-2">Expiry close</th>)}
-                      {show('move') && (<th className="text-right px-3 py-2">Move</th>)}
-                      {show('outcome') && (<th className="text-right px-3 py-2">Outcome</th>)}
-                    </tr>
+                    <ColRow layout={cols.layout} header className="border-b border-gray-100 text-[10px] font-semibold text-gray-400 uppercase tracking-wide">
+                      <th data-col="date" className="text-left px-3 py-2">Date</th>
+                      {show('level') && (<th data-col="level" className="text-left px-3 py-2">Level</th>)}
+                      {show('direction') && (<th data-col="direction" className="text-left px-3 py-2">Direction</th>)}
+                      {show('trigger') && (<th data-col="trigger" className="text-right px-3 py-2">Trigger</th>)}
+                      {show('expiry') && (<th data-col="expiry" className="text-left px-3 py-2">Expiry</th>)}
+                      {show('close') && (<th data-col="close" className="text-right px-3 py-2">Expiry close</th>)}
+                      {show('move') && (<th data-col="move" className="text-right px-3 py-2">Move</th>)}
+                      {show('outcome') && (<th data-col="outcome" className="text-right px-3 py-2">Outcome</th>)}
+                    </ColRow>
                   </thead>
                   <tbody>
                     {rows.map(r => (
-                      <tr key={r.id} className="border-b border-gray-50 tabular-nums">
-                        <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{r.tradeDate}</td>
-                        {show('level') && (<td className="px-3 py-2">
+                      <ColRow layout={cols.layout} key={r.id} className="border-b border-gray-50 tabular-nums">
+                        <td data-col="date" className="px-3 py-2 text-gray-600 whitespace-nowrap">{r.tradeDate}</td>
+                        {show('level') && (<td data-col="level" className="px-3 py-2">
                           <span className="inline-flex items-center gap-1.5 font-medium text-gray-700">
                             <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: getLevelColor(r.level) }} />
                             {getLevelDisplayName(r.level)}
                           </span>
                         </td>)}
-                        {show('direction') && (<td className="px-3 py-2 text-gray-600">{r.direction === 'buy_above' ? '▲ Buy above' : '▼ Sell below'}</td>)}
-                        {show('trigger') && (<td className="px-3 py-2 text-right text-gray-700">{formatCurrency(r.price)}</td>)}
-                        {show('expiry') && (<td className="px-3 py-2 text-gray-600 whitespace-nowrap">{r.expiryDate}{r.earningsInWindow && <span className="ml-1.5 text-[9px] font-bold px-1 py-px rounded bg-amber-100 text-amber-800" title="An earnings report landed between this alert and its expiry">ER</span>}</td>)}
-                        {show('close') && (<td className="px-3 py-2 text-right text-gray-700">{r.expiryClose !== null ? formatCurrency(r.expiryClose) : '—'}</td>)}
-                        {show('move') && (<td className={`px-3 py-2 text-right font-semibold ${r.movePct === null ? 'text-gray-400' : r.movePct > 0 ? 'text-green-600' : r.movePct < 0 ? 'text-red-600' : 'text-gray-500'}`}>
+                        {show('direction') && (<td data-col="direction" className="px-3 py-2 text-gray-600">{r.direction === 'buy_above' ? '▲ Buy above' : '▼ Sell below'}</td>)}
+                        {show('trigger') && (<td data-col="trigger" className="px-3 py-2 text-right text-gray-700">{formatCurrency(r.price)}</td>)}
+                        {show('expiry') && (<td data-col="expiry" className="px-3 py-2 text-gray-600 whitespace-nowrap">{r.expiryDate}{r.earningsInWindow && <span className="ml-1.5 text-[9px] font-bold px-1 py-px rounded bg-amber-100 text-amber-800" title="An earnings report landed between this alert and its expiry">ER</span>}</td>)}
+                        {show('close') && (<td data-col="close" className="px-3 py-2 text-right text-gray-700">{r.expiryClose !== null ? formatCurrency(r.expiryClose) : '—'}</td>)}
+                        {show('move') && (<td data-col="move" className={`px-3 py-2 text-right font-semibold ${r.movePct === null ? 'text-gray-400' : r.movePct > 0 ? 'text-green-600' : r.movePct < 0 ? 'text-red-600' : 'text-gray-500'}`}>
                           {r.movePct !== null ? formatPercentage(r.movePct, 2) : '—'}
                         </td>)}
-                        {show('outcome') && (<td className="px-3 py-2 text-right">
+                        {show('outcome') && (<td data-col="outcome" className="px-3 py-2 text-right">
                           <span className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${OUTCOME_CLASS[r.outcome]}`}>
                             {OUTCOME_LABEL[r.outcome]}
                           </span>
                         </td>)}
-                      </tr>
+                      </ColRow>
                     ))}
                   </tbody>
                 </table>
