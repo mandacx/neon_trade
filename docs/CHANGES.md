@@ -7,6 +7,23 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-23 — US Market Scanner: compact controls so results are visible without scrolling
+
+Reported (screenshot): the scan chips (9 rows) and the 3-row filter grid pushed the results below the fold.
+
+- `app/scanner/page.tsx` controls redesigned:
+  - **Scan picker**: one button ("Volatility: Range breakout") opening a grouped menu (5 / 3 / 2 columns by width; closes on choice, outside click or Esc; each item has its help as a tooltip).
+  - **One toolbar row** (tablet and up): picker, the scan's own settings (N, direction, period, SMA, combination, volume ×, gap, tolerance, ATR), Universe, Type, "Filters (n)", Presets. Long labels truncate with a tooltip; field widths capped so the row doesn't wrap at 1440 px.
+  - **Help line** with Refresh / Copy link / Reset as icon buttons on the right.
+  - **Active filters as removable chips** + "Clear all" (only filters that differ from the defaults).
+  - **Filters panel** (sector, industry, price, change today, dollar / share volume, market cap tier and minimum, near 52W high, result limit, exchanges, exclude ADRs): collapsible inline panel from the tablet width up (open/closed remembered per browser in `localStorage`, guarded); on a phone a bottom sheet that also holds the scan settings, universe, type and presets, with Copy link / Reset / Show results buttons.
+  - **Phone toolbar**: scan button, "Settings (n)", Refresh, plus a one-line summary of the scan settings.
+  - Corporate-action note and results header made one compact line each. Universe label shortened to "Top 1000 by cap (≈ Russell 1000)".
+- **Verified** (Playwright, page component on a temporary ungated route, deleted afterwards, API mocked with a real engine response): first result row now at 498 px on 1280/1440 (was ~860 in the reported screenshot), 560 px at 768, 628 px on a 375×812 phone (above the fold); no horizontal page scroll except the known pre-existing header overflow at 1280; scan menu and phone sheet rendered and checked visually. `tsc`, eslint, 23 fixture tests and `npm run build` pass; bundle still has 0 vendor strings.
+- **Not verified:** signed in on the real route; a real phone (only Chromium emulated widths).
+
+---
+
 ## 2026-10-23 — US Market Scanner: docs, final checks, open items
 
 Step 8. **`docs/us-scanner.md`** (new): data flow, feeds and plan limits, universe sources and rules, scan rules that are easy to get wrong, splits, runbook, tables, limits. The prompt's `docs/DESIGN.md` / `docs/DATA_FLOW.md` don't exist in this repo, so it follows the `docs/earnings.md` / `docs/oi-tracker.md` pattern. **`CLAUDE.md`**: feed rules (daily = consolidated, capped at now − 16 min; snapshots/intraday single-venue; 200 req/min), stored-bars paragraph (consolidated coverage, split check, scanner symbols), new crons, the scanner route, test commands. Removed the unused `fetchUsAssets` from the provider (it only works on the live trading host).

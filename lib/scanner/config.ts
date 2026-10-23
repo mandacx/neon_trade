@@ -36,7 +36,7 @@ export const UNIVERSE_LABELS: Record<UniverseKey, string> = {
   SP500: 'S&P 500',
   NDX100: 'Nasdaq-100',
   DOW30: 'Dow 30',
-  TOP1000: 'Top 1000 by market cap (≈ Russell 1000)',
+  TOP1000: 'Top 1000 by cap (≈ Russell 1000)',
 };
 
 export const EXCHANGES = ['NYSE', 'NASDAQ', 'NYSE American', 'NYSE Arca', 'Cboe BZX'] as const;
