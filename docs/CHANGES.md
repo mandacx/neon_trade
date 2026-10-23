@@ -7,6 +7,22 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-23 — Earnings ingestion widened to the US scanner universe
+
+Step 7. Requested: use the existing earnings calendar table and include the scanner's tickers.
+
+- `lib/earnings.ts`: `getEarningsIngestSymbols()` = tracked ∪ scanner universe (~2,300), used only where data is **ingested**: the Alpha Vantage calendar filter (`syncCalendar`), the news results sync and the news catch-up. Readers are unchanged: the earnings page, home and stock pages still pass `getTrackedSymbols()`, so they show the same stocks as before (checked by reading every caller: `app/api/earnings/list`, `app/api/home/earnings`, `app/api/earnings/levels`).
+- News queries carry the symbol list in the URL; it is now sent in chunks of 1,000 (verified live: the endpoint accepted the full 1,907-symbol list, a 12 KB URL; chunks keep it well inside common limits). No extra Alpha Vantage calls: the calendar is one CSV of every symbol.
+- `/api/cron/earnings?force=true` now also re-syncs the calendar when it already ran today (`forceCalendar`), costing one more Alpha Vantage call; the scheduled runs are unchanged.
+
+### Verified
+- Forced run from the local dev server against live sources: calendar synced, 1,206 rows in the 3-month horizon (717 before; 5 future dates that vanished from the newer snapshot marked dropped as designed); news 2,319 articles → 38 results; catch-up 6 pending, 0 new. Scheduled dates now cover 1,195 symbols, 1,166 of them in the scanner. Alpha Vantage usage today: 2 calls of 25. `tsc` clean.
+
+### Not verified
+- The earnings page and home cards were not opened after the change (readers unchanged by code reading only).
+
+---
+
 ## 2026-10-23 — US Market Scanner page (`/scanner`)
 
 Step 6. `app/scanner/page.tsx` (client), gated by `app/scanner/layout.tsx`; nav: Trackers dropdown + mobile menu.

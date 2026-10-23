@@ -23,6 +23,7 @@ import { sql } from '@/lib/db';
 import { acquireLease, releaseLease } from '@/lib/jobLease';
 import { parseEarningsHeadline, symbolsForResult, easternDateAndSession } from '@/lib/earningsParse';
 import { fetchNewsPage, type NewsArticle } from '@/lib/marketdata';
+import { getScannerSymbols } from '@/lib/usUniverse';
 import type { EarningsBadge, EarningsEvent, EarningsOutcome, EarningsRangeRow, EarningsResult, EarningsSummary, EarningsTime } from '@/types/earnings';
 
 const AV_URL = 'https://www.alphavantage.co/query';
@@ -76,6 +77,20 @@ export async function getTrackedSymbols(): Promise<string[]> {
   `;
   return rows.map((r: any) => r.symbol as string);
 }
+
+/**
+ * Symbols whose earnings are INGESTED (calendar rows and news results): the tracked set plus the US
+ * scanner universe (~2,300). Readers keep passing their own lists (`getTrackedSymbols()` for the
+ * earnings and home pages), so widening this does not change what those pages show.
+ */
+export async function getEarningsIngestSymbols(): Promise<string[]> {
+  const [tracked, scanner] = await Promise.all([getTrackedSymbols(), getScannerSymbols()]);
+  return [...new Set([...tracked.map(s => s.toUpperCase()), ...scanner])];
+}
+
+/** News queries carry the symbol list in the URL; 1,907 symbols (12 KB) was accepted on 2026-10-23, chunks keep it well under limits. */
+const NEWS_SYMBOL_CHUNK = 1000;
+const chunked = <T,>(xs: T[], n: number): T[][] => Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, i * n + n));
 
 export class AvRateLimited extends Error {}
 
@@ -278,7 +293,7 @@ async function resolveCalendar(): Promise<void> {
 // Step 1 — Alpha Vantage calendar (1 call/day)
 // ---------------------------------------------------------------------------
 
-export async function syncCalendar(): Promise<{ status: string; rows?: number; dropped?: number }> {
+export async function syncCalendar(opts: { force?: boolean } = {}): Promise<{ status: string; rows?: number; dropped?: number }> {
   if (!avKey()) return { status: 'skipped: ALPHA_VANTAGE_API_KEY not set' };
   const [{ synced }] = (await sql`
     SELECT EXISTS (
@@ -286,7 +301,7 @@ export async function syncCalendar(): Promise<{ status: string; rows?: number; d
       WHERE last_seen_at >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
     ) AS synced
   `) as Array<{ synced: boolean }>;
-  if (synced) return { status: 'already synced today' };
+  if (synced && !opts.force) return { status: 'already synced today' };
   if (!(await reserveAvCall())) return { status: 'skipped: AV budget used' };
 
   let text: string;
@@ -305,7 +320,7 @@ export async function syncCalendar(): Promise<{ status: string; rows?: number; d
   const idx = (name: string) => header.indexOf(name);
   const [iSym, iDate, iFiscal, iEst, iTime] = ['symbol', 'reportDate', 'fiscalDateEnding', 'estimate', 'timeOfTheDay'].map(idx);
 
-  const tracked = new Set(await getTrackedSymbols());
+  const tracked = new Set(await getEarningsIngestSymbols());
   const rows = table.slice(1)
     .filter(r => tracked.has((r[iSym] ?? '').toUpperCase()) && /^\d{4}-\d{2}-\d{2}$/.test(r[iDate] ?? ''))
     .map(r => ({
@@ -416,14 +431,17 @@ export async function storeNewsResults(articles: NewsArticle[], tracked: Set<str
 }
 
 export async function syncResultsFromNews(opts: { lookbackHours?: number; deadline?: number } = {}): Promise<{ articles: number; results: number }> {
-  const tracked = await getTrackedSymbols();
+  const tracked = await getEarningsIngestSymbols();
   const trackedSet = new Set(tracked);
   const start = new Date(Date.now() - (opts.lookbackHours ?? 30) * 3_600_000).toISOString();
   let articles = 0;
   let results = 0;
-  for await (const page of newsPages({ start, symbols: tracked, deadline: opts.deadline })) {
-    articles += page.length;
-    results += await storeNewsResults(page, trackedSet);
+  for (const part of chunked(tracked, NEWS_SYMBOL_CHUNK)) {
+    if (opts.deadline && Date.now() > opts.deadline) break;
+    for await (const page of newsPages({ start, symbols: part, deadline: opts.deadline })) {
+      articles += page.length;
+      results += await storeNewsResults(page, trackedSet);
+    }
   }
   return { articles, results };
 }
@@ -446,12 +464,15 @@ export async function catchUpPendingFromNews(opts: { deadline?: number } = {}): 
 
   const symbols = pending.map(p => p.symbol);
   const since = pending.map(p => p.since).sort()[0];
-  const tracked = new Set(await getTrackedSymbols());
+  const tracked = new Set(await getEarningsIngestSymbols());
   let articles = 0;
   let results = 0;
-  for await (const page of newsPages({ start: `${addDays(since, -1)}T00:00:00Z`, symbols, deadline: opts.deadline })) {
-    articles += page.length;
-    results += await storeNewsResults(page, tracked);
+  for (const part of chunked(symbols, NEWS_SYMBOL_CHUNK)) {
+    if (opts.deadline && Date.now() > opts.deadline) break;
+    for await (const page of newsPages({ start: `${addDays(since, -1)}T00:00:00Z`, symbols: part, deadline: opts.deadline })) {
+      articles += page.length;
+      results += await storeNewsResults(page, tracked);
+    }
   }
   return { pending: pending.length, articles, results };
 }
@@ -460,7 +481,11 @@ export async function catchUpPendingFromNews(opts: { deadline?: number } = {}): 
 // Orchestration (one cron invocation)
 // ---------------------------------------------------------------------------
 
-export interface EarningsRunPlan { calendar: boolean; news: boolean; catchUp: boolean }
+export interface EarningsRunPlan {
+  calendar: boolean; news: boolean; catchUp: boolean;
+  /** Re-sync the calendar even if it already ran today (manual `?force=true`; costs one Alpha Vantage call). */
+  forceCalendar?: boolean;
+}
 
 export async function processEarnings(plan: EarningsRunPlan, deadline: number): Promise<Record<string, unknown>> {
   if (!(await acquireLease('earnings', Math.ceil((deadline - Date.now()) / 1000) + 5))) return { skipped: 'another run holds the lease' };
@@ -469,7 +494,7 @@ export async function processEarnings(plan: EarningsRunPlan, deadline: number): 
     try { out[key] = await fn(); } catch (e) { out[key] = { error: e instanceof Error ? e.message : String(e) }; }
   };
   try {
-    if (plan.calendar) await attempt('calendar', syncCalendar);
+    if (plan.calendar) await attempt('calendar', () => syncCalendar({ force: plan.forceCalendar }));
     if (plan.news) await attempt('news', () => syncResultsFromNews({ deadline: deadline - 15_000 }));
     if (plan.catchUp) await attempt('catchUp', () => catchUpPendingFromNews({ deadline }));
   } finally {

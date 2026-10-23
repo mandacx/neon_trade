@@ -41,7 +41,8 @@ function planFor(now: Date): EarningsRunPlan {
  * Earnings sync (lib/earnings.ts). Railway calls it every 15 minutes
  * (railway/.railway/railway.ts → earnings-cron); this route decides which
  * steps run, so the schedule never needs DST edits. Outside every window it
- * returns before touching the database. `?force=true` runs all steps.
+ * returns before touching the database. `?force=true` runs all steps (and re-syncs the
+ * calendar even if it already ran today: one more Alpha Vantage call).
  */
 export async function GET(request: NextRequest) {
   if (!isAuthorizedCron(request)) {
@@ -50,7 +51,7 @@ export async function GET(request: NextRequest) {
 
   const startedAt = Date.now();
   const force = request.nextUrl.searchParams.get('force') === 'true';
-  const plan: EarningsRunPlan = force ? { calendar: true, news: true, catchUp: true } : planFor(new Date());
+  const plan: EarningsRunPlan = force ? { calendar: true, news: true, catchUp: true, forceCalendar: true } : planFor(new Date());
   if (!plan.calendar && !plan.news && !plan.catchUp) {
     return NextResponse.json({ success: true, data: { skipped: 'outside earnings windows' } });
   }
