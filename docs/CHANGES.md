@@ -7,6 +7,26 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-23 — US Market Scanner page (`/scanner`)
+
+Step 6. `app/scanner/page.tsx` (client), gated by `app/scanner/layout.tsx`; nav: Trackers dropdown + mobile menu.
+
+- **Layout** (OI tracker shell, `bg-gray-50`, white rounded-xl cards, blue-600 primary): presets + Refresh / Copy link / Reset filters bar (sticky from the tablet width up; on a phone it would cover the screen, so there it scrolls sideways and is not sticky) → scan chips by group (sideways-scrolling rows on a phone) → one-line help for the selected scan → filter grid (2 / 3 / 6 columns) with the prompt's labels, scan-specific fields only when the scan uses them (N select, direction, period, SMA, combination, volume surge, min gap, tolerance, ATR min/max) → Exchange checkboxes and Exclude ADRs → results card.
+- **Results**: "{label} - {matched} matches of {scanned} scanned - showing {returned}", status pill Live (green dot) / Pre-market / After hours / As of close {date}, "(today's volume is partial)", and a note when volume scans had to use settled sessions. Table = `components/oi/DataTable` (sort, per-column filters, search, CSV of the current rows, Columns menu with saved choice: new table id `usScanner` in `TABLE_IDS`). Columns: # Symbol (pinned; opens the chart in a new tab; badges Levels / ETF / Check corporate action with the reason as tooltip), Why it matched (truncated, tooltip), Price, Chg $, Chg % (▲/▼ and sign, not colour alone), Open, High, Low, 52W High, 52W Low, Volume (compact), Avg $ vol, Mkt Cap ($B/$T), Sector, scan metric. Numbers en-US with `Number()` coercion.
+- **States**: empty "No stocks match these filters right now.", error "Could not run the scan. Try again in a moment." (a failed background refresh keeps the old rows), `LoadingSpinner` on first load. Footer disclaimer as specified.
+- **URL state**: params restored once on mount through `normalizeParams` (the server validates again), written with `replaceState` on every change; requests debounced 300 ms. **Auto-refresh** every 30 s only while the tab is visible and the API says the regular session is open.
+- **`DataTable` changes (all tables)**: `aria-sort` on sortable headers, 40 px tap targets for header sort buttons on phones, focus rings, `aria-label` on the search box, opt-in `stickyFirst`. The rank was merged into the Symbol column so that one column can stay pinned.
+
+### Verified
+- `npm run build` passes (`/scanner` 10 kB; `/api/market/scanner`); `tsc` clean; client bundle still has 0 vendor strings.
+- Screenshots (Playwright, Chromium) at 375, 768, 1280 and 1920 of the page component mounted on a temporary ungated route (deleted afterwards) with `/api/market/scanner` mocked by a **real** engine response (range breakout, 100 rows; one row's flag and one row's ETF kind set by hand to show the badges): no horizontal page scroll at 375 / 768 / 1920, the table scrolls inside its box with the symbol pinned, 14 headers with `aria-sort`, every scanner input labelled.
+
+### Not verified / found
+- The real `/scanner` route signed in as a Pro user (the gate, the live API call, auto-refresh, Copy link) was not exercised: the e2e suite has no login.
+- **Pre-existing, not from this change:** signed out at 1280 px the shared Header's desktop nav overflows (document 1301 px; same on `/` and `/guide`), and the header search box has no label.
+
+---
+
 ## 2026-10-23 — US Market Scanner: engine, API, feature code
 
 Steps 4–5 of the build (page in the next entry).

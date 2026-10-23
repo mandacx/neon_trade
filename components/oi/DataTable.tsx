@@ -101,7 +101,7 @@ function FilterPopover<T>({ col, filter, onChange, onClose }: { col: Column<T>; 
 
 export default function DataTable<T>({
   rows, columns: allColumns, rowKey, initialSort, onRowClick, rowClassName, toolbar, emptyText = 'No rows match.', csvName, tableId,
-  maxHeight = '70vh', pageSize = 200, searchPlaceholder = 'Search all columns…', dense = true,
+  maxHeight = '70vh', pageSize = 200, searchPlaceholder = 'Search all columns…', dense = true, stickyFirst = false,
 }: {
   rows: T[];
   columns: Column<T>[];
@@ -118,6 +118,8 @@ export default function DataTable<T>({
   dense?: boolean;
   /** Enables the Columns menu and saves the user's choice under this table id. */
   tableId?: string;
+  /** Keep the first column (e.g. the symbol) visible while the table scrolls sideways. */
+  stickyFirst?: boolean;
 }) {
   const metas = allColumns.filter(c => c.label).map(c => ({ id: c.key, label: c.label, hint: c.title }));
   const prefs = useColumnPrefs(tableId ?? null, metas);
@@ -188,7 +190,7 @@ export default function DataTable<T>({
   return (
     <div>
       <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-gray-100">
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder={searchPlaceholder}
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder={searchPlaceholder} aria-label="Search the table"
           className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs w-52 focus:outline-none focus:ring-2 focus:ring-blue-400" />
         {activeCount > 0 && (
           <button onClick={() => setFilters({})} className="text-[11px] font-semibold text-blue-700 bg-blue-50 px-2 py-1 rounded">
@@ -207,15 +209,17 @@ export default function DataTable<T>({
         <table className="w-full text-sm">
           <thead className="sticky top-0 z-20">
             <ColRow layout={layout} header className="border-b border-gray-200">
-              {columns.map(c => {
+              {columns.map((c, ci) => {
                 const active = sort?.key === c.key;
                 const fActive = isActive(filters[c.key]);
                 const right = (c.align ?? (c.type === 'number' ? 'right' : 'left')) === 'right';
+                const ariaSort = c.sortable === false ? undefined : active ? (sort!.dir === 'asc' ? 'ascending' : 'descending') : 'none';
+                const stick = stickyFirst && ci === 0 ? 'sticky left-0 z-30 shadow-[1px_0_0_#e5e7eb]' : '';
                 return (
-                  <th key={c.key} data-col={c.label ? c.key : undefined} className={`${th} ${right ? 'text-right' : 'text-left'}`} title={c.title}>
+                  <th key={c.key} data-col={c.label ? c.key : undefined} aria-sort={ariaSort} className={`${th} ${right ? 'text-right' : 'text-left'} ${stick}`} title={c.title}>
                     <div className={`relative flex items-center gap-1 ${right ? 'justify-end' : ''}`}>
                       {c.sortable === false ? <span>{c.label}</span> : (
-                        <button onClick={() => toggleSort(c.key, c.type)} className="flex items-center gap-1 hover:text-gray-800">
+                        <button onClick={() => toggleSort(c.key, c.type)} className="flex items-center gap-1 hover:text-gray-800 min-h-[40px] sm:min-h-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 rounded">
                           {c.label}
                           <span className={active ? 'text-blue-600' : 'text-gray-300'}>{active ? (sort!.dir === 'asc' ? '↑' : '↓') : '↕'}</span>
                         </button>
@@ -242,10 +246,11 @@ export default function DataTable<T>({
             ) : sorted.slice(0, shown).map(r => (
               <ColRow layout={layout} key={rowKey(r)} onClick={onRowClick ? () => onRowClick(r) : undefined}
                 className={`border-b border-gray-50 last:border-0 ${onRowClick ? 'cursor-pointer hover:bg-blue-50/40' : ''} ${rowClassName?.(r) ?? ''}`}>
-                {columns.map(c => {
+                {columns.map((c, ci) => {
                   const right = (c.align ?? (c.type === 'number' ? 'right' : 'left')) === 'right';
+                  const stick = stickyFirst && ci === 0 ? 'sticky left-0 z-10 bg-white shadow-[1px_0_0_#f3f4f6]' : '';
                   return (
-                    <td key={c.key} data-col={c.label ? c.key : undefined} className={`${td} ${right ? 'text-right tabular-nums' : ''} ${c.align === 'center' ? 'text-center' : ''} ${c.className ?? 'text-xs'}`}>
+                    <td key={c.key} data-col={c.label ? c.key : undefined} className={`${td} ${right ? 'text-right tabular-nums' : ''} ${c.align === 'center' ? 'text-center' : ''} ${c.className ?? 'text-xs'} ${stick}`}>
                       {c.render ? c.render(r) : (c.value(r) ?? '—')}
                     </td>
                   );

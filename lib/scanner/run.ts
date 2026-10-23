@@ -310,7 +310,11 @@ export async function runScan(p: ScanParams, opts: { onTodayRefresh?: (task: () 
 
   const sectors = [...new Set(universe.filter(u => u.sector).map(u => u.sector!))].sort();
   const industries: Record<string, string[]> = {};
-  for (const u of universe) if (u.sector && u.industry) (industries[u.sector] ??= []).includes(u.industry) || industries[u.sector].push(u.industry);
+  for (const u of universe) {
+    if (!u.sector || !u.industry) continue;
+    const list = (industries[u.sector] ??= []);
+    if (!list.includes(u.industry)) list.push(u.industry);
+  }
   for (const k of Object.keys(industries)) industries[k].sort();
 
   return {
