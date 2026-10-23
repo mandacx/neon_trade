@@ -7,6 +7,24 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-23 — US Market Scanner: docs, final checks, open items
+
+Step 8. **`docs/us-scanner.md`** (new): data flow, feeds and plan limits, universe sources and rules, scan rules that are easy to get wrong, splits, runbook, tables, limits. The prompt's `docs/DESIGN.md` / `docs/DATA_FLOW.md` don't exist in this repo, so it follows the `docs/earnings.md` / `docs/oi-tracker.md` pattern. **`CLAUDE.md`**: feed rules (daily = consolidated, capped at now − 16 min; snapshots/intraday single-venue; 200 req/min), stored-bars paragraph (consolidated coverage, split check, scanner symbols), new crons, the scanner route, test commands. Removed the unused `fetchUsAssets` from the provider (it only works on the live trading host).
+
+### Final checks (all on 2026-10-23)
+- `node scripts/test-us-scanner.mjs` 23 passed; `test-earnings-parse.mjs` 31 passed; `test-oi-strategies.mjs` passed; `scanner-dry-run.mts` 10 symbols identical.
+- `npx tsc --noEmit` clean; `npm run lint` 0 errors (265 warnings, the repo's existing `no-explicit-any` style); `npm run build` passes.
+- Masking: 0 vendor strings in `.next/static`; 0 vendor mentions in `app/`, `lib/`, `components/`, `types/` outside `lib/marketdata/provider/` (stored DB values `alpaca_news` / `alphavantage` excepted; they are mapped before reaching clients).
+- Gate: `/api/market/scanner` signed out → 401 "Login required"; `/scanner` signed out → 307 to `/login?redirect=%2Fscanner`.
+
+### Open items (need the user)
+- **Push** (main auto-deploys to Vercel). Nothing has been pushed.
+- **`railway config apply`** for `us-universe-cron` and `us-universe-meta-cron` (plan: 2 to add, 0 to change, 0 to destroy), after the push, so the services never call routes that 404.
+- Signed-in check of `/scanner` as a Pro user in a browser (gate, live API, auto-refresh, Copy link) and outside market hours (pre-market gappers, after-hours pill).
+- The universe, history and metadata were filled from this machine against the shared DB, so production will already have them when deployed. The weekly Railway jobs keep them current.
+
+---
+
 ## 2026-10-23 — Earnings ingestion widened to the US scanner universe
 
 Step 7. Requested: use the existing earnings calendar table and include the scanner's tickers.

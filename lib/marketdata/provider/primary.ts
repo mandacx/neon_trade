@@ -1,16 +1,15 @@
 /**
- * INTERNAL PROVIDER ADAPTER (primary market data: stock/option bars, snapshots, calendar, news,
- * asset list). Server-only. Do not import from anywhere but lib/marketdata/index.ts, and never put
+ * INTERNAL PROVIDER ADAPTER (primary market data: stock/option bars, snapshots, calendar, news). Server-only. Do not import from anywhere but lib/marketdata/index.ts, and never put
  * this vendor's name, hosts or field names in API responses, routes or UI text.
  */
 import axios, { type AxiosInstance } from 'axios';
-import type { Bar, CalendarRow, NewsArticle, OptionSnapshot, Snapshot, UsAsset, UsExchange } from '../types';
+import type { Bar, CalendarRow, NewsArticle, OptionSnapshot, Snapshot } from '../types';
 import type { ChartInterval } from '../intervals';
 
 const ALPACA_API_KEY = process.env.ALPACA_API_KEY;
 const ALPACA_SECRET_KEY = process.env.ALPACA_SECRET_KEY;
 const ALPACA_BASE_URL = process.env.ALPACA_BASE_URL || 'https://data.alpaca.markets';
-/** Calendar and asset list live on the trading host; the paper host is used so nothing here can touch a live account. */
+/** The calendar lives on the trading host; the paper host is used so nothing here can touch a live account. */
 const TRADING_URL = process.env.ALPACA_TRADING_URL || 'https://paper-api.alpaca.markets';
 
 if (!ALPACA_API_KEY || !ALPACA_SECRET_KEY) {
@@ -543,7 +542,7 @@ export async function getDailyBarsRevalidated(symbols: string[], start: string, 
 }
 
 // ---------------------------------------------------------------------------
-// Exchange calendar, news, asset list
+// Exchange calendar, news
 // ---------------------------------------------------------------------------
 
 /** Trading days in [start, end] with regular and extended session times. Throws on failure. */
@@ -567,27 +566,4 @@ export async function fetchNewsPage(opts: { start: string; end?: string; symbols
   if (!res.ok) throw new Error(`news HTTP ${res.status}`);
   const body = (await res.json()) as { news?: NewsArticle[]; next_page_token?: string | null };
   return { news: body.news ?? [], nextPageToken: body.next_page_token ?? null };
-}
-
-const EXCHANGES: Record<string, UsExchange> = {
-  NYSE: 'NYSE', NASDAQ: 'NASDAQ', AMEX: 'NYSE American', ARCA: 'NYSE Arca', BATS: 'Cboe BZX',
-};
-
-/** Active US equity listings (stocks and ETFs) on the major exchanges. Throws on failure. */
-export async function fetchUsAssets(): Promise<UsAsset[]> {
-  if (!hasKeys()) throw new Error('market-data keys not set');
-  const res = await fetch(`${TRADING_URL}/v2/assets?status=active&asset_class=us_equity`, {
-    headers: authHeaders(), cache: 'no-store', signal: AbortSignal.timeout(30_000),
-  });
-  if (!res.ok) throw new Error(`assets HTTP ${res.status}`);
-  const rows = (await res.json()) as Array<{ symbol: string; name?: string; exchange?: string; tradable?: boolean; status?: string; attributes?: string[] }>;
-  return rows
-    .filter(r => r.status === 'active' && r.exchange && EXCHANGES[r.exchange])
-    .map(r => ({
-      symbol: r.symbol.replace('/', '.').toUpperCase(),
-      name: r.name ?? '',
-      exchange: EXCHANGES[r.exchange as string],
-      tradable: r.tradable !== false,
-      attributes: r.attributes ?? [],
-    }));
 }

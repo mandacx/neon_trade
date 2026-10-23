@@ -37,15 +37,3 @@ export interface OptionSnapshot {
 export interface CalendarRow { date: string; open: string; close: string; sessionOpen: string | null; sessionClose: string | null }
 
 export interface NewsArticle { id: number; headline: string; symbols: string[]; created_at: string }
-
-/** A tradable US equity listing (stock or ETF). `exchange` uses neutral names. */
-export interface UsAsset {
-  symbol: string;
-  name: string;
-  exchange: UsExchange;
-  tradable: boolean;
-  /** Raw class/attribute hints, kept only to help classify (never sent to clients). */
-  attributes: string[];
-}
-
-export type UsExchange = 'NYSE' | 'NASDAQ' | 'NYSE American' | 'NYSE Arca' | 'Cboe BZX' | 'OTHER';
