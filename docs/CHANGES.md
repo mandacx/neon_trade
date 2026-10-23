@@ -7,6 +7,30 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-23 — US Market Scanner: engine, API, feature code
+
+Steps 4–5 of the build (page in the next entry).
+
+- **Engine (`lib/scanner/`)**, pure modules unless noted: `config.ts` (catalogue of 20 scans in 9 groups, params, presets, `normalizeParams` clamps every query value, `toQuery` round-trips), `indicators.ts` (streak, volume ratio, 30% jump, SMA, ROC, ATR%, SMA50×200 cross, inside day, range breakout, percentile), `scans.ts` (one function per scan + corporate-action flag), `liveBar.ts` (latest-session bar, pre-market price, refresh timing), `today.ts` (server: shared `nt_scanner_today`), `run.ts` (server: the runner).
+- **One scan** = one SQL query for the whole universe (per symbol: last 60 OHLCV, 120 highs/lows, 260 closes, 52-week extremes with dates, newest >30% jump) cached 5 min + snapshots in 2 requests of 1,000 symbols (verified the endpoint takes 1,000) cached 15 s + the shared today table. `lib/ttlCache.ts` `getOrSet` de-duplicates concurrent misses.
+- **Latest-session bar (`liveBarFrom`)**: a date comparison against the last stored session (snapshot bars carry their ET date; DST-safe via Intl), not the NSE design's close-matching. The close comparison is kept as a split check (> 5% off on the same session → row flagged). A settled session missing from storage (before the morning top-up) is taken from the snapshot's previous bar.
+- **Today's consolidated volume**: a batched request for ~1,900 symbols takes 10–25 s (measured), so `nt_scanner_today` holds today's 15-min-delayed consolidated bars for everyone, refreshed in the background (`after()`) at most every 3 min in session plus once after close + 17 min, by one instance (lease `scanner-today`), at most one attempt per instance per 3 min. Measured: 1,906 symbols in 14.4 s. Until it lands, volume scans use the settled sessions (`meta.volumeScanSettledOnly`; before this rule a volume scan on single-venue volume matched 0, after the refresh 8).
+- **API**: `GET /api/market/scanner` (`dynamic`, `maxDuration 30`), `requireFeatureApi(us_market_scanner)` + limiter `us_scanner` (120/min, admin-editable); earnings scans also need `earnings`. Response `{ success, data: { params, rows, meta, filters } }`, no vendor names.
+- **Rate-limit settings fix** (`lib/rateLimitConfig.ts`): loading saved limits now fills limiters added since the save with their defaults (and drops removed ones) instead of rejecting the whole saved set and silently reverting every admin-edited value. Admin save is still strict.
+- **Feature**: `FEATURE_US_MARKET_SCANNER = 'us_market_scanner'` in `ALL_FEATURES` (drives `/upgrade`, admin plan editor, `/profile`), seed lists in `scripts/bootstrap-app-tables.mjs`, `scripts/add-us-market-scanner-feature.mjs` (insert-only, `--dry-run`) **run against the live DB: added to PRO and EXPERT** (re-run: none added). `middleware.ts` matcher `/scanner/:path*`, `app/scanner/layout.tsx` guard, Header Trackers dropdown + mobile menu entry "🔎 US Market Scanner".
+- **tsconfig**: `allowImportingTsExtensions` so the pure scanner modules can import each other as `./x.ts` and run under Node's type stripping in the fixture tests (Next resolves them as before).
+
+### Verified
+- `scripts/test-us-scanner.mjs`: 23 tests (adds streak across Thanksgiving, gap filled/open, 52-week today vs 3 sessions ago and the 200-session rule, volume ratio short baseline, jump flag, indicators, RS + ranking, `normalizeParams` clamping + URL round trip, ET dates across the 11-01 DST change, `liveBarFrom` for DST / Thanksgiving / the 11-27 13:00 half day / a missing settled session / split suspicion / stale snapshot, pre-market, refresh timing). Existing `test-earnings-parse.mjs` and `test-oi-strategies.mjs` still pass.
+- `scripts/scanner-dry-run.mts` (new): 10 symbols (AAPL, MSFT, NVDA, BRK.B, JPM, XOM, TSM, SPY, QQQ, SOXL): engine history vs an independent raw consolidated fetch: 260/260 bars, 0 mismatches, identical streak / volume ratio / SMA200 / 3M ROC / ATR.
+- Live engine runs (via tsx, during the regular session 2026-10-23): 12 scans, cold 3.0 s, warm 160–460 ms; results printed and plausible (e.g. AXP "Reports today (2026-10-23, pre-market)", CBOE golden cross, gap/inside-day/RS rows with corporate-action flags where a >30% move exists). `tsc` clean.
+
+### Not verified
+- The HTTP route with a signed-in Pro session (auth, 429, `after()` on Vercel); only the runner was called directly.
+- Pre-market and after-hours behaviour live (the run was during the regular session); half-day and holiday paths are fixture-tested only.
+
+---
+
 ## 2026-10-23 — US universe (`nt_us_universe`), consolidated daily bars, split detection
 
 Steps 2–3 of the US Market Scanner build. Decisions taken with the user during the build are marked **(decided)**.

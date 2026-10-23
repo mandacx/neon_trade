@@ -10,7 +10,7 @@ import SignOutButton from '@/components/auth/SignOutButton';
 import IndicesStrip from '@/components/layout/IndicesStrip';
 import {
   hasFeature, FEATURE_QUADRANT, FEATURE_SCAN_ALERTS_LATEST, FEATURE_SCAN_ALERTS_HISTORY,
-  FEATURE_WATCHLISTS, FEATURE_PERFORMANCE, FEATURE_EARNINGS, FEATURE_OI_TRACKER,
+  FEATURE_WATCHLISTS, FEATURE_PERFORMANCE, FEATURE_EARNINGS, FEATURE_OI_TRACKER, FEATURE_US_MARKET_SCANNER,
 } from '@/lib/features';
 
 // Small "needs upgrade" flag for nav entries — shown before a click, not just
@@ -55,6 +55,7 @@ export default function Header() {
   const needsPerformance = !hasFeature(authCtx.features, FEATURE_PERFORMANCE);
   const needsEarnings = !hasFeature(authCtx.features, FEATURE_EARNINGS);
   const needsOiTracker = !hasFeature(authCtx.features, FEATURE_OI_TRACKER);
+  const needsScanner = !hasFeature(authCtx.features, FEATURE_US_MARKET_SCANNER);
 
   useEffect(() => {
     function onClickOutside(e: MouseEvent) {
@@ -189,7 +190,7 @@ export default function Header() {
               <button
                 onClick={() => setTrackersMenuOpen(v => !v)}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                  pathname?.startsWith('/earnings') || pathname?.startsWith('/oi-tracker') ? 'bg-indigo-700 text-white' : 'bg-indigo-600 text-white hover:bg-indigo-700'
+                  pathname?.startsWith('/earnings') || pathname?.startsWith('/oi-tracker') || pathname?.startsWith('/scanner') ? 'bg-indigo-700 text-white' : 'bg-indigo-600 text-white hover:bg-indigo-700'
                 }`}
               >
                 📊 Trackers
@@ -216,6 +217,15 @@ export default function Header() {
                   >
                     📊 Options OI Tracker
                     {needsOiTracker && <MobileProBadge />}
+                  </button>
+                  <button
+                    onClick={() => { setTrackersMenuOpen(false); router.push('/scanner'); }}
+                    className={`w-full text-left px-3 py-2 text-xs font-medium hover:bg-indigo-50 border-t border-gray-100 ${
+                      pathname?.startsWith('/scanner') ? 'text-indigo-700 bg-indigo-50' : 'text-gray-700'
+                    }`}
+                  >
+                    🔎 US Market Scanner
+                    {needsScanner && <MobileProBadge />}
                   </button>
                 </div>
               )}
@@ -369,6 +379,13 @@ export default function Header() {
           >
             📊 OI Tracker
             {needsOiTracker && <MobileProBadge />}
+          </button>
+          <button
+            onClick={() => router.push('/scanner')}
+            className="w-full text-left px-3 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-50 rounded-lg"
+          >
+            🔎 US Market Scanner
+            {needsScanner && <MobileProBadge />}
           </button>
           <button
             onClick={() => router.push('/guide')}

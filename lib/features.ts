@@ -24,6 +24,8 @@ export const FEATURE_TELEGRAM_ALERTS = 'telegram_alerts';
 export const FEATURE_EARNINGS = 'earnings';
 /** Options OI tracker page and private tracked option positions (lib/oiTracker.ts). */
 export const FEATURE_OI_TRACKER = 'oi_tracker';
+/** US Market Scanner page and API (lib/scanner, docs/us-scanner.md). */
+export const FEATURE_US_MARKET_SCANNER = 'us_market_scanner';
 /**
  * A *restriction*, not a grant: a plan (or user override) that has it only sees monthly and
  * quarterly expiries. Weekly expiries are hidden and rejected server-side (lib/expiryAccess.ts).
@@ -51,6 +53,7 @@ export const ALL_FEATURES: Array<{ code: string; label: string; restriction?: bo
   { code: FEATURE_TELEGRAM_ALERTS, label: 'Telegram Alerts' },
   { code: FEATURE_EARNINGS, label: 'Earnings Dates & Results' },
   { code: FEATURE_OI_TRACKER, label: 'Options OI Tracker' },
+  { code: FEATURE_US_MARKET_SCANNER, label: 'US Market Scanner' },
   { code: FEATURE_STANDARD_EXPIRY_ONLY, label: 'Monthly & quarterly expiries only (no weeklies)', restriction: true },
 ];
 

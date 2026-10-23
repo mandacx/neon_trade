@@ -50,6 +50,14 @@ export const LIMITERS: LimiterDef[] = [
     standard: 90,
     entitled: null,
   },
+  {
+    name: 'us_scanner',
+    label: 'US Market Scanner requests',
+    description: 'Scans on the US Market Scanner (Pro-only, so one tier). The page auto-refreshes every 30 s in market hours.',
+    windowSeconds: 60,
+    standard: 120,
+    entitled: null,
+  },
 ];
 
 export const RATE_LIMITS_KEY = 'rate_limits';
@@ -91,6 +99,19 @@ export function validateRateLimits(input: unknown): { ok: true; values: RateLimi
   return { ok: true, values };
 }
 
+/**
+ * Saved limits plus the defaults of limiters added since they were saved (and without limiters that no
+ * longer exist), so adding a limiter in code doesn't make the saved set invalid and silently drop every
+ * admin-edited value back to the defaults. The admin save path still validates strictly.
+ */
+function withDefaultLimiters(saved: unknown): unknown {
+  if (!saved || typeof saved !== 'object') return saved;
+  const src = saved as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const def of LIMITERS) out[def.name] = src[def.name] ?? { standard: def.standard, entitled: def.entitled };
+  return out;
+}
+
 let cache: { at: number; values: RateLimitValues } | null = null;
 
 export function clearRateLimitCache(): void {
@@ -104,7 +125,7 @@ export async function loadRateLimits(): Promise<RateLimitValues> {
   try {
     const saved = await getSetting<unknown>(RATE_LIMITS_KEY);
     if (saved) {
-      const checked = validateRateLimits(saved.value);
+      const checked = validateRateLimits(withDefaultLimiters(saved.value));
       if (checked.ok) values = checked.values;
       else console.error('rateLimitConfig: saved limits are invalid, using defaults:', checked.error);
     }

@@ -47,7 +47,7 @@ const FREE_FEATURES = ['stock_analysis'];
 const PRO_FEATURES = [
   'stock_analysis', 'levels', 'scan_alerts_latest', 'scan_alerts_history',
   'quadrant', 'watchlists', 'performance', 'telegram_alerts', 'earnings',
-  'oi_tracker',
+  'oi_tracker', 'us_market_scanner',
 ];
 // Top tier: everything in Pro, plus any feature that ships Expert-only. New
 // feature codes go here (and in lib/features.ts), NOT in PRO_FEATURES.
