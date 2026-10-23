@@ -7,6 +7,16 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-22 — Quadrant chart: drag-to-pan and pinch-zoom on touch screens
+
+Reported: on a phone the quadrant could not be moved.
+
+- **Cause (code reading):** `components/charts/QuadrantChart.tsx` panned with `onMouseDown/Move/Up` only. A finger drag produces no mouse move events (only a tap synthesises mouse events), and the wrapper's `touch-action: none` stops the browser scrolling instead, so nothing happened. The component is shared with the scan-alerts latest/historical pages, which get the fix too.
+- **Fix:** Pointer Events (mouse, touch, pen) for pan; two fingers pinch-zoom around their midpoint (minimum span 5% of the full range); pointer capture starts once a pan begins (so a plain tap/click still reaches a dot, and a mouse drag that leaves the plot keeps working); a pan or pinch suppresses the dot click as before. The + / − / Reset buttons are unchanged. Hint text now says pinch.
+- **Verified:** `tsc` clean. **Not verified:** not tried on a phone or in a touch-emulating browser (pan, pinch, tapping a dot, mouse drag and wheel on desktop). `touch-action: none` is kept, so a finger on the chart does not scroll the page; scroll from the margins or the area outside the plot.
+
+---
+
 ## 2026-10-22 — Daily bars stored in Postgres: far fewer Alpaca calls for the stock chart and levels
 
 Requested: keep the past daily data and fetch only today's from Alpaca (like the quadrant page), to cut Alpaca calls and the join work.

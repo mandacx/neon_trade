@@ -224,11 +224,56 @@ export default function QuadrantChart({ data, onStockClick, height = 600, title 
     return () => el.removeEventListener('wheel', onWheel);
   }, []);
 
-  const onMouseDown = (e: React.MouseEvent) => {
+  // Pointer events, not mouse events: a finger drag never produces mouse move events, so on a phone
+  // the mouse-only handlers could not pan. Pointer events cover mouse, touch and pen; two fingers pinch-zoom.
+  const pointersRef = useRef<Map<number, { x: number; y: number }>>(new Map());
+  const pinchRef = useRef<{ dist: number; fx: number; fy: number; x: [number, number]; y: [number, number] } | null>(null);
+
+  const startPinch = () => {
+    const el = plotRef.current;
+    const pts = [...pointersRef.current.values()];
+    if (!el || pts.length < 2) return;
+    const rect = el.getBoundingClientRect();
+    const plotW = rect.width - MARGIN.left - MARGIN.right;
+    const plotH = rect.height - MARGIN.top - MARGIN.bottom;
+    const mx = (pts[0].x + pts[1].x) / 2;
+    const my = (pts[0].y + pts[1].y) / 2;
+    pinchRef.current = {
+      dist: Math.max(Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y), 1),
+      fx: Math.min(1, Math.max(0, (mx - rect.left - MARGIN.left) / plotW)),
+      fy: Math.min(1, Math.max(0, (my - rect.top - MARGIN.top) / plotH)),
+      x: xDomain,
+      y: yDomain,
+    };
+    dragRef.current = null; // the second finger turns a pan into a pinch
+    movedRef.current = true;
+  };
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointersRef.current.size >= 2) { startPinch(); return; }
     dragRef.current = { px: e.clientX, py: e.clientY, x: xDomain, y: yDomain, moved: false };
     movedRef.current = false;
   };
-  const onMouseMove = (e: React.MouseEvent) => {
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (pointersRef.current.has(e.pointerId)) pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    const pinch = pinchRef.current;
+    if (pinch && pointersRef.current.size >= 2) {
+      const pts = [...pointersRef.current.values()];
+      const scale = pinch.dist / Math.max(Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y), 1); // fingers apart -> zoom in
+      const zoom = (dom: [number, number], full: [number, number], f: number): [number, number] => {
+        const w = Math.max((dom[1] - dom[0]) * scale, (full[1] - full[0]) * 0.05);
+        const at = dom[0] + f * (dom[1] - dom[0]);
+        return clampDomain([at - f * w, at + (1 - f) * w], full);
+      };
+      setXDomain(zoom(pinch.x, DEFAULT_X, pinch.fx));
+      setYDomain(zoom(pinch.y, DEFAULT_Y, 1 - pinch.fy)); // the Y axis is inverted on screen (top = max)
+      if (!isDragging) setIsDragging(true);
+      return;
+    }
+
     const d = dragRef.current;
     if (!d) return;
     const el = plotRef.current;
@@ -239,6 +284,10 @@ export default function QuadrantChart({ data, onStockClick, height = 600, title 
     const dx = e.clientX - d.px;
     const dy = e.clientY - d.py;
     if (!d.moved && Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
+    if (!d.moved) {
+      // Keep receiving moves when the pointer leaves the plot (mouse); done once a pan starts so a plain click still reaches a dot.
+      try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* not capturable */ }
+    }
     d.moved = true;
     movedRef.current = true;
     if (!isDragging) setIsDragging(true);
@@ -249,9 +298,12 @@ export default function QuadrantChart({ data, onStockClick, height = 600, title 
     // the window up in data terms: the opposite sign to X.
     setYDomain(clampDomain([d.y[0] + ddy, d.y[1] + ddy], DEFAULT_Y));
   };
-  const endDrag = () => {
+  const endDrag = (e?: React.PointerEvent) => {
+    if (e) pointersRef.current.delete(e.pointerId); else pointersRef.current.clear();
+    if (pointersRef.current.size < 2) pinchRef.current = null;
+    // A finger left after a pinch must not start a pan from a stale origin.
     dragRef.current = null;
-    if (isDragging) setIsDragging(false);
+    if (pointersRef.current.size === 0 && isDragging) setIsDragging(false);
   };
 
   const CustomTooltip = ({ active, payload }: any) => {
@@ -404,10 +456,11 @@ export default function QuadrantChart({ data, onStockClick, height = 600, title 
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
         <div
           ref={plotRef}
-          onMouseDown={onMouseDown}
-          onMouseMove={onMouseMove}
-          onMouseUp={endDrag}
-          onMouseLeave={endDrag}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={endDrag}
+          onPointerCancel={endDrag}
+          onPointerLeave={e => { if (e.pointerType === 'mouse') endDrag(e); }}
           style={{ cursor: isDragging ? 'grabbing' : 'grab', touchAction: 'none' }}
         >
           <ResponsiveContainer width="100%" height={height}>
@@ -518,7 +571,7 @@ export default function QuadrantChart({ data, onStockClick, height = 600, title 
             <p>• X-axis = where the price (live during market hours, otherwise that day&apos;s close) sits <strong>among the stock&apos;s own 5 levels</strong> (rungs), interpolated between adjacent levels</p>
             <p>• Dot color = closest level (category) · Dot size = market cap (larger = bigger company)</p>
             <p>• Amber ring = earnings fall before the expiry (Pro earnings data) — the report can move price through these levels</p>
-            <p>• Scroll to zoom toward the cursor · Drag to pan · Use + / − / Reset to control the view</p>
+            <p>• Scroll or pinch to zoom · Drag to pan · Use + / − / Reset to control the view</p>
             <p>• Click a level card to isolate stocks in that category · Click again to clear</p>
             <p>• Hover dots for detailed level info · Click a dot to open its chart</p>
           </div>
