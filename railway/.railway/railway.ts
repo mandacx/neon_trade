@@ -28,7 +28,26 @@ export default defineRailway(() => {
     env: { CRON_SECRET: "${{market-catalog-cron.CRON_SECRET}}" },
   });
 
+  // US scanner universe (lib/usUniverse.ts, docs/us-scanner.md): listings, index flags and the
+  // liquidity scan, weekly. Called every 10 min on Saturday morning; the route resumes the paced
+  // liquidity scan where it stopped and skips every step once it is under 6 days old.
+  const usUniverseCron = service("us-universe-cron", {
+    build: { buildEnvironment: "V3", builder: "DOCKERFILE", dockerfilePath: "Dockerfile" },
+    replicas: { "us-west2": 1 },
+    deploy: { cronSchedule: "*/10 14-16 * * 6", restartPolicyType: "NEVER" },
+    env: { CRON_SECRET: "${{market-catalog-cron.CRON_SECRET}}" },
+  });
+
+  // Sector / industry / market cap for the universe (yfinance, Python). No DB credentials: it pulls
+  // the symbol list from and posts results to /api/cron/us-universe-meta. Sundays, after the universe run.
+  const usUniverseMetaCron = service("us-universe-meta-cron", {
+    build: { buildEnvironment: "V3", builder: "DOCKERFILE", dockerfilePath: "Dockerfile" },
+    replicas: { "us-west2": 1 },
+    deploy: { cronSchedule: "0 15 * * 0", restartPolicyType: "NEVER" },
+    env: { CRON_SECRET: "${{market-catalog-cron.CRON_SECRET}}" },
+  });
+
   return project("neon-trade-crons", {
-    resources: [marketCatalogCron, telegramAlertsCron, earningsCron],
+    resources: [marketCatalogCron, telegramAlertsCron, earningsCron, usUniverseCron, usUniverseMetaCron],
   });
 });

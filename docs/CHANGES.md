@@ -7,6 +7,40 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-23 — US universe (`nt_us_universe`), consolidated daily bars, split detection
+
+Steps 2–3 of the US Market Scanner build. Decisions taken with the user during the build are marked **(decided)**.
+
+### Daily bars switched to the consolidated feed (SIP) — affects the stock chart too
+- **Found (verified live):** stored/daily bars were IEX-only. AAPL 2026-10-22: IEX volume 980,486 vs consolidated 47,047,124 (~2%); IEX close 348.34 vs official 348.22. Every volume number in the app (chart volume, liquidity) was ~50x low.
+- **Verified plan rules:** consolidated (SIP) daily bars are served up to now − 15 min; any later `end` is refused ("subscription does not permit querying recent SIP data"); a date-only `end` means the end of that day (so `end=today` is refused); real-time SIP snapshots are refused. Rate limit header: `X-Ratelimit-Limit: 200`.
+- **(decided) SIP history for everyone:** `lib/marketdata/provider/primary.ts` uses `feed=sip` for daily/weekly/monthly bars (`getHistoricalBars` with a daily timeframe, `getDailyBarsChunk`, `getDailyBarsMulti`, `getDailyBarsRevalidated`), with `end` turned into an explicit instant capped at now − 16 min (`sipEnd`). Intraday bars and snapshots stay IEX (real time).
+- **Today's bar** (`lib/dailyBars.ts` `liveBar`): the 15-min-delayed consolidated bar gives open/range/volume, the real-time snapshot's regular-session price is the close (widening high/low). In the first ~15 min after the open there is no delayed bar and the snapshot's own (single-venue volume) bar is used.
+- **Earnings reactions** (`app/api/earnings/list`): today's close in the closes series is replaced by the live price (the delayed bar would be 15 min stale).
+- **Re-pull without a gap:** `nt_daily_bars_cover.feed` (new column). Coverage only counts when `feed = 'consolidated'`, so old rows are re-fetched and overwritten (upsert) while still being served until then.
+
+### Universe
+- **Listings (decided: Nasdaq Trader directory, not the vendor asset list):** the vendor's asset list answers only on the live trading host (paper host 401 with these live-account keys); the app keeps to the paper host. `lib/referenceData/listings.ts` parses nasdaqlisted.txt + otherlisted.txt (ETF flag, test-issue flag, exchange). Drops test issues, `$` preferreds, `.W/.U/.R` suffixes and non-ETF names with warrant/unit/right/preferred/notes/debenture/coupon %. ADR = name says American Depositary / ADS / ADR. 11,675 listings kept (5,904 stocks, 5,771 ETFs).
+- **Index flags (decided):** S&P 500 = SPY holdings xlsx, Dow 30 = DIA holdings xlsx (SSGA; parsed by a small built-in zip/xlsx reader, no dependency), Nasdaq-100 = Nasdaq's list API (101 incl. GOOG/GOOGL) with Invesco QQQ JSON as second source (it returned 406 to repeated scripted requests). Plausibility ranges; a failed index keeps its old flags. **Russell 1000: no reachable file** (iShares serves HTML to scripts, Vanguard 404), so `in_top1000` = top 1000 active non-ADR common stocks by market cap, labelled as an approximation. Known gap: foreign issuers whose listing name doesn't say "Depositary" (e.g. TSM) count as US.
+- **Liquidity (decided: $50M/day):** 20 settled consolidated sessions for every active listing, weekly, via `getDailyBarsPaced` (paced, resumable through `nt_us_universe_jobs`). $10M/day let in 3,512 names; $50M → 1,904 liquid (1,421 stocks, 483 ETFs). Scanner = active AND (liquid OR S&P 500 / Nasdaq-100 / Dow 30 / Top-1000) = **1,907** today. **(decided) latest only**: no membership history is kept (bars for scanner symbols are stored daily anyway).
+- **Metadata (decided: weekly Railway Python worker):** `railway/us-universe-meta-cron/meta_worker.py` (yfinance) pulls symbols from and posts results to `/api/cron/us-universe-meta` (cron secret), so Railway holds no DB credentials. Yahoo sectors → GICS 11 names. Existing `securities` metadata seeds 596 rows (never writes `securities`).
+- **Files:** `lib/usUniverse.ts`, `lib/usUniverseRules.ts` (pure), `lib/referenceData/{listings,indexHoldings}.ts`, `app/api/cron/us-universe/route.ts` (listings → indexes → liquidity; steps skip while < 6 days old; `?force=1`), `app/api/cron/us-universe-meta/route.ts`, `scripts/bootstrap-us-universe.mjs` (DDL, `--dry-run`; run once), Railway: `railway/us-universe-cron/Dockerfile` (Sat every 10 min 14–16 UTC), `railway/us-universe-meta-cron/{Dockerfile,meta_worker.py}` (Sun 15:00 UTC) in `railway/.railway/railway.ts`.
+
+### Split detection (`lib/splitCheck.ts`, `warmDailyBars`)
+- The daily top-up re-requests 7 calendar days before each symbol's coverage end. If every overlapping stored close moved by > 0.5% and all by the same ratio (±1%), the symbol is rebased: bars and coverage dropped (`invalidateDailyBars`), full history re-pulled next run; reported in `WarmResult.rebased`. One revised print or noise is not a split. Closes the 2026-10-22 follow-up.
+- `warmDailyBars` now warms tracked ∪ scanner symbols.
+
+### Verified
+- Live runs from a local dev server against the shared Neon DB and live sources: `bootstrap-us-universe.mjs` (dry run, then run); `/api/cron/us-universe` 7 calls (~50 s each): 11,675 listings, 503/101/30 index members all matched, liquidity for 11,675 symbols with 0 failed requests; meta worker run locally: 861 stocks in 107 s, 0 errors, Top-1000 reached 1,000; `/api/cron/daily-bars` 4 calls: 1,947 symbols, ~504k consolidated bars stored, 0 failed chunks, 0 rebased; AAPL stored bars now consolidated (10-22: 348.22, 47.0M).
+- `scripts/test-us-scanner.mjs` (8 tests: listings classify/parse, holdings parse, split check 2:1 / 1:10 / noise, liquidity rules, `sipEnd` EDT/EST). `tsc` clean. `railway config plan`: 2 to add, 0 to change.
+
+### Not verified / not done
+- **Railway not applied** (`railway config apply` waits until this code is deployed, else the services would call routes that 404 in production). Docker images not built.
+- `liveBar` merge, the earnings today-close override and the chart's change in past-candle values were not viewed in a browser; split detection has not seen a real split yet (fixtures only).
+- Holdings sources are third-party web endpoints that can change or block without notice (Invesco already did); the cron reports per-index errors and keeps old flags.
+
+---
+
 ## 2026-10-23 — Vendor masking: market-data facade (`lib/marketdata`), no vendor names reach the browser
 
 Step 1 of the US Market Scanner build (plan agreed 2026-10-23: full repo masking, env var names kept since they are server-only).

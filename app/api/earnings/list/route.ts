@@ -76,7 +76,12 @@ export async function GET(request: NextRequest) {
   const rows = events.map(e => {
     const quote = rowQuote(buildQuote(snapshots[e.symbol], market));
     const meta = secMeta[e.symbol];
-    const reaction = e.kind === 'upcoming' ? null : computeReaction((bars as Record<string, { date: string; close: number }[]>)[e.symbol], e.date, e.time, quote.lastPrice);
+    // Daily closes are consolidated and served 15 min late, so today's (still forming) close is the live price.
+    let closes = (bars as Record<string, { date: string; close: number }[]>)[e.symbol];
+    if (closes && quote.lastPrice != null && closes[closes.length - 1]?.date === today) {
+      closes = [...closes.slice(0, -1), { date: today, close: quote.lastPrice }];
+    }
+    const reaction = e.kind === 'upcoming' ? null : computeReaction(closes, e.date, e.time, quote.lastPrice);
     return {
       ...e,
       name: meta?.name ?? null,

@@ -3,7 +3,7 @@
  * asset list). Server-only. Do not import from anywhere but lib/marketdata/index.ts, and never put
  * this vendor's name, hosts or field names in API responses, routes or UI text.
  */
-import axios, { AxiosInstance } from 'axios';
+import axios, { type AxiosInstance } from 'axios';
 import type { Bar, CalendarRow, NewsArticle, OptionSnapshot, Snapshot, UsAsset, UsExchange } from '../types';
 import type { ChartInterval } from '../intervals';
 
@@ -30,6 +30,42 @@ const alpacaClient: AxiosInstance = axios.create({
   headers: { ...authHeaders(), 'Accept': 'application/json' },
 });
 
+/*
+ * Feeds. Intraday bars and snapshots use IEX (real time, but IEX-only volume, ~2% of the market).
+ * DAILY bars use SIP (consolidated: real volume and the official OHLC). This plan serves SIP only up
+ * to 15 minutes ago: any request whose `end` is later is refused ("subscription does not permit
+ * querying recent SIP data"), and a date-only `end` means the END of that day, so it is refused for
+ * today. `sipEnd` turns a requested end into an explicit instant capped at now - 16 minutes
+ * (verified 2026-10-23).
+ */
+const SIP_DELAY_MS = 16 * 60_000;
+
+/** 00:00 America/New_York on 'YYYY-MM-DD', as epoch ms. */
+function etMidnightMs(date: string): number {
+  const [y, m, d] = date.split('-').map(Number);
+  const hourET = (ms: number) => Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', hour12: false }).format(new Date(ms))) % 24;
+  for (const utcHour of [4, 5]) {
+    const ms = Date.UTC(y, m - 1, d, utcHour);
+    if (hourET(ms) === 0) return ms;
+  }
+  return Date.UTC(y, m - 1, d, 5);
+}
+
+const isDateOnly = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
+const nextDate = (date: string) => new Date(Date.parse(`${date}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+
+/** Explicit SIP end instant (ISO): the requested end (a date means through that ET day), capped at now - 16 min. */
+export function sipEnd(end: string | undefined, nowMs = Date.now()): string {
+  const cap = nowMs - SIP_DELAY_MS;
+  const wanted = end === undefined ? cap : isDateOnly(end) ? etMidnightMs(nextDate(end)) - 1000 : Date.parse(end);
+  return new Date(Math.min(Number.isFinite(wanted) ? wanted : cap, cap)).toISOString();
+}
+
+/** A start instant in ms (a date means 00:00 ET that day). */
+const startMs = (start: string) => (isDateOnly(start) ? etMidnightMs(start) : Date.parse(start));
+
+const isDailyTimeframe = (tf: string) => tf === '1Day' || tf === '1Week' || tf === '1Month';
+
 interface BarsResponse {
   bars: {
     [symbol: string]: Bar[];
@@ -53,6 +89,9 @@ export async function getHistoricalBars(
   try {
     const bars: Bar[] = [];
     let pageToken: string | undefined;
+    const sip = isDailyTimeframe(timeframe);
+    const endParam = sip ? sipEnd(end) : end;
+    if (sip && start && startMs(start) > Date.parse(endParam!)) return bars; // nothing settled yet
     // Alpaca pages at 1000 bars/request by default; intraday ranges can exceed that.
     // Loop until exhausted, capped so a misbehaving response can't loop forever.
     for (let page = 0; page < 20; page++) {
@@ -60,12 +99,12 @@ export async function getHistoricalBars(
         symbols: symbol.toUpperCase(), // Note: 'symbols' not 'symbol'
         timeframe,
         adjustment: 'split', // Adjust for stock splits
-        feed: 'iex', // Use IEX feed (available on free tier)
+        feed: sip ? 'sip' : 'iex', // see "Feeds" above
         limit: 10000,
       };
 
       if (start) params.start = start;
-      if (end) params.end = end;
+      if (endParam) params.end = endParam;
       if (pageToken) params.page_token = pageToken;
 
       const response = await alpacaClient.get<BarsResponse>(
@@ -182,12 +221,13 @@ export interface DailyClose { date: string; close: number }
  */
 export async function getDailyBarsMulti(symbols: string[], start: string, end: string): Promise<Record<string, DailyClose[]>> {
   const out: Record<string, DailyClose[]> = {};
+  if (startMs(start) > Date.parse(sipEnd(end))) return out; // nothing settled yet
   await inChunks(symbols.map(s => s.toUpperCase()), 100, 4, async chunk => {
     try {
       let pageToken: string | undefined;
       for (let page = 0; page < 10; page++) {
         const params: Record<string, string | number> = {
-          symbols: chunk.join(','), timeframe: '1Day', adjustment: 'split', feed: 'iex', limit: 10000, start, end,
+          symbols: chunk.join(','), timeframe: '1Day', adjustment: 'split', feed: 'sip', limit: 10000, start, end: sipEnd(end),
         };
         if (pageToken) params.page_token = pageToken;
         const response = await alpacaClient.get<BarsResponse>('/v2/stocks/bars', { params });
@@ -212,10 +252,11 @@ export async function getDailyBarsMulti(symbols: string[], start: string, end: s
  */
 export async function getDailyBarsChunk(symbols: string[], start: string, end: string): Promise<Record<string, Bar[]>> {
   const out: Record<string, Bar[]> = {};
+  if (startMs(start) > Date.parse(sipEnd(end))) return out; // nothing settled yet
   let pageToken: string | undefined;
   for (let page = 0; page < 20; page++) {
     const params: Record<string, string | number> = {
-      symbols: symbols.map(s => s.toUpperCase()).join(','), timeframe: '1Day', adjustment: 'split', feed: 'iex', limit: 10000, start, end,
+      symbols: symbols.map(s => s.toUpperCase()).join(','), timeframe: '1Day', adjustment: 'split', feed: 'sip', limit: 10000, start, end: sipEnd(end),
     };
     if (pageToken) params.page_token = pageToken;
     const response = await alpacaClient.get<BarsResponse>('/v2/stocks/bars', { params });
@@ -485,7 +526,7 @@ export async function getDailyBarsPaced(
 export async function getDailyBarsRevalidated(symbols: string[], start: string, end: string, revalidate: number): Promise<Record<string, Bar[]>> {
   if (symbols.length === 0 || !hasKeys()) return {};
   const params = new URLSearchParams({
-    symbols: symbols.join(','), timeframe: '1Day', start, end, adjustment: 'split', feed: 'iex', limit: '1000',
+    symbols: symbols.join(','), timeframe: '1Day', start, end: sipEnd(end), adjustment: 'split', feed: 'sip', limit: '1000',
   });
   try {
     const res = await fetch(`${ALPACA_BASE_URL}/v2/stocks/bars?${params}`, { headers: authHeaders(), next: { revalidate } });

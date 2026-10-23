@@ -2,7 +2,7 @@
  * INTERNAL PROVIDER ADAPTER (fallback: symbol search, and bars for symbols the primary has none for,
  * e.g. SPX). Server-only. Import only from lib/marketdata/index.ts; never expose this vendor's name.
  */
-import axios, { AxiosInstance } from 'axios';
+import axios, { type AxiosInstance } from 'axios';
 import type { Bar } from '../types';
 import type { ChartInterval } from '../intervals';
 
