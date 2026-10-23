@@ -145,7 +145,7 @@ export default function OptionContractChart({
 
   // OI/LTP history markers — one per day.us_opt_chg_rpt snapshot, placed on the
   // nearest loaded option bar for that day. Snapshots with no corresponding bar
-  // (e.g. Alpaca's current-trading-day cap) are skipped rather than guessed.
+  // (e.g. the feed's current-trading-day cap) are skipped rather than guessed.
   useEffect(() => {
     if (!candleSeriesRef.current) return;
     if (optionBars.length === 0 || historyPoints.length === 0) {

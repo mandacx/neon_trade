@@ -1,37 +1,38 @@
+/**
+ * INTERNAL PROVIDER ADAPTER (primary market data: stock/option bars, snapshots, calendar, news,
+ * asset list). Server-only. Do not import from anywhere but lib/marketdata/index.ts, and never put
+ * this vendor's name, hosts or field names in API responses, routes or UI text.
+ */
 import axios, { AxiosInstance } from 'axios';
+import type { Bar, CalendarRow, NewsArticle, OptionSnapshot, Snapshot, UsAsset, UsExchange } from '../types';
+import type { ChartInterval } from '../intervals';
 
 const ALPACA_API_KEY = process.env.ALPACA_API_KEY;
 const ALPACA_SECRET_KEY = process.env.ALPACA_SECRET_KEY;
 const ALPACA_BASE_URL = process.env.ALPACA_BASE_URL || 'https://data.alpaca.markets';
+/** Calendar and asset list live on the trading host; the paper host is used so nothing here can touch a live account. */
+const TRADING_URL = process.env.ALPACA_TRADING_URL || 'https://paper-api.alpaca.markets';
 
 if (!ALPACA_API_KEY || !ALPACA_SECRET_KEY) {
-  console.warn('Warning: ALPACA_API_KEY or ALPACA_SECRET_KEY is not set. Alpaca API calls will fail.');
+  console.warn('Warning: primary market-data keys are not set; market-data calls will fail.');
 }
+
+const authHeaders = (): Record<string, string> => ({
+  'APCA-API-KEY-ID': ALPACA_API_KEY ?? '',
+  'APCA-API-SECRET-KEY': ALPACA_SECRET_KEY ?? '',
+});
+
+export const hasKeys = (): boolean => !!ALPACA_API_KEY && !!ALPACA_SECRET_KEY;
 
 // Create axios instance with default config
 const alpacaClient: AxiosInstance = axios.create({
   baseURL: ALPACA_BASE_URL,
-  headers: {
-    'APCA-API-KEY-ID': ALPACA_API_KEY,
-    'APCA-API-SECRET-KEY': ALPACA_SECRET_KEY,
-    'Accept': 'application/json',
-  },
+  headers: { ...authHeaders(), 'Accept': 'application/json' },
 });
 
-export interface AlpacaBar {
-  t: string; // timestamp
-  o: number; // open
-  h: number; // high
-  l: number; // low
-  c: number; // close
-  v: number; // volume
-  n?: number; // number of trades
-  vw?: number; // volume weighted average price
-}
-
-export interface AlpacaHistoryResponse {
+interface BarsResponse {
   bars: {
-    [symbol: string]: AlpacaBar[];
+    [symbol: string]: Bar[];
   };
   next_page_token?: string;
 }
@@ -48,9 +49,9 @@ export async function getHistoricalBars(
   timeframe: string = '1Day',
   start?: string,
   end?: string
-): Promise<AlpacaBar[]> {
+): Promise<Bar[]> {
   try {
-    const bars: AlpacaBar[] = [];
+    const bars: Bar[] = [];
     let pageToken: string | undefined;
     // Alpaca pages at 1000 bars/request by default; intraday ranges can exceed that.
     // Loop until exhausted, capped so a misbehaving response can't loop forever.
@@ -67,7 +68,7 @@ export async function getHistoricalBars(
       if (end) params.end = end;
       if (pageToken) params.page_token = pageToken;
 
-      const response = await alpacaClient.get<AlpacaHistoryResponse>(
+      const response = await alpacaClient.get<BarsResponse>(
         '/v2/stocks/bars',
         { params }
       );
@@ -130,12 +131,6 @@ export async function getLatestTrade(symbol: string) {
   }
 }
 
-export interface AlpacaSnapshot {
-  latestTrade?: { p: number; s: number; t: string };
-  dailyBar?: { o: number; h: number; l: number; c: number; v: number; t: string };
-  prevDailyBar?: { c: number };
-}
-
 /**
  * Batch quote+day-range lookup for watchlists — one call for up to a few
  * hundred symbols via Alpaca's /v2/stocks/snapshots, instead of fanning out
@@ -143,7 +138,7 @@ export interface AlpacaSnapshot {
  * flaky Alpaca call degrades to an empty quotes column rather than taking
  * down the whole watchlist response.
  */
-export async function getSnapshotsMulti(symbols: string[]): Promise<Record<string, AlpacaSnapshot>> {
+export async function getSnapshotsMulti(symbols: string[]): Promise<Record<string, Snapshot>> {
   if (symbols.length === 0) return {};
   try {
     const response = await alpacaClient.get('/v2/stocks/snapshots', {
@@ -172,7 +167,7 @@ async function inChunks<T, R>(items: T[], size: number, parallel: number, fn: (c
 }
 
 /** getSnapshotsMulti for large symbol sets (the earnings page can need ~600), chunked to keep the URL short. */
-export async function getSnapshotsChunked(symbols: string[]): Promise<Record<string, AlpacaSnapshot>> {
+export async function getSnapshotsChunked(symbols: string[]): Promise<Record<string, Snapshot>> {
   const parts = await inChunks(symbols, 150, 4, getSnapshotsMulti);
   return Object.assign({}, ...parts);
 }
@@ -195,7 +190,7 @@ export async function getDailyBarsMulti(symbols: string[], start: string, end: s
           symbols: chunk.join(','), timeframe: '1Day', adjustment: 'split', feed: 'iex', limit: 10000, start, end,
         };
         if (pageToken) params.page_token = pageToken;
-        const response = await alpacaClient.get<AlpacaHistoryResponse>('/v2/stocks/bars', { params });
+        const response = await alpacaClient.get<BarsResponse>('/v2/stocks/bars', { params });
         for (const [sym, bars] of Object.entries(response.data?.bars ?? {})) {
           (out[sym] ??= []).push(...bars.map(b => ({ date: b.t.slice(0, 10), close: b.c })));
         }
@@ -215,26 +210,24 @@ export async function getDailyBarsMulti(symbols: string[], start: string, end: s
  * (Alpaca returns at most 10,000 bars a page across all the symbols). Unlike getDailyBarsMulti this
  * THROWS on a failed request, so a caller storing the result never mistakes a failure for "no bars".
  */
-export async function getDailyBarsChunk(symbols: string[], start: string, end: string): Promise<Record<string, AlpacaBar[]>> {
-  const out: Record<string, AlpacaBar[]> = {};
+export async function getDailyBarsChunk(symbols: string[], start: string, end: string): Promise<Record<string, Bar[]>> {
+  const out: Record<string, Bar[]> = {};
   let pageToken: string | undefined;
   for (let page = 0; page < 20; page++) {
     const params: Record<string, string | number> = {
       symbols: symbols.map(s => s.toUpperCase()).join(','), timeframe: '1Day', adjustment: 'split', feed: 'iex', limit: 10000, start, end,
     };
     if (pageToken) params.page_token = pageToken;
-    const response = await alpacaClient.get<AlpacaHistoryResponse>('/v2/stocks/bars', { params });
+    const response = await alpacaClient.get<BarsResponse>('/v2/stocks/bars', { params });
     for (const [sym, bars] of Object.entries(response.data?.bars ?? {})) (out[sym] ??= []).push(...bars);
     pageToken = response.data?.next_page_token;
     if (!pageToken) return out;
   }
-  throw new Error('Alpaca daily bars: too many pages');
+  throw new Error('daily bars: too many pages');
 }
 
-export type ChartInterval = '1min' | '5min' | '15min' | '30min' | '1hour' | 'daily' | 'weekly' | 'monthly';
-
 /**
- * Convert interval string to Alpaca timeframe format
+ * Convert interval string to the provider's timeframe format
  */
 export function convertIntervalToTimeframe(interval: ChartInterval): string {
   switch (interval) {
@@ -257,11 +250,6 @@ export function convertIntervalToTimeframe(interval: ChartInterval): string {
     default:
       return '1Day';
   }
-}
-
-/** Is this interval finer than one day (i.e. multiple bars per trading day)? */
-export function isIntradayInterval(interval: ChartInterval): boolean {
-  return interval === '1min' || interval === '5min' || interval === '15min' || interval === '30min' || interval === '1hour';
 }
 
 /**
@@ -287,15 +275,15 @@ export function buildOccOptionSymbol(underlying: string, expiryDate: string, opt
  * `end` at yesterday rather than relying on this to throw (see
  * app/api/stocks/[symbol]/option-bars/route.ts).
  */
-export async function getOptionBars(occSymbol: string, timeframe: string, start: string, end: string): Promise<AlpacaBar[]> {
+export async function getOptionBars(occSymbol: string, timeframe: string, start: string, end: string): Promise<Bar[]> {
   try {
-    const bars: AlpacaBar[] = [];
+    const bars: Bar[] = [];
     let pageToken: string | undefined;
     for (let page = 0; page < 20; page++) {
       const params: any = { symbols: occSymbol, timeframe, limit: 10000, start, end };
       if (pageToken) params.page_token = pageToken;
 
-      const response = await alpacaClient.get<AlpacaHistoryResponse>('/v1beta1/options/bars', { params });
+      const response = await alpacaClient.get<BarsResponse>('/v1beta1/options/bars', { params });
 
       bars.push(...(response.data?.bars?.[occSymbol] || []));
       pageToken = response.data?.next_page_token;
@@ -326,7 +314,7 @@ export async function getOptionTodaySnapshotBar(
   expiryDate: string,
   strike: number,
   occSymbol: string
-): Promise<AlpacaBar | null> {
+): Promise<Bar | null> {
   try {
     const response = await alpacaClient.get(`/v1beta1/options/snapshots/${underlying.toUpperCase()}`, {
       params: { expiration_date: expiryDate, strike_price_gte: strike, strike_price_lte: strike },
@@ -350,8 +338,8 @@ export async function getOptionTodaySnapshotBar(
  */
 export async function getOptionBarsMulti(
   symbols: string[], start: string, end: string, timeframe = '1Day', parallel = 3
-): Promise<{ bars: Record<string, AlpacaBar[]>; failed: string[] }> {
-  const bars: Record<string, AlpacaBar[]> = {};
+): Promise<{ bars: Record<string, Bar[]>; failed: string[] }> {
+  const bars: Record<string, Bar[]> = {};
   const failed: string[] = [];
   await inChunks(symbols, 200, parallel, async chunk => {
     try {
@@ -359,7 +347,7 @@ export async function getOptionBarsMulti(
       for (let page = 0; page < 20; page++) {
         const params: Record<string, string | number> = { symbols: chunk.join(','), timeframe, limit: 10000, start, end };
         if (pageToken) params.page_token = pageToken;
-        const response = await alpacaClient.get<AlpacaHistoryResponse>('/v1beta1/options/bars', { params });
+        const response = await alpacaClient.get<BarsResponse>('/v1beta1/options/bars', { params });
         for (const [sym, list] of Object.entries(response.data?.bars ?? {})) (bars[sym] ??= []).push(...list);
         pageToken = response.data?.next_page_token;
         if (!pageToken) break;
@@ -372,25 +360,16 @@ export async function getOptionBarsMulti(
   return { bars, failed };
 }
 
-export interface AlpacaOptionSnapshot {
-  dailyBar?: AlpacaBar;
-  prevDailyBar?: AlpacaBar;
-  latestTrade?: { p: number; s: number; t: string };
-  latestQuote?: { bp: number; ap: number; bs: number; as: number; t: string };
-  greeks?: { delta?: number; gamma?: number; theta?: number; vega?: number; rho?: number };
-  impliedVolatility?: number;
-}
-
 /**
  * Snapshots for specific option contracts. Verified: the endpoint refuses
  * more than 100 symbols per request ("symbol limit is 100"), so it is chunked.
  * Returns {} for chunks that fail.
  */
-export async function getOptionSnapshotsMulti(symbols: string[]): Promise<Record<string, AlpacaOptionSnapshot>> {
+export async function getOptionSnapshotsMulti(symbols: string[]): Promise<Record<string, OptionSnapshot>> {
   const parts = await inChunks([...new Set(symbols)], 100, 4, async chunk => {
     try {
       const response = await alpacaClient.get('/v1beta1/options/snapshots', { params: { symbols: chunk.join(',') } });
-      return (response.data?.snapshots ?? {}) as Record<string, AlpacaOptionSnapshot>;
+      return (response.data?.snapshots ?? {}) as Record<string, OptionSnapshot>;
     } catch (error) {
       console.error('Error fetching option snapshots from Alpaca:', axios.isAxiosError(error) ? error.response?.status : error);
       return {};
@@ -406,8 +385,8 @@ export async function getOptionSnapshotsMulti(symbols: string[]): Promise<Record
  */
 export async function getOptionChainSnapshots(
   underlying: string, opts: { expiryFrom?: string; expiryTo?: string; maxPages?: number } = {}
-): Promise<Record<string, AlpacaOptionSnapshot>> {
-  const out: Record<string, AlpacaOptionSnapshot> = {};
+): Promise<Record<string, OptionSnapshot>> {
+  const out: Record<string, OptionSnapshot> = {};
   try {
     let pageToken: string | undefined;
     for (let page = 0; page < (opts.maxPages ?? 10); page++) {
@@ -424,4 +403,150 @@ export async function getOptionChainSnapshots(
     console.error('Error fetching option chain from Alpaca:', axios.isAxiosError(error) ? error.response?.status : error);
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Paced bulk daily bars (universe refresh, backfills). One shared gate spaces the
+// request starts across every caller in this process, and a 429 / failure doubles
+// a penalty that later successes halve, so bulk jobs never burst the rate limit.
+// ---------------------------------------------------------------------------
+
+/** Requests per minute the bulk paths allow themselves (the plan's limit is 200/min; leave headroom for live traffic). */
+export const BULK_MAX_PER_MINUTE = 150;
+let gateNext = 0;
+let penaltyMs = 0;
+
+async function paceGate(maxPerMinute: number): Promise<void> {
+  const interval = Math.ceil(60_000 / Math.min(maxPerMinute, 200));
+  const now = Date.now();
+  const at = Math.max(now, gateNext);
+  gateNext = at + interval + penaltyMs;
+  if (at > now) await new Promise(r => setTimeout(r, at - now));
+}
+
+function retryAfterMs(error: unknown): number | null {
+  if (!axios.isAxiosError(error)) return null;
+  const h = error.response?.headers?.['retry-after'];
+  const s = Number(h);
+  return Number.isFinite(s) && s > 0 ? s * 1000 : null;
+}
+
+export interface PacedBarsResult {
+  bars: Record<string, Bar[]>;
+  /** Symbols whose chunk still failed after every retry: unknown, never "no bars". */
+  failed: string[];
+  requests: number;
+  retries: number;
+  /** False when `deadline` stopped the run before every chunk was tried. */
+  done: boolean;
+}
+
+/**
+ * Split-adjusted daily bars for many symbols, `chunk` symbols per request series, sequential and
+ * paced. Failed chunks are retried with backoff (honouring Retry-After) up to `maxAttempts`.
+ */
+export async function getDailyBarsPaced(
+  symbols: string[], start: string, end: string,
+  opts: { chunk?: number; maxPerMinute?: number; maxAttempts?: number; deadline?: number } = {},
+): Promise<PacedBarsResult> {
+  const size = opts.chunk ?? 100;
+  const maxAttempts = opts.maxAttempts ?? 4;
+  const out: PacedBarsResult = { bars: {}, failed: [], requests: 0, retries: 0, done: true };
+  const list = [...new Set(symbols.map(s => s.toUpperCase()))];
+  for (let i = 0; i < list.length; i += size) {
+    if (opts.deadline && Date.now() > opts.deadline) { out.done = false; break; }
+    const part = list.slice(i, i + size);
+    let ok = false;
+    for (let attempt = 1; attempt <= maxAttempts && !ok; attempt++) {
+      await paceGate(opts.maxPerMinute ?? BULK_MAX_PER_MINUTE);
+      try {
+        out.requests++;
+        const got = await getDailyBarsChunk(part, start, end);
+        for (const [sym, bars] of Object.entries(got)) out.bars[sym] = bars;
+        ok = true;
+        penaltyMs = Math.floor(penaltyMs / 2);
+      } catch (error) {
+        out.retries++;
+        penaltyMs = Math.min(penaltyMs ? penaltyMs * 2 : 1000, 15_000);
+        const wait = retryAfterMs(error) ?? penaltyMs;
+        console.error('[marketdata] bulk bars chunk failed, attempt', attempt, axios.isAxiosError(error) ? error.response?.status : error);
+        if (attempt < maxAttempts) await new Promise(r => setTimeout(r, wait));
+      }
+    }
+    if (!ok) out.failed.push(...part);
+  }
+  return out;
+}
+
+/**
+ * Daily bars for a few symbols through Next's fetch cache (`revalidate` seconds), for public,
+ * CDN-cached pages such as the home dashboard. Resolves to {} on any failure.
+ */
+export async function getDailyBarsRevalidated(symbols: string[], start: string, end: string, revalidate: number): Promise<Record<string, Bar[]>> {
+  if (symbols.length === 0 || !hasKeys()) return {};
+  const params = new URLSearchParams({
+    symbols: symbols.join(','), timeframe: '1Day', start, end, adjustment: 'split', feed: 'iex', limit: '1000',
+  });
+  try {
+    const res = await fetch(`${ALPACA_BASE_URL}/v2/stocks/bars?${params}`, { headers: authHeaders(), next: { revalidate } });
+    if (!res.ok) {
+      console.error('[marketdata] daily bars HTTP', res.status, await res.text().catch(() => ''));
+      return {};
+    }
+    const body = (await res.json()) as BarsResponse;
+    return body?.bars ?? {};
+  } catch (error) {
+    console.error('[marketdata] daily bars fetch error', error);
+    return {};
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Exchange calendar, news, asset list
+// ---------------------------------------------------------------------------
+
+/** Trading days in [start, end] with regular and extended session times. Throws on failure. */
+export async function fetchCalendar(start: string, end: string): Promise<CalendarRow[]> {
+  if (!hasKeys()) throw new Error('market-data keys not set');
+  const res = await fetch(`${TRADING_URL}/v2/calendar?start=${start}&end=${end}`, {
+    headers: authHeaders(), cache: 'no-store', signal: AbortSignal.timeout(4000),
+  });
+  if (!res.ok) throw new Error(`calendar HTTP ${res.status}`);
+  const rows = (await res.json()) as Array<{ date: string; open: string; close: string; session_open?: string; session_close?: string }>;
+  return rows.map(r => ({ date: r.date, open: r.open, close: r.close, sessionOpen: r.session_open ?? null, sessionClose: r.session_close ?? null }));
+}
+
+/** One page of news headlines (newest last with sort=asc). Throws on HTTP failure. */
+export async function fetchNewsPage(opts: { start: string; end?: string; symbols?: string[]; pageToken?: string | null }): Promise<{ news: NewsArticle[]; nextPageToken: string | null }> {
+  const params = new URLSearchParams({ start: opts.start, limit: '50', sort: 'asc', include_content: 'false' });
+  if (opts.end) params.set('end', opts.end);
+  if (opts.symbols?.length) params.set('symbols', opts.symbols.join(','));
+  if (opts.pageToken) params.set('page_token', opts.pageToken);
+  const res = await fetch(`${ALPACA_BASE_URL}/v1beta1/news?${params}`, { headers: authHeaders(), cache: 'no-store' });
+  if (!res.ok) throw new Error(`news HTTP ${res.status}`);
+  const body = (await res.json()) as { news?: NewsArticle[]; next_page_token?: string | null };
+  return { news: body.news ?? [], nextPageToken: body.next_page_token ?? null };
+}
+
+const EXCHANGES: Record<string, UsExchange> = {
+  NYSE: 'NYSE', NASDAQ: 'NASDAQ', AMEX: 'NYSE American', ARCA: 'NYSE Arca', BATS: 'Cboe BZX',
+};
+
+/** Active US equity listings (stocks and ETFs) on the major exchanges. Throws on failure. */
+export async function fetchUsAssets(): Promise<UsAsset[]> {
+  if (!hasKeys()) throw new Error('market-data keys not set');
+  const res = await fetch(`${TRADING_URL}/v2/assets?status=active&asset_class=us_equity`, {
+    headers: authHeaders(), cache: 'no-store', signal: AbortSignal.timeout(30_000),
+  });
+  if (!res.ok) throw new Error(`assets HTTP ${res.status}`);
+  const rows = (await res.json()) as Array<{ symbol: string; name?: string; exchange?: string; tradable?: boolean; status?: string; attributes?: string[] }>;
+  return rows
+    .filter(r => r.status === 'active' && r.exchange && EXCHANGES[r.exchange])
+    .map(r => ({
+      symbol: r.symbol.replace('/', '.').toUpperCase(),
+      name: r.name ?? '',
+      exchange: EXCHANGES[r.exchange as string],
+      tradable: r.tradable !== false,
+      attributes: r.attributes ?? [],
+    }));
 }

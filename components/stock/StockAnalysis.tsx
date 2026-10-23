@@ -12,7 +12,7 @@ import { EarningsHeaderLines, EarningsExpiryChip, EarningsHistoryTable } from '@
 import type { EarningsResult, EarningsSummary } from '@/types/earnings';
 import { LevelCalculation, ScanAlert } from '@/types/stock';
 import { getLevelColor, getLevelDisplayName, formatCurrency, formatPercentage } from '@/lib/utils';
-import { isIntradayInterval } from '@/lib/alpaca';
+import { isIntradayInterval } from '@/lib/marketdata/intervals';
 import type { ExtendedQuote } from '@/lib/quote';
 import type { MarketSession } from '@/lib/marketSession';
 import { pollDelayMs } from '@/lib/pollDelay';
@@ -123,7 +123,7 @@ const OPT_CHAIN_PRESET_LABELS: Record<OptChainPreset, string> = { '10d': '10D', 
 const OPT_CHAIN_ALL_FROM = '2000-01-01';
 
 // Shape of /api/stocks/[symbol]/quote. Every field but `price` can be null —
-// Alpaca omits prevDailyBar/dailyBar for names that haven't printed, and the
+// The snapshot omits prevDailyBar/dailyBar for names that haven't printed, and the
 // route reports null rather than a NaN change in that case.
 interface LiveQuote {
   /** Live in the regular session; the last regular close outside it. */
@@ -915,7 +915,7 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
     return () => { cancelled = true; };
   }, [embedded, symbol, selectedExpiry, expiryMode, optChainPreset]);
 
-  // Live price — polls Alpaca's snapshot on the real market schedule: every
+  // Live price — polls the quote snapshot on the real market schedule: every
   // 10s in the regular session, every 30s in pre-market / after-hours (the
   // extended-hours move keeps updating), and when the market is closed it
   // sleeps until the next session boundary (04:00 ET pre-market, then 09:30)

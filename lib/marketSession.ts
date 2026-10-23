@@ -1,5 +1,5 @@
 /**
- * US equity market sessions from the Alpaca trading calendar (holidays, early
+ * US equity market sessions from the exchange trading calendar (holidays, early
  * closes and the extended-hours window all come from it, so nothing is
  * hard-coded). Server-side; quote routes call getMarketState() and send the
  * result to the client so polling can follow the real session.
@@ -9,11 +9,11 @@
  *   post     close                    -> session_close (20:00, or 17:00 on early closes)
  *   closed   everything else: overnight, weekends, holidays
  *
- * The calendar endpoint accepts the same keys as the data API (read-only); the
- * paper host is used so nothing here can ever touch a live trading account.
+ * The calendar comes from the market-data facade (read-only; see lib/marketdata).
  * If the call fails the weekday/standard-hours rule is used (no holidays) and
  * `approximate` is set.
  */
+import { fetchCalendar } from '@/lib/marketdata';
 
 export type MarketSession = 'pre' | 'regular' | 'post' | 'closed';
 
@@ -28,10 +28,8 @@ export interface MarketState {
   /** True when the calendar couldn't be loaded and standard weekday hours were assumed. */
   approximate: boolean;
 }
-
 interface CalendarDay { date: string; preOpenMs: number; openMs: number; closeMs: number; postCloseMs: number }
 
-const TRADING_URL = process.env.ALPACA_TRADING_URL || 'https://paper-api.alpaca.markets';
 const DAY_MS = 86_400_000;
 const CALENDAR_TTL_MS = 6 * 60 * 60_000;
 const FALLBACK_TTL_MS = 5 * 60_000;
@@ -81,22 +79,14 @@ let cache: { days: CalendarDay[]; at: number; approximate: boolean } | null = nu
 
 async function loadCalendar(nowMs: number): Promise<{ days: CalendarDay[]; approximate: boolean }> {
   if (cache && nowMs - cache.at < (cache.approximate ? FALLBACK_TTL_MS : CALENDAR_TTL_MS)) return cache;
-  const key = process.env.ALPACA_API_KEY;
-  const secret = process.env.ALPACA_SECRET_KEY;
   try {
-    if (!key || !secret) throw new Error('Alpaca keys not set');
-    const res = await fetch(
-      `${TRADING_URL}/v2/calendar?start=${etDateOf(nowMs - 10 * DAY_MS)}&end=${etDateOf(nowMs + 30 * DAY_MS)}`,
-      { headers: { 'APCA-API-KEY-ID': key, 'APCA-API-SECRET-KEY': secret }, cache: 'no-store', signal: AbortSignal.timeout(4000) },
-    );
-    if (!res.ok) throw new Error(`calendar HTTP ${res.status}`);
-    const rows = (await res.json()) as Array<{ date: string; open: string; close: string; session_open?: string; session_close?: string }>;
+    const rows = await fetchCalendar(etDateOf(nowMs - 10 * DAY_MS), etDateOf(nowMs + 30 * DAY_MS));
     const days = rows.map(r => ({
       date: r.date,
-      preOpenMs: etInstantMs(r.date, colon(r.session_open ?? '0400')),
+      preOpenMs: etInstantMs(r.date, colon(r.sessionOpen ?? '0400')),
       openMs: etInstantMs(r.date, colon(r.open)),
       closeMs: etInstantMs(r.date, colon(r.close)),
-      postCloseMs: etInstantMs(r.date, colon(r.session_close ?? '2000')),
+      postCloseMs: etInstantMs(r.date, colon(r.sessionClose ?? '2000')),
     }));
     if (days.length === 0) throw new Error('empty calendar');
     cache = { days, at: nowMs, approximate: false };
@@ -140,7 +130,7 @@ const rangeCache = new Map<string, { days: string[]; at: number }>();
 
 /**
  * Trading dates ('YYYY-MM-DD', ascending) between `start` and `end` inclusive,
- * from the Alpaca calendar for that exact range (so it also works for old
+ * from the exchange calendar for that exact range (so it also works for old
  * dates, unlike the rolling window above). Falls back to weekdays if the call
  * fails; that fallback ignores holidays.
  */
@@ -150,14 +140,7 @@ export async function tradingDaysBetween(start: string, end: string): Promise<st
   if (hit && Date.now() - hit.at < CALENDAR_TTL_MS) return hit.days;
   let days: string[];
   try {
-    const k = process.env.ALPACA_API_KEY;
-    const s = process.env.ALPACA_SECRET_KEY;
-    if (!k || !s) throw new Error('Alpaca keys not set');
-    const res = await fetch(`${TRADING_URL}/v2/calendar?start=${start}&end=${end}`, {
-      headers: { 'APCA-API-KEY-ID': k, 'APCA-API-SECRET-KEY': s }, cache: 'no-store', signal: AbortSignal.timeout(4000),
-    });
-    if (!res.ok) throw new Error(`calendar HTTP ${res.status}`);
-    days = ((await res.json()) as Array<{ date: string }>).map(r => r.date).sort();
+    days = (await fetchCalendar(start, end)).map(r => r.date).sort();
   } catch (err) {
     console.error('[marketSession] calendar range unavailable, using weekdays:', err instanceof Error ? err.message : err);
     days = [];

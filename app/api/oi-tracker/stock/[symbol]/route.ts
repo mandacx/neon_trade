@@ -3,7 +3,7 @@ import { guardOi, parseScreenParams, scopeExpiry, serverError } from '@/lib/oiTr
 import { filterByExpiry, isStandardExpiry, standardExpiryOnly } from '@/lib/expiryAccess';
 import { getOiScreen, getStockFullOi, getStrategyRows, getOiLoadDates } from '@/lib/oiTracker';
 import { detectStrategies } from '@/lib/oiStrategies';
-import { getOptionChainSnapshots, getSnapshotsMulti, type AlpacaOptionSnapshot } from '@/lib/alpaca';
+import { getOptionChainSnapshots, getSnapshotsMulti, type OptionSnapshot } from '@/lib/marketdata';
 import { etDateOf } from '@/lib/marketSession';
 import type { OiContractRow, OiGroupRow } from '@/types/oiTracker';
 
@@ -25,7 +25,7 @@ export interface LiveOption {
   theta: number | null;
 }
 
-function toLive(contract: string, s: AlpacaOptionSnapshot): LiveOption {
+function toLive(contract: string, s: OptionSnapshot): LiveOption {
   return {
     contract,
     vol: s.dailyBar?.v ?? null,
@@ -45,8 +45,8 @@ function toLive(contract: string, s: AlpacaOptionSnapshot): LiveOption {
  * Everything the stock OI modal needs for one underlying: report contracts over
  * the range (all of them, up to 2,000), per-expiry / per-strike / per-date
  * aggregates, full OI per expiry (eod_usmkts_price), strategy candidates, and
- * the live Alpaca chain (volume, IV, greeks) merged by OCC symbol. The live
- * part is best-effort: null when Alpaca has no chain for the symbol (e.g.
+ * the live option chain (volume, IV, greeks) merged by OCC symbol. The live
+ * part is best-effort: null when the feed has no chain for the symbol (e.g.
  * indices) or the call fails.
  */
 export async function GET(request: NextRequest, { params }: { params: Promise<{ symbol: string }> }) {
@@ -81,7 +81,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       getOiScreen({ ...base, groupBy: 'date', limit: 200 }),
       getStockFullOi(symbol, parsed.to),
       getStrategyRows({ ...base, groupBy: 'contract', minLeg }),
-      getOptionChainSnapshots(symbol, { expiryFrom: today, maxPages: 6 }).catch(() => ({} as Record<string, AlpacaOptionSnapshot>)),
+      getOptionChainSnapshots(symbol, { expiryFrom: today, maxPages: 6 }).catch(() => ({} as Record<string, OptionSnapshot>)),
       getSnapshotsMulti([symbol]),
     ]);
 

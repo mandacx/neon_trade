@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getSnapshotsMulti } from '@/lib/alpaca';
+import { getSnapshotsMulti } from '@/lib/marketdata';
 import { getMarketState } from '@/lib/marketSession';
 import { buildQuote } from '@/lib/quote';
 

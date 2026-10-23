@@ -3,7 +3,7 @@
  * returned. Pure and client-safe.
  *
  *   regular   every `regularMs`
- *   pre/post  every `extendedMs` (prices still move; IEX prints are sparser)
+ *   pre/post  every `extendedMs` (prices still move; extended-hours prints are sparser)
  *   closed    sleep until the next session boundary (the 04:00 ET pre-market
  *             start, then 09:30 ...), capped so a sleeping laptop or a changed
  *             calendar can't leave the page stale for long

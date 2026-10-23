@@ -5,7 +5,7 @@
  * date D reflects the trading of the session before D (verified on WMT and
  * SPXW contracts: OI change ≈ the previous session's volume), so for every
  * contract in load D this stores that previous session's daily bar from
- * Alpaca in nt_opt_daily_bars. Contracts Alpaca has no bar for get a
+ * the market-data feed in nt_opt_daily_bars. Contracts it has no bar for get a
  * `no_trade` row so they are not asked for again.
  *
  * Runs from /api/cron/market-catalog (weekday mornings, after the load lands)
@@ -15,7 +15,7 @@
 import { sql } from '@/lib/db';
 import { catalogTradeDates } from '@/lib/marketCatalog';
 import { previousTradingDay } from '@/lib/marketSession';
-import { getOptionBarsMulti } from '@/lib/alpaca';
+import { getOptionBarsMulti } from '@/lib/marketdata';
 import { acquireLease, releaseLease } from '@/lib/jobLease';
 import { occSql } from '@/lib/oiTracker';
 
@@ -109,7 +109,7 @@ export async function captureOptionBars(opts: { deadline: number; loadDate?: str
       }
       stored += rows.filter(r => !r.noTrade).length;
       noTrade += rows.filter(r => r.noTrade).length;
-      // Every contract in the batch failed: Alpaca is down or refusing; stop rather than spin.
+      // Every contract in the batch failed: the feed is down or refusing; stop rather than spin.
       if (rows.length === 0) break;
     }
     return { loadDate, session, pendingBefore, stored, noTrade, failed, done };

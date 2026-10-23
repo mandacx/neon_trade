@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getOptionBars, getOptionTodaySnapshotBar, buildOccOptionSymbol, convertIntervalToTimeframe, isIntradayInterval, ChartInterval } from '@/lib/alpaca';
+import { getOptionBars, getOptionTodaySnapshotBar, buildOccOptionSymbol, convertIntervalToTimeframe, isIntradayInterval, ChartInterval } from '@/lib/marketdata';
 import { usTradingDayKey } from '@/lib/utils';
 import { format, subDays } from 'date-fns';
 import axios from 'axios';
 import { getCurrentUserContext } from '@/lib/appUsers';
 import { expiryAllowed, WEEKLY_EXPIRY_ERROR } from '@/lib/expiryAccess';
 
-// OHLCV bars for a single option contract, via Alpaca's Options Market Data
-// API (OCC symbol built from expiry+strike+optType) — see lib/alpaca.ts for
+// OHLCV bars for a single option contract, via the market-data options API
+// (OCC symbol built from expiry+strike+optType) — see lib/marketdata for
 // the OCC symbol format and the "no current trading day" subscription limit.
 export async function GET(
   request: NextRequest,
@@ -41,7 +41,7 @@ export async function GET(
     // (UTC on Vercel) local date — otherwise for a few hours every evening
     // (UTC midnight until the next Eastern midnight) the server's "yesterday"
     // is still today's Eastern trading session, the cap below fails to
-    // exclude it, and Alpaca 403s with "subscription does not permit
+    // exclude it, and the feed 403s with "subscription does not permit
     // querying recent OPRA data".
     const todayET = usTradingDayKey(Math.floor(Date.now() / 1000));
     const yesterdayET = format(subDays(new Date(`${todayET}T12:00:00Z`), 1), 'yyyy-MM-dd');
@@ -75,7 +75,7 @@ export async function GET(
     // The historical endpoint above always 403s for the current trading day
     // (capped at `effectiveTo` = yesterday), so today never shows up in
     // `barsData`. Append today's running bar (via the options snapshot
-    // endpoint, the only current-day data this Alpaca plan permits) for
+    // endpoint, the only current-day data this data plan permits) for
     // daily and intraday views — weekly/monthly stay historical-only since a
     // single day's bar isn't the right shape for a partial week/month candle.
     if ((interval === 'daily' || isIntradayInterval(interval)) && to >= todayET) {
@@ -104,7 +104,7 @@ export async function GET(
   } catch (error) {
     if (axios.isAxiosError(error) && error.response?.status === 403) {
       return NextResponse.json(
-        { success: false, error: 'Options bar data is not available on the current Alpaca subscription for this range.', message: error.response?.data?.message },
+        { success: false, error: 'Options bar data is not available for this range on the current data plan.' },
         { status: 403 }
       );
     }

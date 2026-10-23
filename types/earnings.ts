@@ -30,7 +30,8 @@ export interface EarningsResult {
   salesActual: number | null;
   salesEstimate: number | null;
   salesOutcome: EarningsOutcome | null;
-  source: 'alpaca_news' | 'alphavantage';
+  /** Where the result came from: a results headline ('news') or the earnings calendar feed. */
+  source: 'news' | 'calendar';
 }
 
 export interface EarningsSummary {

@@ -86,7 +86,7 @@ interface TVChartProps {
   extended?: ExtendedQuote | null;
   currentPrice?: number;
   // Today's move and range, shown under the price. Any field may be null —
-  // Alpaca omits the previous/daily bar for names that haven't printed, and
+  // The snapshot omits the previous/daily bar for names that haven't printed, and
   // each row is simply left out rather than rendered as NaN.
   dayChange?: number | null;
   dayChangePercent?: number | null;

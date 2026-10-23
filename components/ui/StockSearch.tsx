@@ -6,7 +6,7 @@ import { useSymbolSearch } from '@/components/ui/useSymbolSearch';
 
 export default function StockSearch({ compact }: { compact?: boolean }) {
   const [query, setQuery] = useState('');
-  // Ticker or company name; our symbols show at once, Tradier's are appended.
+  // Ticker or company name; our symbols show at once, remote matches are appended.
   const { results, isLoading, isLoadingMore } = useSymbolSearch(query);
   const [isOpen, setIsOpen] = useState(false);
   // -1 = nothing highlighted; Enter and the go arrow both fall back to the

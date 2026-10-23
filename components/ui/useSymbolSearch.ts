@@ -17,8 +17,8 @@ const MAX_RESULTS = 20;
  * Ticker-or-name search shared by the header search box and the watchlist
  * "add symbol" input. Two requests per query (see app/api/stocks/search):
  * our own symbols first (in-memory, near-instant — `isLoading` covers only
- * this), then Tradier's matches appended when they arrive (`isLoadingMore`),
- * so a slow Tradier call never delays the dropdown. Responses for an older
+ * this), then the remote matches appended when they arrive (`isLoadingMore`),
+ * so a slow remote call never delays the dropdown. Responses for an older
  * query are dropped.
  */
 export function useSymbolSearch(query: string) {

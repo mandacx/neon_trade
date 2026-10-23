@@ -5,11 +5,11 @@ import { searchLocal, searchRemote, type SymbolSearchResult } from '@/lib/symbol
  * Stock search by ticker or company name (lib/symbolSearch.ts).
  *
  *   scope=local   our own symbols + names — in-memory, sub-millisecond
- *   scope=remote  Tradier name/ticker search for symbols we don't track
+ *   scope=remote  remote name/ticker search for symbols we don't track
  *   (default)     both, merged — local first
  *
  * The search inputs call local and remote as two requests, so the dropdown
- * shows our results immediately and appends Tradier's when they arrive.
+ * shows our results immediately and appends the remote matches when they arrive.
  * Results are the same for every visitor, so they're CDN-cached.
  */
 export async function GET(request: NextRequest) {
@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json(
       { success: true, data: { results } },
-      // Local results follow our daily data; Tradier's barely change.
+      // Local results follow our daily data; remote ones barely change.
       { headers: { 'Cache-Control': `public, s-maxage=${scope === 'local' ? 3600 : 86400}, stale-while-revalidate=86400` } }
     );
   } catch (error) {

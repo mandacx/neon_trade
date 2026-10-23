@@ -1,11 +1,16 @@
+/**
+ * INTERNAL PROVIDER ADAPTER (fallback: symbol search, and bars for symbols the primary has none for,
+ * e.g. SPX). Server-only. Import only from lib/marketdata/index.ts; never expose this vendor's name.
+ */
 import axios, { AxiosInstance } from 'axios';
-import type { AlpacaBar, ChartInterval } from '@/lib/alpaca';
+import type { Bar } from '../types';
+import type { ChartInterval } from '../intervals';
 
 const TRADIER_API_URL = process.env.TRADIER_API_URL || 'https://api.tradier.com/v1';
 const TRADIER_API_KEY = process.env.TRADIER_API_KEY || '';
 
 if (!TRADIER_API_KEY) {
-  console.warn('Warning: TRADIER_API_KEY is not set. Tradier API calls will fail.');
+  console.warn('Warning: fallback market-data key is not set; symbol search and index bars will fail.');
 }
 
 // Create axios instance with default config
@@ -157,7 +162,7 @@ export async function getTimeSales(
  * request is retried once from that date (older ranges return no bars).
  * 30min/1hour are built from 15min bars, bucketed on US/Eastern clock time.
  */
-export async function getBarsForChart(symbol: string, interval: ChartInterval, from: string, to: string): Promise<AlpacaBar[]> {
+export async function getBarsForChart(symbol: string, interval: ChartInterval, from: string, to: string): Promise<Bar[]> {
   const sym = symbol.toUpperCase();
   const longTimeout = { timeout: 10_000 };
 
@@ -184,7 +189,7 @@ export async function getBarsForChart(symbol: string, interval: ChartInterval, f
       const oldest = /on or after (\d{4}-\d{2}-\d{2})/.exec(JSON.stringify(res.data ?? ''))?.[1];
       if (oldest) return { oldest };
     }
-    if (res.status >= 400) throw new Error(`Tradier timesales HTTP ${res.status}`);
+    if (res.status >= 400) throw new Error(`index intraday bars HTTP ${res.status}`);
     const data = res.data?.series?.data;
     return { rows: !data ? [] : Array.isArray(data) ? data : [data] };
   };
@@ -196,7 +201,7 @@ export async function getBarsForChart(symbol: string, interval: ChartInterval, f
   }
   const rows = 'rows' in first ? first.rows : [];
 
-  const bars: AlpacaBar[] = rows.map(r => ({
+  const bars: Bar[] = rows.map(r => ({
     t: new Date(Number(r.timestamp) * 1000).toISOString(),
     o: Number(r.open), h: Number(r.high), l: Number(r.low), c: Number(r.close), v: Number(r.volume) || 0,
   }));
@@ -217,9 +222,9 @@ export function easternMidnightIso(date: string): string {
 }
 
 /** Merge ascending bars into N-minute buckets aligned to US/Eastern clock time. */
-function aggregateBars(bars: AlpacaBar[], minutes: number): AlpacaBar[] {
+function aggregateBars(bars: Bar[], minutes: number): Bar[] {
   const fmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
-  const out: AlpacaBar[] = [];
+  const out: Bar[] = [];
   let key = '';
   for (const b of bars) {
     const parts = fmt.formatToParts(new Date(b.t));

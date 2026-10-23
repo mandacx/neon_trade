@@ -37,7 +37,7 @@ function centralNow(date: Date) {
  * After the catalog, the same run captures option volume for the latest
  * options load (lib/optionVolume.ts; resumable, so a day that doesn't fit in
  * one run finishes on the next). Before that it tops up the stored daily stock
- * bars for every tracked symbol (lib/dailyBars.ts: one or two Alpaca requests a
+ * bars for every tracked symbol (lib/dailyBars.ts: one or two market-data requests a
  * day; the first runs also backfill a year of history, resumable, 20s budget).
  */
 export async function GET(request: NextRequest) {

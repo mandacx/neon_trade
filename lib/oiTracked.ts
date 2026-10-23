@@ -6,7 +6,7 @@
  * reserved for a future social feature and is always 'private' here.
  *
  * P&L per leg: (current − entry) × 100 × qty, negated for sell-to-open.
- * Current price: Alpaca option snapshot mid (bid/ask), else last trade, else
+ * Current price: option snapshot mid (bid/ask), else last trade, else
  * the day's close; expired contracts use intrinsic value at the expiry-day
  * close of the underlying, else the contract's last bar; closed positions use
  * their exit price.
@@ -15,8 +15,8 @@ import { sql } from '@/lib/db';
 import { etDateOf } from '@/lib/marketSession';
 import { occSql } from '@/lib/oiTracker';
 import {
-  getDailyBarsMulti, getOptionBarsMulti, getOptionSnapshotsMulti, getSnapshotsMulti, type AlpacaBar, type AlpacaOptionSnapshot,
-} from '@/lib/alpaca';
+  getDailyBarsMulti, getOptionBarsMulti, getOptionSnapshotsMulti, getSnapshotsMulti, type Bar, type OptionSnapshot,
+} from '@/lib/marketdata';
 import type { OptType, TrackedPosition } from '@/types/oiTracker';
 
 export const MAX_OPEN_POSITIONS = 300;
@@ -34,7 +34,7 @@ export const todayET = () => etDateOf(Date.now());
 const addDays = (d: string, n: number) => new Date(Date.parse(`${d}T12:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
 const numOrNull = (v: unknown): number | null => (v === null || v === undefined || v === '' ? null : Number(v));
 
-function snapshotPrice(s: AlpacaOptionSnapshot | undefined): number | null {
+function snapshotPrice(s: OptionSnapshot | undefined): number | null {
   if (!s) return null;
   const bid = s.latestQuote?.bp ?? 0;
   const ask = s.latestQuote?.ap ?? 0;
@@ -131,7 +131,7 @@ async function priceOn(contract: string, underlying: string, date: string): Prom
   return numOrNull(rows[0]?.ltp);
 }
 
-/** Underlying price on a date (Alpaca stock data; the report's close for indices such as SPX). */
+/** Underlying price on a date (market-data stock bars; the report's close for indices such as SPX). */
 async function underlyingOn(underlying: string, date: string): Promise<number | null> {
   if (date >= todayET()) {
     const snap = (await getSnapshotsMulti([underlying]))[underlying];
@@ -359,7 +359,7 @@ export async function getTrackedHistory(userId: string, id: string): Promise<{ l
     const e = l.closedAt ?? (l.expiry < today ? l.expiry : addDays(today, -1));
     return e > m ? e : m;
   }, start);
-  const { bars }: { bars: Record<string, AlpacaBar[]> } = start <= end
+  const { bars }: { bars: Record<string, Bar[]> } = start <= end
     ? await getOptionBarsMulti(legs.map(l => l.contract), start, end < today ? end : addDays(today, -1))
     : { bars: {} };
   const byLeg = new Map<string, Map<string, number>>();

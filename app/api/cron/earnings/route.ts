@@ -22,7 +22,7 @@ const at = (h: number, m = 0) => h * 60 + m;
 /**
  * What a run at this moment should do (all times US/Eastern):
  *   weekdays 06:30–19:30  news results — pre-market, intraday and post-market
- *                         reports land as Benzinga headlines within minutes —
+ *                         reports land as results headlines within minutes —
  *                         plus the Alpha Vantage calendar (once a day; later
  *                         runs see it's already synced and skip the call)
  *   weekdays 20:00–23:00  news catch-up for any scheduled date that passed

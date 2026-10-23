@@ -1,10 +1,10 @@
 /**
- * Turns an Alpaca snapshot into one consistent quote: the regular-session
+ * Turns a market-data snapshot into one consistent quote: the regular-session
  * price and day change, plus (outside regular hours) the extended-hours move
  * measured from the regular close. Pure; the market state comes from
  * lib/marketSession.ts.
  *
- * What the IEX snapshot gives (checked live, after the close):
+ * What the snapshot gives (checked live, after the close):
  *   dailyBar      the REGULAR session's bar (an after-hours print does not change it)
  *   prevDailyBar  the session before that
  *   latestTrade   the latest print including extended hours (condition code "T")
@@ -14,11 +14,11 @@
  *                            vs the close before it, and `ext` = latest trade vs the
  *                            regular close, if it printed after the regular close.
  * The ext figure stays until the next regular session starts (overnight,
- * weekends and holidays included). IEX sees only part of extended-hours
+ * weekends and holidays included). The feed sees only part of extended-hours
  * volume, so many names have no ext print; then `ext` is null and nothing is
  * shown rather than a stale or invented number.
  */
-import type { AlpacaSnapshot } from '@/lib/alpaca';
+import type { Snapshot } from '@/lib/marketdata';
 import type { MarketState } from '@/lib/marketSession';
 import { etDateOf, etInstantMs } from '@/lib/marketSession';
 
@@ -53,7 +53,7 @@ export function rowQuote(q: Quote) {
 
 const pct = (diff: number, base: number | null) => (base ? (diff / base) * 100 : null);
 
-export function buildQuote(snap: AlpacaSnapshot | undefined, state: MarketState): Quote {
+export function buildQuote(snap: Snapshot | undefined, state: MarketState): Quote {
   if (!snap) return EMPTY;
   const daily = snap.dailyBar;
   const prev = snap.prevDailyBar;

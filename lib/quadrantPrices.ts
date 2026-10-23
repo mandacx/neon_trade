@@ -13,7 +13,7 @@
  *                       (immutable, stored once per date). Note the EOD table's
  *                       `close` for load date D is the close of session D-1.
  *
- * A failed Alpaca call never overwrites a good row; the old row is served.
+ * A failed market-data call never overwrites a good row; the old row is served.
  *
  * A stored row only vouches for the symbols it was captured for, and callers ask for different
  * symbol sets (the quadrant route passes the stocks of the selected expiry: 631 for the nearest
@@ -22,7 +22,7 @@
  * they are not asked for again on every request; 0 is never returned to callers.
  */
 import { sql } from '@/lib/db';
-import { getSnapshotsChunked, getDailyBarsMulti } from '@/lib/alpaca';
+import { getSnapshotsChunked, getDailyBarsMulti } from '@/lib/marketdata';
 import { getMarketState, type MarketSession } from '@/lib/marketSession';
 import { buildQuote } from '@/lib/quote';
 

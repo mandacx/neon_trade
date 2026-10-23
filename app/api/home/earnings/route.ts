@@ -3,7 +3,7 @@ import { requireFeatureApi } from '@/lib/routeGuards';
 import { FEATURE_EARNINGS } from '@/lib/features';
 import { earningsBadge, getEarningsEvents, getEarningsSummary, getTrackedSymbols } from '@/lib/earnings';
 import { getSecuritiesMeta } from '@/lib/securitiesFilters';
-import { getSnapshotsMulti } from '@/lib/alpaca';
+import { getSnapshotsMulti } from '@/lib/marketdata';
 import { getMarketState } from '@/lib/marketSession';
 import { buildQuote, rowQuote } from '@/lib/quote';
 import type { EarningsBadge, EarningsEvent } from '@/types/earnings';
@@ -19,7 +19,7 @@ const CARD_LIMIT = 10;
  *
  *   upcoming   reports in the next 7 days, biggest companies first
  *   reported   reports in the last 3 days (beat/miss), biggest first
- *              (both carry lastPrice / change / changePercent from Alpaca snapshots)
+ *              (both carry lastPrice / change / changePercent from market-data snapshots)
  *   badges     ?pairs=SYM:YYYY-MM-DD,… → EarningsBadge per symbol, relative to
  *              that row's expiry (the Top OI tables)
  */

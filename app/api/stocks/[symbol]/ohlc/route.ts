@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getHistoricalBars, convertIntervalToTimeframe, ChartInterval } from '@/lib/alpaca';
-import type { AlpacaBar } from '@/lib/alpaca';
-import { getBarsForChart } from '@/lib/tradier';
-import { getDailyBars, toVendorBars } from '@/lib/dailyBars';
+import { getHistoricalBars, getFallbackBars, convertIntervalToTimeframe, type Bar, type ChartInterval } from '@/lib/marketdata';
+import { getDailyBars, toBars } from '@/lib/dailyBars';
 import { usTradingDayKey } from '@/lib/utils';
 import { format, subDays } from 'date-fns';
 
@@ -26,44 +24,37 @@ export async function GET(
       );
     }
 
-    // Convert interval to Alpaca timeframe format
     const timeframe = convertIntervalToTimeframe(interval);
 
-    // Fetch OHLC data from Alpaca. Alpaca's stock-bars API has no indices (SPX
-    // returns an empty set, ^GSPC a 400), so when it has nothing for the symbol
-    // the bars come from Tradier instead.
-    let bars: AlpacaBar[] = [];
-    let alpacaError: unknown = null;
-    let source: 'alpaca' | 'tradier' = 'alpaca';
+    // The primary source has no indices (SPX returns an empty set), so when it has nothing for
+    // the symbol the bars come from the fallback source instead (lib/marketdata).
+    let bars: Bar[] = [];
+    let primaryError: unknown = null;
     if (interval === 'daily') {
-      // Daily bars: past days come from our own table (filled from Alpaca once), only today is fetched live.
-      // lib/dailyBars.ts also does the Tradier fallback for indices.
+      // Daily bars: past days come from our own table (filled once), only today is fetched live.
+      // lib/dailyBars.ts also does the fallback for indices.
       const daily = await getDailyBars(symbol, from, to);
       if (daily.bars.length === 0 && daily.error) throw daily.error;
-      bars = toVendorBars(daily.bars);
-      source = daily.source;
+      bars = toBars(daily.bars);
     } else {
       try {
         bars = await getHistoricalBars(symbol, timeframe, from, to);
       } catch (err) {
-        alpacaError = err;
+        primaryError = err;
       }
     }
     if (bars.length === 0 && interval !== 'daily') {
       try {
-        const fallback = await getBarsForChart(symbol, interval, from, to);
-        if (fallback.length > 0) {
-          bars = fallback;
-          source = 'tradier';
-        }
+        const fallback = await getFallbackBars(symbol, interval, from, to);
+        if (fallback.length > 0) bars = fallback;
       } catch (err) {
-        console.error('Tradier OHLC fallback failed:', err instanceof Error ? err.message : err);
+        console.error('OHLC fallback failed:', err instanceof Error ? err.message : err);
       }
     }
-    // Neither source has bars and Alpaca errored: report that error as before.
-    if (bars.length === 0 && alpacaError) throw alpacaError;
+    // Neither source has bars and the primary errored: report that error as before.
+    if (bars.length === 0 && primaryError) throw primaryError;
 
-    // Transform Alpaca data to our format. `timestamp` (epoch seconds) is the
+    // Transform bars to our format. `timestamp` (epoch seconds) is the
     // chart's canonical time — `date` is the US trading-day it falls on, used to
     // join against day-level data (option levels, OI, scan alerts).
     const ohlcData = bars.map(bar => {
@@ -86,7 +77,6 @@ export async function GET(
         interval,
         from,
         to,
-        source,
         data: ohlcData,
       },
     });

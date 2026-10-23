@@ -15,14 +15,14 @@ const sign = (v: number) => (v >= 0 ? '+' : '−');
 /**
  * Pre-market / after-hours move, measured from the regular-session close (lib/quote.ts
  * decides when it exists). `full` is the stock-page header form; the default is a
- * compact pill for tables. IEX only sees part of extended-hours volume, so the print
- * is the last IEX trade, not a consolidated quote — the tooltip says so.
+ * compact pill for tables. The feed sees only part of extended-hours volume, so the print
+ * is the last trade it saw, not a consolidated quote — the tooltip says so.
  */
 export default function ExtendedMove({ ext, full = false }: { ext: ExtendedQuote | null | undefined; full?: boolean }) {
   if (!ext) return null;
   const tone = ext.change > 0 ? 'text-green-600' : ext.change < 0 ? 'text-red-600' : 'text-gray-500';
   const pctText = ext.changePercent == null ? '' : `${sign(ext.changePercent)}${Math.abs(ext.changePercent).toFixed(2)}%`;
-  const title = `${ext.label}: ${formatCurrency(ext.price)} (${sign(ext.change)}${formatCurrency(Math.abs(ext.change))}${pctText ? `, ${pctText}` : ''}) vs the regular-session close · last IEX trade ${fmtEtTime(ext.at)}`;
+  const title = `${ext.label}: ${formatCurrency(ext.price)} (${sign(ext.change)}${formatCurrency(Math.abs(ext.change))}${pctText ? `, ${pctText}` : ''}) vs the regular-session close · last trade seen ${fmtEtTime(ext.at)}`;
 
   if (full) {
     return (

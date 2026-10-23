@@ -3,7 +3,7 @@ import { requireFeatureApi } from '@/lib/routeGuards';
 import { FEATURE_EARNINGS, FEATURE_WATCHLISTS, hasFeature } from '@/lib/features';
 import { getWatchlistSymbols } from '@/lib/watchlists';
 import { getSecuritiesMeta } from '@/lib/securitiesFilters';
-import { getSnapshotsMulti } from '@/lib/alpaca';
+import { getSnapshotsMulti } from '@/lib/marketdata';
 import { getEarningsSummary } from '@/lib/earnings';
 import { getMarketState } from '@/lib/marketSession';
 import { buildQuote, rowQuote } from '@/lib/quote';
@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic';
 // Live row data (name + last price + today's OHLC + volume + change) for
 // every symbol in one watchlist — the table view's data source. Split from
 // GET /api/watchlists/[id] (which stays fast/DB-only for the symbol list
-// itself) since this one fans out to Alpaca and is meaningfully slower.
+// itself) since this one fans out to the market-data feed and is meaningfully slower.
 //
 // Session-aware (lib/quote.ts): `lastPrice`/`change` are live in the regular
 // session and the last regular close after it; `ext` carries the pre-market /

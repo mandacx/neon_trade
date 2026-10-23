@@ -543,7 +543,7 @@ export default function EarningsPage() {
           )}
         </div>
         <p className="text-[11px] text-gray-400 mt-3">
-          Reaction and since-report moves use split-adjusted daily closes (Alpaca IEX); today&apos;s bar is still in progress during market hours.
+          Reaction and since-report moves use split-adjusted daily closes; today&apos;s bar is still in progress during market hours.
           A ~ before a date means it is estimated, not yet confirmed by the company. ⚠ means the report lands before the selected expiry.
         </p>
       </main>

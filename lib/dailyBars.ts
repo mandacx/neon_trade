@@ -1,31 +1,31 @@
 /**
- * Daily stock bars kept in Postgres (`nt_daily_bars`), so a stock page does not ask Alpaca for the same
+ * Daily stock bars kept in Postgres (`nt_daily_bars`), so a stock page does not ask the market-data feed for the same
  * past days on every open, scroll-back chunk and levels request. Server-only.
  *
- *  - Days before today (US/Eastern) are final: fetched from Alpaca once, on demand, and stored.
+ *  - Days before today (US/Eastern) are final: fetched once, on demand, and stored.
  *    `nt_daily_bars_cover` records, per symbol, the date range already pulled (so weekends, holidays
  *    and days a symbol did not trade are not asked for again). Later requests fetch only the missing
  *    edge: older days when the user scrolls back, newer days since the last visit.
- *  - Today is never stored: it is the one live Alpaca call (a partial bar until the close), kept
+ *  - Today is never stored: it is the one live market-data call (a partial bar until the close), kept
  *    for LIVE_TTL_MS so the chart and levels requests of one page load share it.
  *  - A failed fetch stores nothing and records no coverage, so it is retried on the next request
- *    (what is already stored is still served). Alpaca first, Tradier when Alpaca has no bars (indices such as SPX).
+ *    (what is already stored is still served). Primary source first, the fallback when it has no bars (indices such as SPX).
  *
  * `warmDailyBars()` fills the same tables for every tracked symbol in bulk (about 100 symbols a request), so a
  * first visit to a stock already finds its history: the one-time history plus the daily top-up, both run by the
  * market-catalog cron (and by /api/cron/daily-bars for a manual run).
  *
- * SPLITS ARE NOT HANDLED YET. Alpaca's bars are split-adjusted, so after a split the stored days before it
+ * SPLITS ARE NOT HANDLED YET. The stored bars are split-adjusted, so after a split the stored days before it
  * are stale (unadjusted). `invalidateDailyBars()` drops a symbol's bars so they are re-pulled adjusted;
  * detecting a split and calling it is a planned follow-up (docs/CHANGES.md).
  */
 import { sql } from '@/lib/db';
-import { getDailyBarsChunk, getHistoricalBars } from '@/lib/alpaca';
-import { easternMidnightIso, getBarsForChart } from '@/lib/tradier';
+import { getDailyBarsChunk, getHistoricalBars } from '@/lib/marketdata';
+import { easternMidnightIso, getFallbackBars } from '@/lib/marketdata';
 import { usTradingDayKey } from '@/lib/utils';
 
 export interface DailyBar { date: string; open: number; high: number; low: number; close: number; volume: number }
-type Vendor = 'alpaca' | 'tradier';
+type Vendor = 'primary' | 'fallback';
 
 /** How long today's live bar is reused. */
 const LIVE_TTL_MS = 15_000;
@@ -59,10 +59,10 @@ async function ensureTables(): Promise<void> {
 async function fetchRange(symbol: string, from: string, to: string): Promise<{ bars: DailyBar[]; source: Vendor }> {
   // `end` as a bare date is midnight, which would cut off the last day's bar.
   let raw = await getHistoricalBars(symbol, '1Day', from, shiftDate(to, 1));
-  let source: Vendor = 'alpaca';
+  let source: Vendor = 'primary';
   if (raw.length === 0) {
-    raw = await getBarsForChart(symbol, 'daily', from, to);
-    source = 'tradier';
+    raw = await getFallbackBars(symbol, 'daily', from, to);
+    source = 'fallback';
   }
   const bars: DailyBar[] = [];
   for (const b of raw) {
@@ -105,7 +105,7 @@ function ensureStored(symbol: string, from: string, to: string): Promise<Vendor 
     const cover = (await sql`SELECT from_date::text AS f, to_date::text AS t FROM public.nt_daily_bars_cover WHERE symbol = ${symbol}`)[0] as { f: string; t: string } | undefined;
     const segments = missingSegments(cover, from, to);
     if (segments.length === 0) return null;
-    let used: Vendor = 'alpaca';
+    let used: Vendor = 'primary';
     for (const [a, b] of segments) {
       const { bars, source } = await fetchRange(symbol, a, b);
       used = source;
@@ -149,7 +149,7 @@ export async function getDailyBars(symbolIn: string, from: string, to: string): 
   let error: unknown;
   const today = todayET();
   const pastTo = to < today ? to : shiftDate(today, -1);
-  let source: Vendor = 'alpaca';
+  let source: Vendor = 'primary';
 
   const bars: DailyBar[] = [];
   if (from <= pastTo) {
@@ -179,8 +179,8 @@ export async function getDailyBars(symbolIn: string, from: string, to: string): 
   return { bars, source, error };
 }
 
-/** The same bars shaped like the vendor's (`t` at US/Eastern midnight, as Alpaca stamps daily bars). */
-export function toVendorBars(bars: DailyBar[]) {
+/** The same bars as neutral `Bar`s (`t` at US/Eastern midnight, as the feed stamps daily bars). */
+export function toBars(bars: DailyBar[]) {
   return bars.map(b => ({ t: easternMidnightIso(b.date), o: b.open, h: b.high, l: b.low, c: b.close, v: b.volume }));
 }
 
@@ -209,7 +209,7 @@ export interface WarmResult {
   /** Symbols whose missing days were stored (or confirmed empty) this run. */
   filled: number;
   barsStored: number;
-  /** Symbols Alpaca returned nothing for and that we have never stored (indices, odd tickers): left to the lazy Tradier path. */
+  /** Symbols the primary source returned nothing for and that we have never stored (indices, odd tickers): left to the lazy fallback path. */
   noBars: number;
   failedChunks: number;
   requests: number;
@@ -307,7 +307,7 @@ export async function warmDailyBars(opts: { symbols?: string[]; days?: number; d
     }
   }
   result.filled = filled.size;
-  // Symbols Alpaca has nothing for are left to the lazy path; they are not unfinished work.
+  // Symbols the primary source has nothing for are left to the lazy path; they are not unfinished work.
   result.noBars = [...never].filter(sym => !filled.has(sym)).length;
   return result;
 }

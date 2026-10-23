@@ -41,7 +41,7 @@ export interface StockWithLevels {
   closestLevel: LevelCalculation;
 }
 
-// OHLC data from Tradier API
+// OHLC data
 export interface OHLCData {
   date: string;
   open: number;

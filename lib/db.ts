@@ -602,7 +602,7 @@ export async function getStockDataForSymbolsAtExpiry(symbols: string[], expiryDa
 /**
  * True if `symbol` is a known ticker in this app's own data (securities or
  * eod_usmkts_price). Used to validate watchlist additions — the search box
- * (app/api/stocks/search) surfaces a broader universe via Tradier, but a
+ * (app/api/stocks/search) surfaces a broader universe via remote search, but a
  * symbol outside this app's options-levels pipeline has no levels/OI to show
  * on a watchlist row, so additions are restricted to this narrower set.
  */

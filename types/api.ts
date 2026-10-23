@@ -33,8 +33,8 @@ export interface StockDetailsResponse {
   };
 }
 
-// OHLC response from Tradier
-export interface TradierOHLCResponse {
+// OHLC response
+export interface OHLCResponse {
   symbol: string;
   interval: string;
   data: Array<{

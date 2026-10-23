@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { format, parseISO, subDays } from 'date-fns';
 import Modal from '@/components/ui/Modal';
 import OptionContractChart, { OptionBarPoint, UnderlyingPoint, OiHistoryPoint } from '@/components/charts/OptionContractChart';
-import { isIntradayInterval } from '@/lib/alpaca';
+import { isIntradayInterval } from '@/lib/marketdata/intervals';
 
 type ModalInterval = '1min' | '5min' | '15min' | '30min' | '1hour' | 'daily';
 const INTERVAL_LABELS: Record<ModalInterval, string> = {
@@ -34,7 +34,7 @@ interface OptionContractModalProps {
 export default function OptionContractModal({ symbol, expiry, strike, optType, onClose }: OptionContractModalProps) {
   const [interval, setInterval_] = useState<ModalInterval>('daily');
   // 30 days by default rather than "All". "All" starts at ALL_FROM, and
-  // getOptionBars pages the Alpaca options endpoint up to 20 times to cover
+  // getOptionBars pages the options bars endpoint up to 20 times to cover
   // whatever span it's given — so opening this modal used to fire a burst of
   // upstream requests to draw a chart nobody had asked to see in full yet.
   // "All" is still one click away for anyone who wants it.

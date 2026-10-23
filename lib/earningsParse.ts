@@ -1,5 +1,5 @@
 /**
- * Parser for Benzinga earnings-result headlines (delivered through the Alpaca
+ * Parser for earnings-result headlines (delivered through the market-data
  * News API), e.g.
  *
  *   "IBM Q2 Adj. EPS $2.93 Beats $2.86 Estimate, Sales $17.162B Beat $16.860B Estimate"
@@ -118,7 +118,7 @@ export function parseEarningsHeadline(headline: string): ParsedEarningsHeadline 
     } else if (sales[3]) {
       salesOutcome = outcomeWord(sales[3]);
       salesEstimate = parseAmount(sales[4]);
-      // Benzinga occasionally publishes a placeholder "$0.00" estimate.
+      // The headline source occasionally publishes a placeholder "$0.00" estimate.
       if (salesEstimate === 0) { salesEstimate = null; salesOutcome = null; }
     }
   }
@@ -138,7 +138,7 @@ export function parseEarningsHeadline(headline: string): ParsedEarningsHeadline 
 }
 
 /**
- * Article → the symbol it reports for. Benzinga tags extra tickers on some
+ * Article → the symbol it reports for. The headline source tags extra tickers on some
  * results headlines (peers, ETFs); accept it only when exactly one tracked
  * symbol is tagged, or when every tracked tag is a share class of the same
  * company (GOOG/GOOGL, FOX/FOXA, NWS/NWSA).

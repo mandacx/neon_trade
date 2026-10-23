@@ -7,19 +7,19 @@
  * on the first search per server instance and refreshed hourly. Matching it
  * is sub-millisecond, so the dropdown never waits on the database.
  *
- * Remote supplement (searchRemote): Tradier — /markets/search for company
+ * Remote supplement (searchRemote): the fallback source's company
  * names, /markets/lookup for tickers — for symbols we don't track. The client
- * requests it separately and appends it, so a slow Tradier call (it often
+ * requests it separately and appends it, so a slow remote call (it often
  * runs into its 2s timeout) never holds up the local results.
  */
 import { sql } from '@/lib/db';
-import { searchSymbols, searchCompanies } from '@/lib/tradier';
+import { searchSymbols, searchCompanies } from '@/lib/marketdata';
 
 export interface SymbolSearchResult {
   symbol: string;
   name: string;
   exchange: string;
-  /** We have option levels for it (it's in our data, not just a Tradier hit). */
+  /** We have option levels for it (it's in our data, not just a remote hit). */
   hasLevels: boolean;
 }
 
@@ -106,7 +106,7 @@ export async function searchLocal(query: string, limit = 12): Promise<SymbolSear
     .map(({ e }) => ({ symbol: e.symbol, name: e.name ?? e.symbol, exchange: 'US', hasLevels: e.hasLevels }));
 }
 
-/** Tradier: company-name search, plus ticker lookup when the query could be a ticker. */
+/** Remote: company-name search, plus ticker lookup when the query could be a ticker. */
 export async function searchRemote(query: string, limit = 12): Promise<SymbolSearchResult[]> {
   const q = query.trim();
   if (!q) return [];
@@ -119,9 +119,9 @@ export async function searchRemote(query: string, limit = 12): Promise<SymbolSea
   const out: SymbolSearchResult[] = [];
   // Ticker matches first when the query looks like one, names otherwise.
   for (const r of tickerLike ? [...byTicker, ...byName] : [...byName, ...byTicker]) {
-    // Tradier writes class shares as BRK/B; the stock route and Alpaca use BRK.B.
+    // The remote source writes class shares as BRK/B; the stock route and bars use BRK.B.
     const symbol = r.symbol?.toUpperCase().replace(/\//g, '.');
-    // Same shape the stock page accepts (app/stock/[symbol]/page.tsx); Tradier
+    // Same shape the stock page accepts (app/stock/[symbol]/page.tsx); the remote source
     // also returns oddities like "JPM'C" that would open an "Invalid symbol" page.
     if (!symbol || !/^[A-Z0-9.\-]{1,10}$/.test(symbol) || seen.has(symbol)) continue;
     seen.add(symbol);

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { sql, getAvailableDates } from '@/lib/db';
 import { calculateLevels, findClosestLevel } from '@/lib/calculations';
 import { ETF_SYMBOLS } from '@/lib/curatedWatchlists';
+import { getDailyBarsRevalidated } from '@/lib/marketdata';
 
 // The DISTINCT / window-function / GROUP BY queries below scan a large slice
 // of eod_usmkts_price rather than filtering to one symbol, so they're the
@@ -15,49 +16,18 @@ import { ETF_SYMBOLS } from '@/lib/curatedWatchlists';
 
 const INDEX_SYMBOLS = ['SPY', 'QQQ', 'DIA', 'IWM'];
 
-async function alpacaFetch(path: string, params: Record<string, string>): Promise<any> {
-  const apiKey = process.env.ALPACA_API_KEY;
-  const secretKey = process.env.ALPACA_SECRET_KEY;
-  const baseUrl = process.env.ALPACA_BASE_URL || 'https://data.alpaca.markets';
-  if (!apiKey || !secretKey) return null;
-  try {
-    const res = await fetch(`${baseUrl}${path}?${new URLSearchParams(params)}`, {
-      headers: { 'APCA-API-KEY-ID': apiKey, 'APCA-API-SECRET-KEY': secretKey },
-      next: { revalidate: 300 },
-    });
-    if (!res.ok) {
-      console.error('Alpaca error', path, res.status, await res.text().catch(() => ''));
-      return null;
-    }
-    return res.json();
-  } catch (e) {
-    console.error('Alpaca fetch error', path, e);
-    return null;
-  }
-}
-
-// Fetch multi-symbol daily bars for last N days
-async function alpacaBars(symbols: string[], days = 5): Promise<Record<string, any[]>> {
+// Multi-symbol daily bars for the last N days (Next fetch cache, 5 minutes).
+async function recentDailyBars(symbols: string[], days = 5): Promise<Record<string, any[]>> {
   if (symbols.length === 0) return {};
   const end = new Date();
   const start = new Date();
   start.setDate(start.getDate() - days);
-  const params = {
-    symbols: symbols.join(','),
-    timeframe: '1Day',
-    start: start.toISOString().split('T')[0],
-    end: end.toISOString().split('T')[0],
-    adjustment: 'split',
-    feed: 'iex',
-    limit: '1000',
-  };
-  const data = await alpacaFetch('/v2/stocks/bars', params);
-  return data?.bars ?? {};
+  return getDailyBarsRevalidated(symbols, start.toISOString().split('T')[0], end.toISOString().split('T')[0], 300);
 }
 
 async function getIndexData() {
   try {
-    const bars = await alpacaBars(INDEX_SYMBOLS, 7);
+    const bars = await recentDailyBars(INDEX_SYMBOLS, 7);
     return INDEX_SYMBOLS.map(symbol => {
       const b: any[] = bars[symbol] || [];
       if (b.length === 0) return { symbol, price: null, change: null, changePercent: null };
@@ -167,9 +137,9 @@ async function getTopMovers() {
     const symbols: string[] = sp500Rows.map((r: any) => r.symbol as string);
     console.log(`getTopMovers: fetching bars for ${symbols.length} symbols`);
 
-    // Use bars endpoint (works on free IEX tier) — 5 days to ensure 2 trading days
+    // Daily bars for 7 calendar days, to be sure of 2 trading days
     const [barsMap, nameMap] = await Promise.all([
-      alpacaBars(symbols, 7),
+      recentDailyBars(symbols, 7),
       getSecuritiesNames(symbols),
     ]);
 
@@ -191,7 +161,7 @@ async function getTopMovers() {
     }
 
     if (enriched.length === 0) {
-      console.error('getTopMovers: no enriched bars data returned from Alpaca');
+      console.error('getTopMovers: no enriched bars data returned');
       return null;
     }
 
@@ -314,7 +284,7 @@ async function getLatestTwoDates(): Promise<[string | null, string | null]> {
 export async function GET() {
   try {
     // Resolved once and shared — this used to be recomputed by each of the
-    // three DB sections, each a scan of eod_usmkts_price. Movers is Alpaca +
+    // three DB sections, each a scan of eod_usmkts_price. Movers is market data +
     // securities only, so it doesn't wait on it.
     const datesPromise = getLatestTwoDates();
     const [topStocksResult, topETFsResult, sectorBreakdown, topMovers] = await Promise.all([

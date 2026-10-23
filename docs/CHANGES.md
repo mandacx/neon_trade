@@ -7,6 +7,25 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-23 — Vendor masking: market-data facade (`lib/marketdata`), no vendor names reach the browser
+
+Step 1 of the US Market Scanner build (plan agreed 2026-10-23: full repo masking, env var names kept since they are server-only).
+
+- **Facade:** `lib/marketdata/index.ts` (server-only) re-exports everything callers need under neutral names and types (`lib/marketdata/types.ts`: `Bar`, `Snapshot`, `OptionSnapshot`, `CalendarRow`, `NewsArticle`, `UsAsset`). `lib/alpaca.ts` → `lib/marketdata/provider/primary.ts`, `lib/tradier.ts` → `lib/marketdata/provider/fallback.ts` (git mv; `AlpacaBar`/`AlpacaSnapshot`/`AlpacaOptionSnapshot` → `Bar`/`Snapshot`/`OptionSnapshot`, `getBarsForChart` exported as `getFallbackBars`). Client-safe `lib/marketdata/intervals.ts` (`ChartInterval`, `isIntradayInterval`).
+- **Moved into the provider:** the trading-calendar fetch (`fetchCalendar`, used by `lib/marketSession.ts`), the news fetch (`fetchNewsPage`, used by `lib/earnings.ts` `newsPages`, formerly `alpacaNews`), and the home route's duplicate inline client (`getDailyBarsRevalidated`, same 5-minute Next fetch cache). New for later steps: `fetchUsAssets` (asset list) and `getDailyBarsPaced` (sequential, shared request gate at 150/min, exponential backoff honouring Retry-After, failed chunks reported, never treated as "no bars").
+- **Leaks removed:**
+  - **Client bundle (verified):** `StockAnalysis.tsx` / `OptionContractModal.tsx` imported `isIntradayInterval` from `lib/alpaca.ts`, which shipped `ALPACA_API_KEY`/`ALPACA_SECRET_KEY` names, the data host URL and a console warning to the browser. A baseline build had vendor strings in 3 `.next/static` files; after: 0.
+  - `/api/test-alpaca` and `/api/test-tradier` (public; returned the first 5 characters of each API key, host URLs and raw vendor payloads) removed; replaced by `/api/diagnostics/market-data` (pass/fail, counts, timings only). `/diagnostics` page updated.
+  - `/api/stocks/[symbol]/ohlc` no longer returns `source: 'alpaca' | 'tradier'` (nothing in the client read it). `dailyBars.ts` uses `'primary' | 'fallback'` internally; `toVendorBars` → `toBars`.
+  - Option-bars 403 message no longer names the vendor or echoes its message.
+  - Earnings results: `source` sent to clients is now `'news' | 'calendar'` (mapped in `toResult`); the stored DB values (`alpaca_news`, `alphavantage`) are unchanged.
+  - UI text: earnings page footer "(Alpaca IEX)" and the extended-hours pill tooltip "last IEX trade" → neutral. Comments across app/lib/components neutralised.
+- **Not changed:** env var names (`ALPACA_*`, `TRADIER_*`; server-only, verified no `NEXT_PUBLIC_`), scripts under `scripts/` (server tooling), docs, stored DB values.
+- **Verified:** `tsc` clean; eslint 0 errors on changed files; `npm run build` passes; `.next/static` grep for vendor strings = 0 files (3 before, from a baseline build of the previous commit). Production server (`next start`) smoke test with live data: `/api/diagnostics/market-data` (quotes, daily bars, symbol search all ok), `/api/stocks/AAPL/ohlc?interval=daily` (from `nt_daily_bars`), `/api/stocks/SPX/ohlc?interval=1hour` (fallback path, volume 0), `/api/market/indices`, `/api/stocks/search?scope=remote`, `/api/home/data`, `/api/stocks/AAPL/quote` (session `regular`).
+- **Not verified:** pages not opened in a browser; earnings cron (calendar/news via the facade) not run end to end, only type-checked (the news call is the same request as before); option-bars 403 path not triggered.
+
+---
+
 ## 2026-10-22 — Quadrant chart: drag-to-pan and pinch-zoom on touch screens
 
 Reported: on a phone the quadrant could not be moved.

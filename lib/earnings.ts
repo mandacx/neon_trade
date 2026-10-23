@@ -4,8 +4,8 @@
  *
  *   nt_earnings_calendar  upcoming schedule — Alpha Vantage EARNINGS_CALENDAR
  *                         (one CSV covering every symbol; 1 call/day)
- *   nt_earnings           reported results — Benzinga results headlines from
- *                         the Alpaca News API, parsed by lib/earningsParse.ts
+ *   nt_earnings           reported results — results headlines from the
+ *                         market-data news feed, parsed by lib/earningsParse.ts
  *                         (same day, EPS + sales vs consensus)
  *   nt_api_usage          Alpha Vantage daily budget (free tier: 25/day)
  *   nt_job_lease          single-row lease so cron runs never overlap
@@ -22,11 +22,11 @@
 import { sql } from '@/lib/db';
 import { acquireLease, releaseLease } from '@/lib/jobLease';
 import { parseEarningsHeadline, symbolsForResult, easternDateAndSession } from '@/lib/earningsParse';
+import { fetchNewsPage, type NewsArticle } from '@/lib/marketdata';
 import type { EarningsBadge, EarningsEvent, EarningsOutcome, EarningsRangeRow, EarningsResult, EarningsSummary, EarningsTime } from '@/types/earnings';
 
 const AV_URL = 'https://www.alphavantage.co/query';
 const AV_PROVIDER = 'alphavantage';
-const ALPACA_NEWS_URL = `${process.env.ALPACA_BASE_URL || 'https://data.alpaca.markets'}/v1beta1/news`;
 
 const avKey = () => process.env.ALPHA_VANTAGE_API_KEY || '';
 const avDailyBudget = () => Number(process.env.ALPHA_VANTAGE_DAILY_BUDGET || 25);
@@ -356,31 +356,17 @@ export async function syncCalendar(): Promise<{ status: string; rows?: number; d
 }
 
 // ---------------------------------------------------------------------------
-// Step 2 — Alpaca News results (no AV budget; runs often)
+// Step 2 — news-feed results (no AV budget; runs often)
 // ---------------------------------------------------------------------------
 
-interface NewsArticle { id: number; headline: string; symbols: string[]; created_at: string }
-
-/** Page through Alpaca news. `symbols` narrows server-side; stops at `deadline`. */
-export async function* alpacaNews(opts: { start: string; end?: string; symbols?: string[]; deadline?: number; maxPages?: number }) {
+/** Page through the news feed. `symbols` narrows server-side; stops at `deadline`. */
+export async function* newsPages(opts: { start: string; end?: string; symbols?: string[]; deadline?: number; maxPages?: number }) {
   let token: string | null = null;
   let pages = 0;
   do {
-    const params = new URLSearchParams({ start: opts.start, limit: '50', sort: 'asc', include_content: 'false' });
-    if (opts.end) params.set('end', opts.end);
-    if (opts.symbols?.length) params.set('symbols', opts.symbols.join(','));
-    if (token) params.set('page_token', token);
-    const res = await fetch(`${ALPACA_NEWS_URL}?${params}`, {
-      headers: {
-        'APCA-API-KEY-ID': process.env.ALPACA_API_KEY || '',
-        'APCA-API-SECRET-KEY': process.env.ALPACA_SECRET_KEY || '',
-      },
-      cache: 'no-store',
-    });
-    if (!res.ok) throw new Error(`Alpaca news HTTP ${res.status}`);
-    const body = (await res.json()) as { news?: NewsArticle[]; next_page_token?: string | null };
-    yield body.news ?? [];
-    token = body.next_page_token ?? null;
+    const page = await fetchNewsPage({ start: opts.start, end: opts.end, symbols: opts.symbols, pageToken: token });
+    yield page.news;
+    token = page.nextPageToken;
     pages++;
   } while (token && (!opts.maxPages || pages < opts.maxPages) && (!opts.deadline || Date.now() < opts.deadline));
 }
@@ -435,7 +421,7 @@ export async function syncResultsFromNews(opts: { lookbackHours?: number; deadli
   const start = new Date(Date.now() - (opts.lookbackHours ?? 30) * 3_600_000).toISOString();
   let articles = 0;
   let results = 0;
-  for await (const page of alpacaNews({ start, symbols: tracked, deadline: opts.deadline })) {
+  for await (const page of newsPages({ start, symbols: tracked, deadline: opts.deadline })) {
     articles += page.length;
     results += await storeNewsResults(page, trackedSet);
   }
@@ -445,7 +431,7 @@ export async function syncResultsFromNews(opts: { lookbackHours?: number; deadli
 /**
  * Catch-up for reports the rolling news window missed (cron outage, a late
  * "Reported Earlier," headline, a symbol absent from the 30h scan): re-query
- * Alpaca News for just the symbols whose scheduled date passed without a
+ * the news feed for just the symbols whose scheduled date passed without a
  * stored result, from the day before their earliest such date.
  */
 export async function catchUpPendingFromNews(opts: { deadline?: number } = {}): Promise<{ pending: number; articles: number; results: number }> {
@@ -463,7 +449,7 @@ export async function catchUpPendingFromNews(opts: { deadline?: number } = {}): 
   const tracked = new Set(await getTrackedSymbols());
   let articles = 0;
   let results = 0;
-  for await (const page of alpacaNews({ start: `${addDays(since, -1)}T00:00:00Z`, symbols, deadline: opts.deadline })) {
+  for await (const page of newsPages({ start: `${addDays(since, -1)}T00:00:00Z`, symbols, deadline: opts.deadline })) {
     articles += page.length;
     results += await storeNewsResults(page, tracked);
   }
@@ -511,7 +497,8 @@ function toResult(r: any): EarningsResult {
     salesActual: num(r.sales_actual),
     salesEstimate: num(r.sales_estimate),
     salesOutcome: (r.sales_outcome as EarningsOutcome | null) ?? null,
-    source: r.source,
+    // Stored values name the feeds; clients only get the neutral kind.
+    source: r.source === 'alpaca_news' ? 'news' : 'calendar',
   };
 }
 
@@ -584,7 +571,7 @@ export function earningsBadge(summary: EarningsSummary | null | undefined, expir
 }
 
 /**
- * Earliest date our results data covers (start of the Alpaca News backfill).
+ * Earliest date our results data covers (start of the news-feed backfill).
  * Before this, "no report in the window" means "no data", not "no report".
  */
 export async function getEarningsCoverageStart(): Promise<string | null> {

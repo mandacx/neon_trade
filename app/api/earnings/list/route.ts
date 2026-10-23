@@ -4,7 +4,7 @@ import { FEATURE_EARNINGS } from '@/lib/features';
 import { getEarningsRange, getTrackedSymbols, todayET } from '@/lib/earnings';
 import { addDaysET } from '@/lib/earningsFilter';
 import { computeReaction } from '@/lib/earningsReaction';
-import { getDailyBarsMulti, getSnapshotsChunked } from '@/lib/alpaca';
+import { getDailyBarsMulti, getSnapshotsChunked } from '@/lib/marketdata';
 import { getMarketState } from '@/lib/marketSession';
 import { buildQuote, rowQuote } from '@/lib/quote';
 import { getSecuritiesMeta } from '@/lib/securitiesFilters';

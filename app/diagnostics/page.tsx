@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
+
 import Link from 'next/link';
 
 export default function DiagnosticsPage() {
   const [dbHealth, setDbHealth] = useState<any>(null);
-  const [tradierHealth, setTradierHealth] = useState<any>(null);
+  const [marketHealth, setMarketHealth] = useState<any>(null);
   const [ohlcTest, setOhlcTest] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
@@ -22,13 +23,12 @@ export default function DiagnosticsPage() {
         setDbHealth({ success: false, error: String(error) });
       }
 
-      // Test 2: Tradier API
+      // Test 2: Market data (quotes, daily bars, symbol search)
       try {
-        const tradierRes = await fetch('/api/test-tradier');
-        const tradierData = await tradierRes.json();
-        setTradierHealth(tradierData);
+        const marketRes = await fetch('/api/diagnostics/market-data');
+        setMarketHealth(await marketRes.json());
       } catch (error) {
-        setTradierHealth({ success: false, error: String(error) });
+        setMarketHealth({ success: false, error: String(error) });
       }
 
       // Test 3: OHLC Endpoint
@@ -75,16 +75,16 @@ export default function DiagnosticsPage() {
           </pre>
         </div>
 
-        {/* Tradier API Health */}
+        {/* Market data health */}
         <div className="mb-6 bg-white rounded-lg shadow p-6">
           <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-            <span className={tradierHealth?.success ? 'text-green-600' : 'text-red-600'}>
-              {tradierHealth?.success ? '✓' : '✗'}
+            <span className={marketHealth?.success ? 'text-green-600' : 'text-red-600'}>
+              {marketHealth?.success ? '✓' : '✗'}
             </span>
-            Tradier API Connection
+            Market Data Connection
           </h2>
           <pre className="bg-gray-100 p-4 rounded overflow-auto text-xs">
-            {JSON.stringify(tradierHealth, null, 2)}
+            {JSON.stringify(marketHealth, null, 2)}
           </pre>
         </div>
 
@@ -102,7 +102,7 @@ export default function DiagnosticsPage() {
           {ohlcTest?.success && ohlcTest?.data?.data?.length > 0 && (
             <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded">
               <p className="text-green-800 font-semibold">
-                ✓ Successfully fetched {ohlcTest.data.data.length} data points from Tradier API
+                ✓ Successfully fetched {ohlcTest.data.data.length} daily data points
               </p>
               <p className="text-sm text-green-700 mt-2">
                 Date range: {ohlcTest.data.from} to {ohlcTest.data.to}
