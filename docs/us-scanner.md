@@ -116,7 +116,8 @@ node --env-file=.env.local railway/node_modules/tsx/dist/cli.mjs --tsconfig tsco
 
 Railway: `us-universe-cron` (Saturday every 10 min 14:00–16:50 UTC; the route skips steps under 6 days
 old) and `us-universe-meta-cron` (Sunday 15:00 UTC) in `railway/.railway/railway.ts`. Apply with
-`railway config apply` from `railway/` in PowerShell (see CLAUDE.md), after the routes are deployed.
+`railway config apply` from `railway/` in PowerShell (see CLAUDE.md). Applied and deployed 2026-10-26.
+Redeploy an image with `railway up ./us-universe-cron --path-as-root --service us-universe-cron` from `railway/`.
 
 ## Tables
 

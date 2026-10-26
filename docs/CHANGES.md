@@ -7,6 +7,21 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-26 — US scanner Railway services live
+
+The scanner code is on main (725ef74, 80406fc; Vercel deploy succeeded). `railway config apply --yes` from `railway/` created `us-universe-cron` and `us-universe-meta-cron` with `CRON_SECRET` referenced from `market-catalog-cron`. Images were deployed with `railway up`.
+
+- **Deploy gotcha.** `railway up --service X`, run from inside `railway/X/`, uploads the whole linked `railway/` directory. The build then fails with "couldn't locate the dockerfile at path Dockerfile". Use `railway up ./X --path-as-root --service X` from `railway/`. CLAUDE.md is updated to match.
+- **Verified:**
+  - Both deployments report SUCCESS. The `us-universe-cron` build log shows the alpine + curl image.
+  - `railway config plan` reports "already up to date".
+- **Not verified:**
+  - First scheduled runs: Saturday 2026-10-31 14:00 UTC for the universe, Sunday 2026-11-01 15:00 UTC for the metadata. Check `nt_us_universe.liquidity_at` / `meta_at` afterwards.
+  - The meta image's build log could not be streamed, though its deployment reports SUCCESS.
+- The 2026-10-23 open items "Push" and "railway config apply" are done. The signed-in browser check of `/scanner` is still open.
+
+---
+
 ## 2026-10-23 — US Market Scanner: compact controls so results are visible without scrolling
 
 Reported (screenshot): the scan chips (9 rows) and the 3-row filter grid pushed the results below the fold.
