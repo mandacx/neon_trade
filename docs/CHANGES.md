@@ -7,6 +7,17 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-27 — Stock chart: drag up/down without touching the price axis first
+
+Reported: dragging the candles vertically did nothing until the right price axis had been resized once.
+
+- **Cause** (read in `lightweight-charts` 4.2.3, `PriceScale.startScroll`): it returns immediately while the scale is auto-fitting; dragging the axis turns auto-fit off, which is why it worked afterwards.
+- **Change** (`components/charts/TVChart.tsx`, chart-creation effect): a capture-phase `mousedown` on the plot area (not the axes) turns the right scale's auto-fit off before the library's own handler runs, so the same drag pans in both directions. If the drag stays horizontal (< 3 px vertical), auto-fit is turned back on at release, so scrolling through time still fits the visible candles. If the scale is already manual, nothing changes (the library pans as before). Fit levels toggle, ↺ and the axis double-click still restore auto-fit.
+- **Verified:** library source read; `npx tsc --noEmit` clean.
+- **Not verified:** behaviour in a browser (not run); touch (unchanged, mouse events only).
+
+---
+
 ## 2026-10-26 — US scanner Railway services live
 
 The scanner code is on main (725ef74, 80406fc; Vercel deploy succeeded). `railway config apply --yes` from `railway/` created `us-universe-cron` and `us-universe-meta-cron` with `CRON_SECRET` referenced from `market-catalog-cron`. Images were deployed with `railway up`.

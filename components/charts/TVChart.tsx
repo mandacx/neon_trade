@@ -722,7 +722,44 @@ export default function TVChart({
     });
     resizeObserver.observe(chartContainerRef.current);
 
+    // Free vertical drag. While the right scale auto-fits it ignores vertical
+    // panning (it only works after the axis has been dragged, which switches
+    // auto-fit off). Switch it off on mouse-down so the same drag pans up/down,
+    // and switch it back on at release if the drag stayed horizontal, so
+    // scrolling through time keeps fitting the visible candles.
+    const dragEl = chartContainerRef.current;
+    let dragStart: { x: number; y: number; restoreAuto: boolean } | null = null;
+    const onDragMove = (e: MouseEvent) => {
+      if (dragStart && dragStart.restoreAuto && Math.abs(e.clientY - dragStart.y) >= 3) {
+        dragStart.restoreAuto = false; // vertical pan: keep the manual range
+      }
+    };
+    const onDragEnd = () => {
+      window.removeEventListener('mousemove', onDragMove);
+      window.removeEventListener('mouseup', onDragEnd);
+      if (dragStart?.restoreAuto) chartRef.current?.priceScale('right').applyOptions({ autoScale: true });
+      dragStart = null;
+    };
+    const onDragStart = (e: MouseEvent) => {
+      if (e.button !== 0) return;
+      const rect = dragEl.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const left = chart.priceScale('left').width();
+      const right = chart.priceScale('right').width();
+      if (x <= left || x >= rect.width - right) return; // axes handle themselves
+      const scale = chart.priceScale('right');
+      if (!scale.options().autoScale) return; // already manual: the library pans
+      scale.applyOptions({ autoScale: false });
+      dragStart = { x: e.clientX, y: e.clientY, restoreAuto: true };
+      window.addEventListener('mousemove', onDragMove);
+      window.addEventListener('mouseup', onDragEnd);
+    };
+    dragEl.addEventListener('mousedown', onDragStart, true);
+
     return () => {
+      dragEl.removeEventListener('mousedown', onDragStart, true);
+      window.removeEventListener('mousemove', onDragMove);
+      window.removeEventListener('mouseup', onDragEnd);
       resizeObserver.disconnect();
       if (visibleRangeUnsubscribe) {
         visibleRangeUnsubscribe();
