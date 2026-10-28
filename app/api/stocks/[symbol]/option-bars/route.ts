@@ -1,10 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getOptionBars, getOptionTodaySnapshotBar, buildOccOptionSymbol, convertIntervalToTimeframe, isIntradayInterval, ChartInterval } from '@/lib/marketdata';
+import { getOptionBars, getOptionTodaySnapshotBar, getFallbackBars, buildOccOptionSymbol, convertIntervalToTimeframe, isIntradayInterval, ChartInterval } from '@/lib/marketdata';
+import type { Bar } from '@/lib/marketdata';
 import { usTradingDayKey } from '@/lib/utils';
 import { format, subDays } from 'date-fns';
 import axios from 'axios';
 import { getCurrentUserContext } from '@/lib/appUsers';
 import { expiryAllowed, WEEKLY_EXPIRY_ERROR } from '@/lib/expiryAccess';
+
+// Index options (SPX/SPXW/...) trade outside 09:30-16:00 and the history feed's
+// bars include those prints, so today's bars must too. Equity options: intraday
+// bars include extended prints as well, but the history feed's DAILY bar does
+// not, so equity daily keeps the regular-session daily bar. Checked 2026-10-28.
+const INDEX_OPTION_ROOTS = new Set(['SPX', 'SPXW', 'NDX', 'NDXP', 'RUT', 'RUTW', 'XSP', 'VIX', 'VIXW', 'DJX']);
+function todaySessions(root: string, interval: ChartInterval): 'open' | 'all' {
+  return interval === 'daily' ? (INDEX_OPTION_ROOTS.has(root.toUpperCase()) ? 'all' : 'open') : 'all';
+}
 
 // OHLCV bars for a single option contract, via the market-data options API
 // (OCC symbol built from expiry+strike+optType) — see lib/marketdata for
@@ -54,8 +64,26 @@ export async function GET(
     // cap `to` at yesterday rather than surfacing that as an error.
     const effectiveTo = to < yesterdayET ? to : yesterdayET;
 
-    const occSymbol = buildOccOptionSymbol(symbol, expiry, optType, strike);
+    // The OCC root can differ from the underlying (SPX -> SPXW weeklies, NDX -> NDXP,
+    // adjusted contracts such as LEN1); the OI tracker passes the contract's own root.
+    const rootParam = searchParams.get('root');
+    if (rootParam !== null && !/^[A-Za-z0-9]{1,6}$/.test(rootParam)) {
+      return NextResponse.json({ success: false, error: 'root must be 1-6 letters or digits' }, { status: 400 });
+    }
+    const root = rootParam ?? symbol;
+    const occSymbol = buildOccOptionSymbol(root, expiry, optType, strike);
     const timeframe = convertIntervalToTimeframe(interval);
+
+    // Today's bars come from the fallback feed (real intraday bars; the primary
+    // feed's only current-day data is one daily snapshot bar). Started in
+    // parallel with the history request; null when today isn't wanted/available.
+    const wantsToday = (interval === 'daily' || isIntradayInterval(interval)) && to >= todayET;
+    const todayBarsPromise: Promise<Bar[]> = wantsToday
+      ? getFallbackBars(occSymbol, interval, todayET, todayET, todaySessions(root, interval)).catch(err => {
+          console.error('Error fetching today\'s option bars:', err instanceof Error ? err.message : err);
+          return [];
+        })
+      : Promise.resolve([]);
 
     const bars = await getOptionBars(occSymbol, timeframe, from, effectiveTo);
 
@@ -74,11 +102,25 @@ export async function GET(
 
     // The historical endpoint above always 403s for the current trading day
     // (capped at `effectiveTo` = yesterday), so today never shows up in
-    // `barsData`. Append today's running bar (via the options snapshot
-    // endpoint, the only current-day data this data plan permits) for
-    // daily and intraday views — weekly/monthly stay historical-only since a
-    // single day's bar isn't the right shape for a partial week/month candle.
-    if ((interval === 'daily' || isIntradayInterval(interval)) && to >= todayET) {
+    // `barsData`. Append today from the fallback feed (daily: one running bar;
+    // intraday: every bar so far, same bucket boundaries as the history).
+    // Weekly/monthly stay historical-only since a single day's bar isn't the
+    // right shape for a partial week/month candle.
+    if (wantsToday) {
+      const todayBars = (await todayBarsPromise)
+        .map(b => ({ b, timestamp: Math.floor(new Date(b.t).getTime() / 1000) }))
+        .filter(({ timestamp }) => usTradingDayKey(timestamp) === todayET);
+      for (const { b, timestamp } of todayBars) {
+        barsData.push({
+          date: todayET, timestamp,
+          open: b.o, high: b.h, low: b.l, close: b.c, volume: b.v,
+        });
+      }
+    }
+
+    // Nothing from the fallback feed: show the primary feed's single running
+    // daily bar instead (it can't draw intraday candles, but beats an empty today).
+    if (wantsToday && !barsData.some(b => b.date === todayET)) {
       const todayBar = await getOptionTodaySnapshotBar(symbol, expiry, strike, occSymbol);
       const timestamp = todayBar ? Math.floor(new Date(todayBar.t).getTime() / 1000) : 0;
       // Snapshot's dailyBar can be stale (e.g. Friday's bar showing on a

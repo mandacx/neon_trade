@@ -250,7 +250,7 @@ export default function StockOiModal({ symbol, loadDates, to, initialRange = '1'
                 <div className="p-3">
                   <div className="h-80">
                     <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={[...data.byDate].reverse().map(g => ({ date: g.loadDate, 'Calls opened': g.callOpened, 'Calls closed': g.callClosed, 'Puts opened': g.putOpened, 'Puts closed': g.putClosed }))} stackOffset="sign">
+                      <BarChart data={[...data.byDate].reverse().map(g => ({ date: g.tradeDate ?? g.loadDate, 'Calls opened': g.callOpened, 'Calls closed': g.callClosed, 'Puts opened': g.putOpened, 'Puts closed': g.putClosed }))} stackOffset="sign">
                         <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                         <XAxis dataKey="date" tick={{ fontSize: 10 }} />
                         <YAxis tick={{ fontSize: 10 }} tickFormatter={v => fmtCount(v)} />
@@ -263,7 +263,7 @@ export default function StockOiModal({ symbol, loadDates, to, initialRange = '1'
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
-                  <p className="text-[11px] text-gray-400 mt-1">Contracts opened (+) and closed (−) per load date, from the OI change report. Pick 10D–60D above for a longer history.</p>
+                  <p className="text-[11px] text-gray-400 mt-1">Contracts opened (+) and closed (−) per trading day (the session behind each load), from the OI change report. Pick 10D–60D above for a longer history.</p>
                 </div>
               )}
               {tab === 'strategies' && (
@@ -286,7 +286,7 @@ export default function StockOiModal({ symbol, loadDates, to, initialRange = '1'
         </div>
       </Modal>
       {contractModal && (
-        <OptionContractModal symbol={contractModal.underlying} expiry={contractModal.expiry} strike={contractModal.strike} optType={contractModal.optType} onClose={() => setContractModal(null)} />
+        <OptionContractModal symbol={contractModal.underlying} expiry={contractModal.expiry} strike={contractModal.strike} optType={contractModal.optType} occRoot={/^([A-Z0-9]{1,6})\d{6}[CP]\d{8}$/.exec(contractModal.contract)?.[1]} onClose={() => setContractModal(null)} />
       )}
       {track && <TrackForm legs={track.legs} label={track.label} onClose={() => setTrack(null)} onDone={onTracked} />}
     </>

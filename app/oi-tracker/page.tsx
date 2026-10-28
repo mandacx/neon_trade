@@ -206,7 +206,7 @@ export default function OiTrackerPage() {
       { key: 'strike', label: 'Strike', type: 'number', value: r => r.strike, render: r => <b>{fmtStrike(r.strike!)}</b> },
       { key: 'close', label: 'Close', type: 'number', value: r => r.close, render: r => r.close?.toFixed(2) ?? '—' },
     ],
-    date: [{ key: 'date', label: 'Load date', type: 'date', value: r => r.loadDate, render: r => <b className="text-xs">{r.loadDate}</b> }],
+    date: [{ key: 'date', label: 'Trade date', type: 'date', value: r => r.tradeDate ?? r.loadDate, render: r => <b className="text-xs" title={`Session behind the OI change; reported in the ${r.loadDate} load`}>{r.tradeDate ?? r.loadDate}</b> }],
   };
   const groupCols = (g: Exclude<OiGroupBy, 'contract'>): Column<OiGroupRow>[] => [
     ...groupKeyCols[g],

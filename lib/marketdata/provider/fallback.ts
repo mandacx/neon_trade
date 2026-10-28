@@ -162,11 +162,18 @@ export async function getTimeSales(
  * request is retried once from that date (older ranges return no bars).
  * 30min/1hour are built from 15min bars, bucketed on US/Eastern clock time.
  */
-export async function getBarsForChart(symbol: string, interval: ChartInterval, from: string, to: string): Promise<Bar[]> {
+export async function getBarsForChart(
+  symbol: string, interval: ChartInterval, from: string, to: string,
+  // 'all' includes pre/post-market prints (index options trade outside 09:30-16:00,
+  // and the primary feed's option bars include them); 'daily' is then built from
+  // 15-minute bars, because the daily history endpoint is regular-session only.
+  sessions: 'open' | 'all' = 'open'
+): Promise<Bar[]> {
   const sym = symbol.toUpperCase();
   const longTimeout = { timeout: 10_000 };
+  const dailyFromBars = interval === 'daily' && sessions === 'all';
 
-  if (interval === 'daily' || interval === 'weekly' || interval === 'monthly') {
+  if (!dailyFromBars && (interval === 'daily' || interval === 'weekly' || interval === 'monthly')) {
     const res = await tradierClient.get('/markets/history', { params: { symbol: sym, interval, start: from, end: to }, ...longTimeout });
     const day = res.data?.history?.day;
     const rows: any[] = !day ? [] : Array.isArray(day) ? day : [day];
@@ -178,10 +185,11 @@ export async function getBarsForChart(symbol: string, interval: ChartInterval, f
   }
 
   const source: '1min' | '5min' | '15min' = interval === '1min' ? '1min' : interval === '5min' ? '5min' : '15min';
+  const sessionFilter = sessions === 'all' ? 'all' : 'open';
   // Resolves to the rows, or to the oldest start date Tradier allows when `start` is too old.
   const fetchRows = async (start: string): Promise<{ rows: any[] } | { oldest: string }> => {
     const res = await tradierClient.get('/markets/timesales', {
-      params: { symbol: sym, interval: source, start: `${start} 00:00`, end: `${to} 23:59`, session_filter: 'open' },
+      params: { symbol: sym, interval: source, start: `${start} 00:00`, end: `${to} 23:59`, session_filter: sessionFilter },
       validateStatus: () => true,
       ...longTimeout,
     });
@@ -205,6 +213,7 @@ export async function getBarsForChart(symbol: string, interval: ChartInterval, f
     t: new Date(Number(r.timestamp) * 1000).toISOString(),
     o: Number(r.open), h: Number(r.high), l: Number(r.low), c: Number(r.close), v: Number(r.volume) || 0,
   }));
+  if (dailyFromBars) return aggregateBars(bars, 24 * 60);
   if (interval === '30min' || interval === '1hour') return aggregateBars(bars, interval === '30min' ? 30 : 60);
   return bars;
 }

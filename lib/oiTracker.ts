@@ -12,7 +12,7 @@
  */
 import { sql } from '@/lib/db';
 import { catalogTradeDates } from '@/lib/marketCatalog';
-import { previousTradingDay, tradingDaysBetween } from '@/lib/marketSession';
+import { previousTradingDay, sessionsForLoads } from '@/lib/marketSession';
 import { suggestSide, type StrategyInputRow } from '@/lib/oiStrategies';
 import { getWatchlistSymbols } from '@/lib/watchlists';
 import type {
@@ -100,15 +100,7 @@ async function loadDatesIn(from: string, to: string, max = MAX_LOADS): Promise<s
 }
 
 /** For each load date, the trading session whose activity it reports (the previous trading day). */
-async function sessionsFor(loads: string[]): Promise<string[]> {
-  if (loads.length === 0) return [];
-  const start = new Date(Date.parse(`${loads[0]}T12:00:00Z`) - 14 * 86_400_000).toISOString().slice(0, 10);
-  const days = await tradingDaysBetween(start, loads[loads.length - 1]);
-  return loads.map(d => {
-    const before = days.filter(x => x < d);
-    return before.length ? before[before.length - 1] : d;
-  });
-}
+const sessionsFor = sessionsForLoads;
 
 /**
  * The symbol restriction from the symbols list, the securities filters and the
@@ -293,6 +285,7 @@ function toGroupRow(r: any, groupBy: Exclude<OiGroupBy, 'contract'>): OiGroupRow
     expiry: groupBy === 'expiry' ? r.k2 : null,
     strike: groupBy === 'strike' ? Number(r.k2) : null,
     loadDate: groupBy === 'date' ? r.k1 : null,
+    tradeDate: groupBy === 'date' ? r.trade_date ?? null : null,
     close: groupBy === 'date' ? null : numOrNull(r.close),
     callOpened,
     callClosed: num(r.call_closed),
@@ -334,6 +327,7 @@ const GROUP_AGGS = `
   SUM(vol) AS vol,
   COUNT(*)::int AS contracts,
   MAX(close) AS close,
+  MAX(last_session)::text AS trade_date,
   (array_agg(contract ORDER BY ABS(chg) DESC))[1] AS top_contract,
   (array_agg(chg ORDER BY ABS(chg) DESC))[1] AS top_chg`;
 
@@ -409,7 +403,7 @@ export async function getStrategyRows(p: OiScreenParams & { minLeg: number }): P
   const base = buildBase({ ...p, direction: 'both', valueBucket: 'all', minValue: null, moneyness: 'all', minAbsChg: p.minLeg }, loads, sessions, symbols, true);
   const rows = await sql(`${base.text} SELECT * FROM c LIMIT 20000`, base.params);
   return rows.map((r: any) => ({
-    contract: r.contract, underlying: r.und, loadDate: r.load_s as string, expiry: r.expiry_s as string, optType: r.t as OptType,
+    contract: r.contract, underlying: r.und, loadDate: r.load_s as string, tradeDate: r.last_session as string, expiry: r.expiry_s as string, optType: r.t as OptType,
     strike: num(r.strike_pr), oiChg: num(r.chg), ltp: num(r.ltp), close: num(r.close), vol: numOrNull(r.vol),
   }));
 }

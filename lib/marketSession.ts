@@ -155,6 +155,21 @@ export async function tradingDaysBetween(start: string, end: string): Promise<st
   return days;
 }
 
+/**
+ * For each option-report load date (ascending), the trading session whose activity
+ * it reports: the previous trading day (the OI published on the morning of D
+ * results from D-1; docs/oi-tracker.md). One calendar call for the whole span.
+ */
+export async function sessionsForLoads(loads: string[]): Promise<string[]> {
+  if (loads.length === 0) return [];
+  const start = new Date(Date.parse(`${loads[0]}T12:00:00Z`) - 14 * DAY_MS).toISOString().slice(0, 10);
+  const days = await tradingDaysBetween(start, loads[loads.length - 1]);
+  return loads.map(d => {
+    const before = days.filter(x => x < d);
+    return before.length ? before[before.length - 1] : d;
+  });
+}
+
 /** The trading day before `date` ('YYYY-MM-DD'), or null if none in the prior two weeks. */
 export async function previousTradingDay(date: string): Promise<string | null> {
   const end = new Date(Date.parse(`${date}T12:00:00Z`) - DAY_MS).toISOString().slice(0, 10);

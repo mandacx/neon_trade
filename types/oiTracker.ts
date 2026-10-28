@@ -59,6 +59,8 @@ export interface OiGroupRow {
   expiry: string | null;
   strike: number | null;
   loadDate: string | null;
+  /** The session behind a per-date row (the trading day before its load date); null for other groupings. */
+  tradeDate: string | null;
   close: number | null;
   callOpened: number;
   callClosed: number;
@@ -124,6 +126,8 @@ export interface StrategyCandidate {
   id: string;
   underlying: string;
   loadDate: string;
+  /** The session behind the load date (the trading day before it). */
+  tradeDate?: string;
   close: number;
   kind: StrategyKind;
   label: string;

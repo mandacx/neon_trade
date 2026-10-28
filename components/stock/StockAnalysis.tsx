@@ -111,7 +111,7 @@ type RangePreset = '10d' | '30d' | '90d' | 'custom';
 const RANGE_PRESET_DAYS: Record<Exclude<RangePreset, 'custom'>, number> = { '10d': 10, '30d': 30, '90d': 90 };
 const RANGE_PRESET_LABELS: Record<RangePreset, string> = { '10d': '10D', '30d': '30D', '90d': '90D', custom: 'Custom' };
 
-type OptChainRow = { optType: 'put' | 'call'; strike: number; ltp: number; oi: number; oiChg: number; close: number; loadDate: string };
+type OptChainRow = { optType: 'put' | 'call'; strike: number; ltp: number; oi: number; oiChg: number; close: number; loadDate: string; /** Session behind the OI change (the day before the load date). */ tradeDate?: string };
 type OptChainSortKey = 'loadDate' | 'close' | 'strike' | 'optType' | 'ltp' | 'oi' | 'oiChg' | 'absOiChg' | 'chgOpenIntPrice' | 'absChgOpenIntPrice';
 
 type OptChainPreset = '10d' | '30d' | '90d' | 'all';
@@ -1813,7 +1813,7 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
                             >
                               <td data-col="symbol" className="py-1.5 pr-3 text-gray-600">{symbol.toUpperCase()}</td>
                               {oc('expiry') && (<td data-col="expiry" className="py-1.5 px-2 text-gray-600">{selectedExpiry}</td>)}
-                              {oc('loadDate') && (<td data-col="loadDate" className="py-1.5 px-2 text-gray-600">{r.loadDate}</td>)}
+                              {oc('loadDate') && (<td data-col="loadDate" className="py-1.5 px-2 text-gray-600" title={`Session behind the OI change; reported in the ${r.loadDate} load`}>{r.tradeDate ?? r.loadDate}</td>)}
                               {oc('cmp') && (<td data-col="cmp" className="text-right py-1.5 px-2 text-gray-600">{r.close}</td>)}
                               {oc('strike') && (<td data-col="strike" className="text-right py-1.5 px-2 font-mono">{r.strike}</td>)}
                               {oc('optType') && (<td data-col="optType" className={`py-1.5 px-2 font-semibold capitalize ${r.optType === 'call' ? 'text-green-600' : 'text-red-600'}`}>{r.optType}</td>)}

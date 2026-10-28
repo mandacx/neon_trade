@@ -1,8 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { catalogLastSeen } from '@/lib/marketCatalog';
+import { sessionsForLoads } from '@/lib/marketSession';
 import { getCurrentUserContext } from '@/lib/appUsers';
 import { expiryAllowed, WEEKLY_EXPIRY_ERROR } from '@/lib/expiryAccess';
+
+// The OI published on load date D results from session D-1, so each row also
+// carries `tradeDate` (the trading day before its load date; docs/oi-tracker.md).
+// Best-effort: an empty map (calendar unavailable) makes callers fall back to the load date.
+async function tradeDateByLoad(loads: string[]): Promise<Map<string, string>> {
+  const distinct = [...new Set(loads)].sort();
+  try {
+    const sessions = await sessionsForLoads(distinct);
+    return new Map(distinct.map((d, i) => [d, sessions[i]]));
+  } catch (error) {
+    console.error('Error mapping load dates to trading sessions:', error instanceof Error ? error.message : error);
+    return new Map();
+  }
+}
 
 // Per-strike option-chain OI snapshot(s) from public.us_opt_chg_rpt — a
 // different, finer granularity than eod_usmkts_price's aggregate call/put OI
@@ -58,6 +73,7 @@ export async function GET(
           AND (${optType}::text IS NULL OR TRIM(opt_type) = ${optType}::text)
         ORDER BY load_dt DESC, strike_pr ASC, opt_type ASC
       `;
+      const tradeDates = await tradeDateByLoad((rows as any[]).map(r => r.load_dt));
       const chain = (rows as any[]).map(r => ({
         optType: r.opt_type === 'put' ? 'put' : 'call',
         strike: Number(r.strike_pr),
@@ -66,6 +82,7 @@ export async function GET(
         oiChg: Number(r.oi_chg),
         close: Number(r.close),
         loadDate: r.load_dt,
+        tradeDate: tradeDates.get(r.load_dt) ?? r.load_dt,
       }));
       return NextResponse.json({ success: true, data: { symbol: upperSymbol, expiryDate: expiry, from, to, rows: chain } });
     }
@@ -99,6 +116,7 @@ export async function GET(
       ORDER BY strike_pr ASC, opt_type ASC
     `;
 
+    const tradeDate = (await tradeDateByLoad([loadDate])).get(loadDate) ?? loadDate;
     const chain = (rows as any[]).map(r => ({
       optType: r.opt_type === 'put' ? 'put' : 'call',
       strike: Number(r.strike_pr),
@@ -107,6 +125,7 @@ export async function GET(
       oiChg: Number(r.oi_chg),
       close: Number(r.close),
       loadDate,
+      tradeDate,
     }));
 
     return NextResponse.json({

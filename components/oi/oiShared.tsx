@@ -237,7 +237,7 @@ export function StrategyList({ candidates, onOpenStock, onTrack, showUnderlying 
                 <span className="text-[11px] text-gray-500">qty diff <b className="tabular-nums">{c.qtyDiffPct.toFixed(2)}%</b></span>
                 <span className="text-[11px] text-gray-500">{fmtMoneyCompact(c.totalValue)}</span>
                 <span className="text-[11px] text-gray-400" title="0–1: closeness of quantities (60%) and leg size (40%)">conf {c.confidence.toFixed(2)}</span>
-                <span className="text-[11px] text-gray-400">{c.loadDate}</span>
+                <span className="text-[11px] text-gray-400" title={`Session behind the OI change; reported in the ${c.loadDate} load`}>{c.tradeDate ?? c.loadDate}</span>
                 <button onClick={() => onTrack(c)} className="ml-auto text-[11px] font-semibold text-blue-600 hover:text-blue-800 border border-blue-200 rounded px-2 py-0.5">Track</button>
               </div>
               <div className="flex flex-wrap gap-1.5 mt-1.5">

@@ -28,10 +28,12 @@ interface OptionContractModalProps {
   expiry: string;
   strike: number;
   optType: 'call' | 'put';
+  /** The contract's OCC root when it differs from the underlying (SPXW, NDXP, adjusted LEN1...). */
+  occRoot?: string;
   onClose: () => void;
 }
 
-export default function OptionContractModal({ symbol, expiry, strike, optType, onClose }: OptionContractModalProps) {
+export default function OptionContractModal({ symbol, expiry, strike, optType, occRoot, onClose }: OptionContractModalProps) {
   const [interval, setInterval_] = useState<ModalInterval>('daily');
   // 30 days by default rather than "All". "All" starts at ALL_FROM, and
   // getOptionBars pages the options bars endpoint up to 20 times to cover
@@ -67,7 +69,7 @@ export default function OptionContractModal({ symbol, expiry, strike, optType, o
       .then(json => {
         if (cancelled) return;
         if (json.success && json.data?.rows) {
-          setHistoryPoints(json.data.rows.map((r: any) => ({ loadDate: r.loadDate, ltp: r.ltp, oi: r.oi, oiChg: r.oiChg })));
+          setHistoryPoints(json.data.rows.map((r: any) => ({ tradeDate: r.tradeDate ?? r.loadDate, ltp: r.ltp, oi: r.oi, oiChg: r.oiChg })));
         } else {
           setHistoryPoints([]);
         }
@@ -91,7 +93,7 @@ export default function OptionContractModal({ symbol, expiry, strike, optType, o
     setBarsError(null);
 
     Promise.all([
-      fetch(`/api/stocks/${symbol}/option-bars?expiry=${expiry}&strike=${strike}&optType=${optType}&interval=${interval}&from=${from}&to=${windowEnd}`).then(res => res.json()),
+      fetch(`/api/stocks/${symbol}/option-bars?expiry=${expiry}&strike=${strike}&optType=${optType}&interval=${interval}&from=${from}&to=${windowEnd}${occRoot && occRoot !== symbol.toUpperCase() ? `&root=${occRoot}` : ''}`).then(res => res.json()),
       fetch(`/api/stocks/${symbol}/ohlc?interval=${interval}&from=${from}&to=${windowEnd}`).then(res => res.json()),
     ])
       .then(([optionJson, underlyingJson]) => {
@@ -119,7 +121,7 @@ export default function OptionContractModal({ symbol, expiry, strike, optType, o
       .finally(() => { if (!cancelled) setBarsLoading(false); });
 
     return () => { cancelled = true; };
-  }, [symbol, expiry, strike, optType, interval, rangePreset, windowEnd]);
+  }, [symbol, expiry, strike, optType, occRoot, interval, rangePreset, windowEnd]);
 
   const occLabel = `${symbol.toUpperCase()} ${expiry} ${strike} ${optType === 'call' ? 'Call' : 'Put'}`;
 
@@ -189,7 +191,7 @@ export default function OptionContractModal({ symbol, expiry, strike, optType, o
       />
 
       <div className="mt-2 text-[11px] text-gray-400">
-        {historyPoints.length} OI/LTP snapshot{historyPoints.length === 1 ? '' : 's'} on record for this contract.
+        {historyPoints.length} OI/LTP snapshot{historyPoints.length === 1 ? '' : 's'} on record for this contract, marked on the trading day that produced each OI change (the report loads the morning after).
       </div>
     </Modal>
   );

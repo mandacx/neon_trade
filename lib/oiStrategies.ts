@@ -19,6 +19,7 @@ export interface StrategyInputRow {
   contract: string;
   underlying: string;
   loadDate: string;
+  tradeDate?: string;
   expiry: string;
   optType: OptType;
   strike: number;
@@ -68,6 +69,7 @@ function makeCandidate(
     id: `${rows[0].underlying}|${rows[0].loadDate}|${sorted.map(r => r.contract).join('+')}`,
     underlying: rows[0].underlying,
     loadDate: rows[0].loadDate,
+    tradeDate: rows[0].tradeDate,
     close: rows[0].close,
     kind,
     label,

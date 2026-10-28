@@ -36,8 +36,10 @@ export type UnderlyingPoint = {
 // One snapshot per day from public.us_opt_chg_rpt for this exact strike+type —
 // "mark all the data points from the beginning" means every one of these,
 // not just whatever window the option-bars chart itself is showing.
+// `tradeDate` is the session that produced the OI change: the report loaded on
+// day D reflects D-1's trading, so the marker belongs on D-1's bar, not D's.
 export type OiHistoryPoint = {
-  loadDate: string;
+  tradeDate: string;
   ltp: number;
   oi: number;
   oiChg: number;
@@ -143,8 +145,8 @@ export default function OptionContractChart({
     underlyingSeriesRef.current.setData(data);
   }, [underlyingBars]);
 
-  // OI/LTP history markers — one per day.us_opt_chg_rpt snapshot, placed on the
-  // nearest loaded option bar for that day. Snapshots with no corresponding bar
+  // OI/LTP history markers — one per us_opt_chg_rpt snapshot, placed on the
+  // option bar of the session that produced it (its trade date, one trading day before the load). Snapshots with no corresponding bar
   // (e.g. the feed's current-trading-day cap) are skipped rather than guessed.
   useEffect(() => {
     if (!candleSeriesRef.current) return;
@@ -159,7 +161,7 @@ export default function OptionContractChart({
 
     const markers: SeriesMarker<Time>[] = historyPoints
       .map((p): SeriesMarker<Time> | null => {
-        const barTime = firstBarTimeByDay.get(p.loadDate);
+        const barTime = firstBarTimeByDay.get(p.tradeDate);
         if (barTime === undefined) return null;
         const rising = p.oiChg > 0;
         const falling = p.oiChg < 0;
@@ -189,7 +191,7 @@ export default function OptionContractChart({
     const byDayKey = new Map<string, OptionBarPoint>();
     optionBars.forEach(b => byDayKey.set(b.dayKey, b));
     const historyByDay = new Map<string, OiHistoryPoint>();
-    historyPoints.forEach(p => historyByDay.set(p.loadDate, p));
+    historyPoints.forEach(p => historyByDay.set(p.tradeDate, p));
     const underlyingByTime = new Map<number, number>();
     underlyingBars.forEach(b => underlyingByTime.set(b.time, b.close));
 
