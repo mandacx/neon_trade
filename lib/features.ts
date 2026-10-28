@@ -33,6 +33,12 @@ export const FEATURE_US_MARKET_SCANNER = 'us_market_scanner';
  */
 export const FEATURE_STANDARD_EXPIRY_ONLY = 'standard_expiry_only';
 
+/** Display name for a plan code (matches `nt_plans.name`; EXPERT is shown as "Pro Plus"). */
+export function planLabel(planCode: string): string {
+  if (planCode === 'EXPERT') return 'Pro Plus';
+  return planCode.charAt(0).toUpperCase() + planCode.slice(1).toLowerCase();
+}
+
 /** True if `features` (a plan's feature-code list) includes `code`. */
 export function hasFeature(features: string[] | undefined | null, code: string): boolean {
   return !!features?.includes(code);

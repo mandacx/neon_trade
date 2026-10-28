@@ -7,6 +7,18 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-27 — Header: Performance hidden by plan/user, plan tag on the avatar
+
+Requested: drop Performance from the menu per plan/user feature, hide it when signed out, and show the plan (Free / Pro / Expert) on the profile icon.
+
+- **Change** (`components/layout/Header.tsx` only): the Performance button (desktop and mobile menu) renders only when `authCtx.loggedIn && hasFeature(features, 'performance')`. `authCtx.features` is the plan's list with per-user overrides applied (`lib/appUsers.ts`), so the admin Plans editor and per-user overrides control it with no new code. It is no longer shown with a PRO badge to users who lack it.
+- **Avatar:** a small pill under the initial shows the plan from `authCtx.planCode` (`FREE` gray, `PRO` amber, `EXPERT` purple; unknown codes fall back to a capitalised code in the Free style). Also in the avatar tooltip/aria-label and next to "Profile" in the mobile menu. An expired plan already resolves to `FREE` in the context. EXPERT is labelled "Pro Plus" everywhere (`planLabel()` in `lib/features.ts`, used by the header avatar and `/profile`, matching `nt_plans.name` already used on /upgrade and admin).
+- **Not changed:** the route is still protected independently (`middleware.ts` login check, `app/performance/layout.tsx` feature guard), so a typed URL is still refused. Links elsewhere (e.g. the Guide page text link to /performance) are untouched.
+- **Verified:** `npx tsc --noEmit` clean; code paths read.
+- **Not verified:** visual check in a browser (pill placement/clipping on the 32 px avatar, mobile menu); behavior per plan with real accounts.
+
+---
+
 ## 2026-10-27 — Stock chart: drag up/down without touching the price axis first
 
 Reported: dragging the candles vertically did nothing until the right price axis had been resized once.

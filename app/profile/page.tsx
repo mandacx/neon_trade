@@ -5,7 +5,7 @@ import SignOutButton from '@/components/auth/SignOutButton';
 import AccountEditor from '@/components/profile/AccountEditor';
 import TelegramCard from '@/components/profile/TelegramCard';
 import { getCurrentUserContext, getHasPassword } from '@/lib/appUsers';
-import { ALL_FEATURES, FEATURE_TELEGRAM_ALERTS, hasFeature } from '@/lib/features';
+import { ALL_FEATURES, FEATURE_TELEGRAM_ALERTS, hasFeature, planLabel } from '@/lib/features';
 import { formatCTDate } from '@/lib/time';
 
 // getCurrentUserContext() reads cookies, so this page can't be statically rendered.
@@ -50,7 +50,7 @@ export default async function ProfilePage() {
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
                 <div className="flex items-center justify-between mb-1">
                   <h2 className="text-sm font-semibold text-gray-700">Your plan</h2>
-                  <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">{ctx.planCode}</span>
+                  <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">{planLabel(ctx.planCode)}</span>
                 </div>
                 {ctx.planExpiresAt && (
                   <p className="text-[11px] text-gray-400 mb-2">Renews/expires {formatCTDate(ctx.planExpiresAt)}</p>
