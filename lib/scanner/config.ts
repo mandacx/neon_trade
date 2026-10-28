@@ -117,6 +117,8 @@ export interface ScanInfo {
   usesTol?: boolean;
   usesAtr?: boolean;
   metricLabel: string;
+  /** Label of the extra signed-% column for scans whose detail quotes a move that is not the metric. */
+  changeLabel?: string;
   help: string;
 }
 
@@ -139,9 +141,9 @@ export const ALLOWED_N: Record<ScanKey, number[]> = {
 };
 
 export const SCANS: ScanInfo[] = [
-  { key: 'streak_up', group: 'Streaks', label: 'Consecutive gainers', nLabel: 'Closes higher in a row ≥', dirLabels: null, metricLabel: 'Streak',
+  { key: 'streak_up', group: 'Streaks', label: 'Consecutive gainers', nLabel: 'Closes higher in a row ≥', dirLabels: null, metricLabel: 'Streak', changeLabel: 'Streak chg %',
     help: 'Stocks that closed higher than the day before at least N sessions in a row. Today counts while the market is open.' },
-  { key: 'streak_down', group: 'Streaks', label: 'Consecutive losers', nLabel: 'Closes lower in a row ≥', dirLabels: null, metricLabel: 'Streak',
+  { key: 'streak_down', group: 'Streaks', label: 'Consecutive losers', nLabel: 'Closes lower in a row ≥', dirLabels: null, metricLabel: 'Streak', changeLabel: 'Streak chg %',
     help: 'Stocks that closed lower than the day before at least N sessions in a row. Today counts while the market is open.' },
   { key: 'high52', group: '52-week', label: '52-week high', nLabel: 'Hit within last (sessions)', dirLabels: null, metricLabel: 'Off high %',
     help: 'Set a new 52-week high (highest high of the last 252 sessions) within the last N sessions. Needs at least 200 sessions of history.' },
@@ -149,7 +151,7 @@ export const SCANS: ScanInfo[] = [
     help: 'Set a new 52-week low within the last N sessions. Needs at least 200 sessions of history.' },
   { key: 'volume', group: 'Volume', label: 'Volume gainers', nLabel: 'Average volume over (sessions)', dirLabels: null, usesVolX: true, metricLabel: 'Volume ×',
     help: 'Average volume of the last N sessions vs the 20 sessions before them. Today’s volume is partial while the market is open.' },
-  { key: 'price_volume', group: 'Volume', label: 'Price × volume', nLabel: 'Window (sessions)', dirLabels: null, usesVolX: true, usesCombo: true, metricLabel: 'Volume ×',
+  { key: 'price_volume', group: 'Volume', label: 'Price × volume', nLabel: 'Window (sessions)', dirLabels: null, usesVolX: true, usesCombo: true, metricLabel: 'Volume ×', changeLabel: 'Price chg %',
     help: 'Price direction over the last N sessions combined with a volume surge (≥ the multiple) or thin volume (≤ 0.7×) vs the 20 sessions before.' },
   { key: 'gap_up', group: 'Gaps', label: 'Top gappers (up)', nLabel: null, dirLabels: null, usesGap: true, metricLabel: 'Gap %',
     help: 'Opened at least the minimum % above the previous close. “Gap filled” means the price has since traded back to the previous close.' },
@@ -173,11 +175,11 @@ export const SCANS: ScanInfo[] = [
     help: 'Today’s (or the last session’s) high and low are inside the previous session’s range: a contraction that often precedes a breakout.' },
   { key: 'range_breakout', group: 'Volatility', label: 'Range breakout', nLabel: 'Range of the last (sessions)', dirLabels: ['Above the high', 'Below the low'], metricLabel: 'Beyond %',
     help: 'Price closed above the highest high (or below the lowest low) of the previous N sessions.' },
-  { key: 'rs_spy', group: 'Relative strength', label: 'Relative strength vs SPY', nLabel: null, dirLabels: ['Outperforming', 'Underperforming'], usesPeriod: true, metricLabel: 'vs SPY %',
+  { key: 'rs_spy', group: 'Relative strength', label: 'Relative strength vs SPY', nLabel: null, dirLabels: ['Outperforming', 'Underperforming'], usesPeriod: true, metricLabel: 'vs SPY %', changeLabel: 'Stock chg %',
     help: 'Return over 1, 3 or 6 months minus SPY’s, with the percentile rank across all scanned names.' },
   { key: 'earnings_upcoming', group: 'Earnings', label: 'Earnings coming up', nLabel: 'Reporting within (days)', dirLabels: null, metricLabel: 'Days to report',
     help: 'Scheduled to report earnings within the next N days (dates marked ~ are estimates).' },
-  { key: 'earnings_reacted', group: 'Earnings', label: 'Earnings reaction', nLabel: null, dirLabels: null, usesGap: true, metricLabel: 'Gap %',
+  { key: 'earnings_reacted', group: 'Earnings', label: 'Earnings reaction', nLabel: null, dirLabels: null, usesGap: true, metricLabel: 'Gap %', changeLabel: 'Day chg %',
     help: 'Reported yesterday after the close or today before the open, and gapped at least the minimum % either way.' },
 ];
 

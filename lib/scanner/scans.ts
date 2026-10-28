@@ -40,6 +40,8 @@ export interface ScanContext {
 export interface Match {
   metric: number;
   detail: string;
+  /** Signed % move the detail text quotes when it is not the metric itself (streak, price window, ...); shown in its own column. */
+  windowChg?: number;
   /** Bars the match looked at (for the corporate-action jump flag); none for single-day scans. */
   lookback?: number;
   /** 52-week scans flag a jump anywhere in the year. */
@@ -55,7 +57,7 @@ function streakScan(c: ScanContext, dir: 1 | -1): Match | null {
   const { len, from } = streak(c.s.bars, dir);
   if (len < c.p.n) return null;
   const cum = pct(last(c.s.bars).c, c.s.bars[from].c);
-  return { metric: len, detail: `${len} closes ${dir === 1 ? 'higher' : 'lower'} in a row, ${signed(cum)}`, lookback: len + 1 };
+  return { metric: len, detail: `${len} closes ${dir === 1 ? 'higher' : 'lower'} in a row, ${signed(cum)}`, windowChg: cum, lookback: len + 1 };
 }
 
 function extremeScan(c: ScanContext, side: 'high' | 'low'): Match | null {
@@ -119,7 +121,7 @@ export const SCANNERS: Record<ScanKey, (c: ScanContext) => Match | null> = {
     const surge = c.p.combo.endsWith('surge');
     if (up ? chg <= 0 : chg >= 0) return null;
     if (surge ? r < c.p.volX : r > 0.7) return null;
-    return { metric: r, detail: `${PV_COMBO_LABELS[c.p.combo]}: price ${signed(chg)} over ${c.p.n} session${c.p.n === 1 ? '' : 's'}, volume ${fmt(r, 1)}×`, lookback: c.p.n + 20 };
+    return { metric: r, detail: `${PV_COMBO_LABELS[c.p.combo]}: price ${signed(chg)} over ${c.p.n} session${c.p.n === 1 ? '' : 's'}, volume ${fmt(r, 1)}×`, windowChg: chg, lookback: c.p.n + 20 };
   },
 
   gap_up: c => gapScan(c, 1),
@@ -194,7 +196,7 @@ export const SCANNERS: Record<ScanKey, (c: ScanContext) => Match | null> = {
     if (r === null || c.spyRoc == null) return null;
     const excess = r - c.spyRoc;
     if (c.p.dir === 'up' ? excess <= 0 : excess >= 0) return null;
-    return { metric: excess, detail: `${signed(r)} over ${c.p.period} vs SPY ${signed(c.spyRoc)} (${signed(excess)})`, lookback: n + 1 };
+    return { metric: excess, detail: `${signed(r)} over ${c.p.period} vs SPY ${signed(c.spyRoc)} (${signed(excess)})`, windowChg: r, lookback: n + 1 };
   },
 
   earnings_upcoming: c => {
@@ -210,7 +212,7 @@ export const SCANNERS: Record<ScanKey, (c: ScanContext) => Match | null> = {
     const today = last(b), prev = b[b.length - 2];
     const gap = pct(today.o, prev.c);
     if (Math.abs(gap) < c.p.minGapPct) return null;
-    return { metric: Math.abs(gap), detail: `Earnings reaction: gap ${signed(gap)}, now ${signed(pct(today.c, prev.c))} on the day`, lookback: 2 };
+    return { metric: Math.abs(gap), detail: `Earnings reaction: gap ${signed(gap)}, now ${signed(pct(today.c, prev.c))} on the day`, windowChg: pct(today.c, prev.c), lookback: 2 };
   },
 };
 

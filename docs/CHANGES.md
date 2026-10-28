@@ -7,6 +7,21 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-28 — US scanner: the % quoted in "Why it matched" gets its own column
+
+Requested (after a first misreading as today's Chg %): for scans like consecutive winners/losers, "Why it matched" quotes the % move across the streak ("5 closes higher in a row, +8.40%"); show that value as a column beside the scan's value column.
+
+- **Change:** `Match.windowChg` (`lib/scanner/scans.ts`) carries the signed % the detail text quotes when it is not the metric; `ScanRow.windowChg` (`lib/scanner/run.ts`, rounded to 2 dp, `null` otherwise); `ScanInfo.changeLabel` (`lib/scanner/config.ts`) names the column, and `app/scanner/page.tsx` renders it (coloured, with arrow like Chg %) right after the scan's value column, which itself moved from last to directly after "Why it matched". The column only exists for the scans below.
+  - Consecutive gainers/losers: **Streak chg %**, close of the latest bar vs the close before the streak (the same number as in the text).
+  - Price × volume: **Price chg %** over the window.
+  - Relative strength vs SPY: **Stock chg %** (the stock's own ROC; the metric stays the excess over SPY).
+  - Earnings reaction: **Day chg %** (the metric stays the gap).
+  - Not added where the metric already is the signed move (Rate of change, Price vs MA, Open = High/Low) or the text quotes only the metric (gaps, 52-week, breakout, volume, ATR, inside day, cross, upcoming earnings).
+- **Saved layouts:** column order is only the default; users who already reordered columns keep their saved order (new columns are appended per the `useColumnPrefs` contract in CLAUDE.md, unverified here), "Reset columns" applies the new default. Sorting, ⚙ Columns and CSV work through the same column list.
+- **Verified:** `npx tsc --noEmit` clean, eslint 0 errors on the touched files, `node scripts/test-us-scanner.mjs` 23 passed (they don't assert the new field). **Not verified:** rendered in a browser, or a live scan response.
+
+---
+
 ## 2026-10-27 — Header: Performance hidden by plan/user, plan tag on the avatar
 
 Requested: drop Performance from the menu per plan/user feature, hide it when signed out, and show the plan (Free / Pro / Expert) on the profile icon.

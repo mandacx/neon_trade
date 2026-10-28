@@ -17,7 +17,7 @@ interface Row {
   rank: number; symbol: string; name: string | null; exchange: string | null; sector: string | null; industry: string | null;
   kind: 'stock' | 'etf'; price: number; change: number | null; changePct: number | null; open: number; high: number; low: number;
   high52: number | null; low52: number | null; volume: number; avgDollarVolM: number; marketCapB: number | null;
-  session: 'pre' | 'regular' | 'post' | 'closed'; hasLevels: boolean; metric: number; detail: string; flag: string | null;
+  session: 'pre' | 'regular' | 'post' | 'closed'; hasLevels: boolean; metric: number; detail: string; windowChg: number | null; flag: string | null;
 }
 interface Meta {
   asOf: string; live: boolean; partialToday: boolean; volumeDelayedFeed: boolean; volumeScanSettledOnly: boolean;
@@ -158,6 +158,12 @@ export default function UsScannerPage() {
       key: 'detail', label: 'Why it matched', type: 'text', value: r => r.detail, sortable: false,
       render: r => <span className="block max-w-[340px] truncate text-gray-700" title={r.detail}>{r.detail}</span>,
     },
+    { key: 'metric', label: info.metricLabel, type: 'number', value: r => r.metric, render: r => <span className="font-semibold">{metricText(params, r.metric)}</span> },
+    ...(info.changeLabel ? [{
+      key: 'windowChg', label: info.changeLabel, type: 'number' as const, value: (r: Row) => r.windowChg,
+      title: 'The % move quoted in "Why it matched"',
+      render: (r: Row) => <span className={`font-semibold ${tone(r.windowChg)}`}>{arrow(r.windowChg)}{signedPct(r.windowChg)}</span>,
+    }] : []),
     { key: 'price', label: 'Price', type: 'number', value: r => r.price, render: r => price(r.price) },
     { key: 'change', label: 'Chg $', type: 'number', value: r => r.change, render: r => <span className={tone(r.change)}>{signedMoney(r.change)}</span> },
     { key: 'changePct', label: 'Chg %', type: 'number', value: r => r.changePct, render: r => <span className={`font-semibold ${tone(r.changePct)}`}>{arrow(r.changePct)}{signedPct(r.changePct)}</span> },
@@ -170,8 +176,7 @@ export default function UsScannerPage() {
     { key: 'avgDollarVolM', label: 'Avg $ vol', type: 'number', value: r => r.avgDollarVolM, render: r => `$${compact(r.avgDollarVolM * 1e6)}`, title: 'Average daily dollar volume, last 20 settled sessions' },
     { key: 'marketCapB', label: 'Mkt Cap', type: 'number', value: r => r.marketCapB, render: r => capText(r.marketCapB) },
     { key: 'sector', label: 'Sector', type: 'text', value: r => r.sector },
-    { key: 'metric', label: info.metricLabel, type: 'number', value: r => r.metric, render: r => <span className="font-semibold">{metricText(params, r.metric)}</span> },
-  ], [info.metricLabel, params]);
+  ], [info.metricLabel, info.changeLabel, params]);
 
   const [pickerOpen, setPickerOpen] = useState(false);
   const [filtersOpen, setFiltersOpenState] = useState(false);

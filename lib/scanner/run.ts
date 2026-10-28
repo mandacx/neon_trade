@@ -44,6 +44,8 @@ export interface ScanRow {
   hasLevels: boolean;
   metric: number;
   detail: string;
+  /** Signed % move quoted in `detail` (see Match.windowChg); null for scans without one. */
+  windowChg: number | null;
   flag: string | null;
 }
 
@@ -230,7 +232,7 @@ export async function runScan(p: ScanParams, opts: { onTodayRefresh?: (task: () 
   const spyRoc = spy ? roc(spy.s.closes, PERIOD_SESSIONS[p.period]) : null;
 
   const scanFn = SCANNERS[p.scan];
-  const matches: Array<{ u: UniverseRow; s: SymbolSeries; m: Match; row: Omit<ScanRow, 'rank' | 'metric' | 'detail' | 'flag'>; flag: string | null }> = [];
+  const matches: Array<{ u: UniverseRow; s: SymbolSeries; m: Match; row: Omit<ScanRow, 'rank' | 'metric' | 'detail' | 'windowChg' | 'flag'>; flag: string | null }> = [];
   let scanned = 0;
   let anyLive = false;
   let anyPartialVolume = false;
@@ -305,7 +307,7 @@ export async function runScan(p: ScanParams, opts: { onTodayRefresh?: (task: () 
   const asc = rankAscending(p);
   matches.sort((a, b) => (asc ? a.m.metric - b.m.metric : b.m.metric - a.m.metric) || b.row.avgDollarVolM - a.row.avgDollarVolM);
   const rows: ScanRow[] = matches.slice(0, p.limit).map((x, i) => ({
-    ...x.row, rank: i + 1, metric: Math.round(x.m.metric * 100) / 100, detail: x.m.detail, flag: x.flag,
+    ...x.row, rank: i + 1, metric: Math.round(x.m.metric * 100) / 100, detail: x.m.detail, windowChg: x.m.windowChg == null ? null : Math.round(x.m.windowChg * 100) / 100, flag: x.flag,
   }));
 
   const sectors = [...new Set(universe.filter(u => u.sector).map(u => u.sector!))].sort();
