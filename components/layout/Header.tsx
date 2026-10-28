@@ -259,7 +259,7 @@ export default function Header() {
                   onClick={() => setAccountMenuOpen(v => !v)}
                   aria-label={`Account menu, ${tag.label} plan`}
                   title={`${tag.label} plan`}
-                  className="relative flex items-center gap-1.5 w-8 h-8 rounded-full bg-gray-700 text-white text-xs font-bold justify-center hover:bg-gray-800"
+                  className="relative flex items-center gap-1.5 w-10 h-10 rounded-full bg-gray-700 text-white text-sm font-bold justify-center hover:bg-gray-800"
                 >
                   {(authCtx.name ?? authCtx.email ?? '?').slice(0, 1).toUpperCase()}
                   <span className={`absolute -bottom-1.5 left-1/2 -translate-x-1/2 px-1 rounded-full ring-1 text-[8px] font-bold uppercase leading-[11px] tracking-wide ${tag.cls}`}>
