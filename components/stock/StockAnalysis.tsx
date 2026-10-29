@@ -1440,13 +1440,14 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
                   />
                 </div>
               )}
-              {visitedTabs.has('chain') && selectedExpiry && (
+              {visitedTabs.has('chain') && (
                 <div hidden={tab !== 'chain'}>
                   <OptionChainTab
                     symbol={symbol.toUpperCase()}
                     selectedExpiry={selectedExpiry}
                     expiryMode={expiryMode}
                     expiries={upcomingExpiries}
+                    expiriesReady={!isLoading}
                     levels={builderLevels}
                     earnings={earnings}
                     entitled={hasFeature(authCtx.features, FEATURE_STRATEGY_BUILDER) || hasFeature(authCtx.features, FEATURE_OPTION_CHAIN)}

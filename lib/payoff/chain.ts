@@ -18,6 +18,8 @@ export interface OptQuote {
   theta: number | null;
   vega: number | null;
   vol: number | null;
+  /** Open interest: the previous session's close (the source gives no date). Absent when not loaded. */
+  oi?: number | null;
 }
 
 export interface ChainRow { strike: number; call?: OptQuote; put?: OptQuote }

@@ -7,6 +7,80 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-29 — Option chain on the live-chain source (quotes, greeks, OI in one call); chain for symbols without levels
+
+Requested: after comparing the two feeds, build the Option Chain tab on Tradier (quotes, greeks, open interest), fix the blank tab for stocks that aren't in our levels, and keep contract-level history as it is (price bars from Alpaca, OI changes from our `us_opt_chg_rpt`, when present).
+
+**Findings behind it (live calls 2026-10-29, read-only)**
+- Tradier `/markets/options/chains?greeks=true` returns bid, ask, last, volume, `open_interest` and greeks (delta, gamma, theta, vega, `mid_iv`) for a whole expiry in **one** request, no paging: AAPL 188 contracts, SPY 474 in 0.23 s, SPX 1,908 in 0.7 s. SPX 10-30 under symbol `SPX` returns the 974 `SPXW` contracts, so the weekly-root retry isn't needed there. The key allows 120 requests/min.
+- **Open interest has no date and no history** (`date` / `as_of` parameters are ignored, same chain both times). It equals our loader's OI for load 10-29 (session 10-28) on every contract compared (AAPL 15/15, SPY 75/75) and differs from Alpaca's contract-list OI dated 10-27: the previous session's close, one session fresher. Only one morning checked; stability at other times is **unverified**.
+- Greeks and IV agree closely with Alpaca's on the same contract (AAPL 340C: IV 0.2922 vs 0.3002, delta 0.6667 vs 0.6765, vega 0.3158 vs 0.3086), so the payoff maths' conventions hold. Tradier's put and call theta were identical on the sample contract (0.2215), unlike Alpaca's; effect on net-theta figures **not examined**.
+- `/markets/options/expirations?includeAllRoots=true` lists a symbol's expiries (BAC 20, SPX 54); an unknown symbol returns an empty list with 200.
+- Contract history, unchanged: `option-bars` (Alpaca bars) and `opt-chain` (our table). Tradier's option history has volume and OHLC but no OI, and none for expired contracts.
+
+**What changed**
+- **Removed the Alpaca contract-list OI function** added earlier today (`getOptionOpenInterest`, `ALPACA_CONTRACTS_URL`, the live-host call), so nothing calls the live trading host and the earlier pending decision about it is moot.
+- **`lib/marketdata/provider/fallback.ts` + facade:** `getOptionChainContracts(symbol, expiry)` and `getOptionExpirations(symbol)` (neutral `OptionChainContract` type in `types.ts`). Vendor names stay in the provider.
+- **`app/api/stocks/[symbol]/chain/route.ts`:** builds the chain from the live chain (one request) in parallel with the spot. If that returns nothing or fails, it falls back to the earlier quote snapshots (no OI) with the old weekly-root retry. The 15 s cache, limiter and gate are unchanged. `oiDate` is gone: the header says "OI: previous close".
+- **New `GET /api/stocks/[symbol]/chain-expiries`:** upcoming expiries for any symbol; same gate (`strategy_builder` or `option_chain`), same limiter, 6 h per-symbol cache, weekly-expiry filter for monthly-only plans.
+- **`components/stock/tabs/OptionChainTab.tsx` and `StockAnalysis.tsx`:** the tab renders even when the page has no expiries. Then, once the page has finished loading, it fetches `/chain-expiries` (only when the tab is open), shows an Expiry dropdown (nearest selected) and works as usual, builder included. When the page does have expiries nothing changes. No options found, or an error, shows a message instead of a blank tab.
+- **Open Interest tab:** not changed; it still depends on our levels data (**not checked** for a symbol without levels).
+
+**Verified**
+- `npx tsc --noEmit` clean; eslint 0 errors.
+- **Real routes** (signed in as the owner, now on a plan with `strategy_builder`): `/chain` AAPL 11-20 (94 strikes, 162 contracts with OI, 340C OI 14,648), SPY (237 strikes), SPX 10-30 (root SPXW, 487 strikes), BAC (38 strikes); no vendor names in the bodies. `/chain-expiries`: BAC 20, AAPL 23, SPX 54, unknown symbol 0, signed out 401.
+- **Real pages:** `/stock/BAC?tab=chain` (no levels): the Expiry dropdown (20 options), the chain with the OI column and "OI: previous close", changing the expiry fetched that chain, Bull Call Spread built; `/stock/AAPL?tab=chain` unchanged; 0 px overflow, no page errors. Dev shows requests twice (React StrictMode).
+- A static grep of the touched client files finds no vendor names. `npm run build` and the `.next/static` grep were **not** re-run.
+
+**Not verified**
+- The fallback to quote snapshots when the live chain is empty (not triggered).
+- A chain-only (`option_chain`, no builder) user on a no-levels symbol (the owner has the builder).
+- Behaviour at the market open and close, and when the OI is refreshed.
+- The 120/min Tradier limit under load; the chain and expiry routes share the per-user limiter.
+
+**Follow-ups:** per-day OI history would need our own daily snapshot; the Open Interest tab for symbols without levels; the CLAUDE.md vendor description was updated.
+
+---
+
+## 2026-10-29 — Option Chain: open interest column; what the contract list offers for OI history
+
+> **Superseded the same day** by the entry above: the OI now comes with the Tradier chain and the Alpaca contract-list call described under "What changed" here was removed. The findings about the contract list still stand.
+
+Requested: add an open interest column to the option chain, and explore whether Alpaca's historical option contract data has open interest for each end of day, and what its date column says.
+
+**Findings (live calls 2026-10-29, read-only)**
+- **Source:** `GET /v2/options/contracts` returns `open_interest` and `open_interest_date` per contract, with `close_price` and `close_price_date`.
+  - **Host:** it answers only on the live trading host (`api.alpaca.markets`). The paper host used for the calendar answers 401 for these keys.
+  - **One value per contract:** only the latest OI and the date it is as of. There is **no per-day history**: `as_of`, `date` and `open_interest_date` parameters are rejected (422 `invalid path`).
+  - **Not elsewhere:** the options snapshot (the chain's quote source) has no OI field (`dailyBar, latestQuote, latestTrade, minuteBar, prevDailyBar`), and option daily bars carry only `c,h,l,n,o,t,v,vw`.
+- **What the date means:** AAPL 11-20 on 10-29 had 188 contracts: 162 with OI all dated 2026-10-27, 26 with null OI and null date (no OI). Alpaca's OI dated 10-27 equals our loader's `us_opt_chg_rpt` OI at **load_dt 10-28** exactly (AAPL 16/16, SPY 69/69), the session-D−1 rule in `docs/oi-tracker.md`. It does not match load 10-29 (session 10-28) for contracts that changed, so on this morning Alpaca was one session behind our loader.
+  - So `open_interest_date` is the **session whose end-of-day OI it is**, and it was 1–2 days stale versus our own load that morning (when it refreshes during the day is **unverified**).
+- **`close_price_date`** varies per contract (last traded day), not a common date.
+- **Consequence for history:** per-day OI history can't come from Alpaca. It has to come from our own `us_opt_chg_rpt` (change report, only |Δ| ≥ 101 contracts) or from snapshotting this list daily ourselves (not built).
+- **Cost:** 1 call per expiry (more pages only past 1,000 contracts). Measured: AAPL 188 contracts 266 ms, SPY 474 in 64 ms, SPX 11-20 1,908 contracts 143 ms. Whether it counts toward the 200/min market-data limit is **unverified** (different host).
+
+**What changed**
+- **`lib/marketdata/provider/primary.ts`:** `getOptionOpenInterest(underlying, expiry)` (exported via the facade) reads the contract list on `CONTRACTS_URL` (env `ALPACA_CONTRACTS_URL`, default `https://api.alpaca.markets`), keyed by OCC symbol with `{ oi, oiDate }`, paged by 1,000, 5 s timeout, `{}` on any failure. Only GETs of the contract list are made; nothing touches the account or orders. This is the first call on the live host (the calendar deliberately uses the paper host), so it is worth knowing.
+- **`app/api/stocks/[symbol]/chain/route.ts`:** fetches OI in parallel with the snapshots and quote, merges it into each call/put as `oi`, and returns `oiDate` (the latest date seen). No weekly-root retry: SPX's list already holds the SPXW weeklies (SPX 10-30 → 974 `SPXW` contracts; the `SPXW` underlying returns none). It rides in the existing 15 s cache; a failure leaves the column empty and the chain intact.
+- **`lib/payoff/chain.ts`:** `OptQuote.oi?`, `OptionChain.oiDate?`.
+- **`components/stock/strategy/ChainTable.tsx`:** new "OI" column (Open interest), on by default, after Volume, so it is the outermost column on each side (scroll sideways or reorder in the Columns menu). A saved column layout from before gets it appended.
+- **`components/stock/tabs/OptionChainTab.tsx`:** header shows "Open interest as of {date}".
+
+**Verified**
+- `npx tsc --noEmit` clean; eslint 0 errors (2 older warnings); `node scripts/test-payoff.mjs` 23 passed.
+- The facade function against live data for AAPL, SPY, SPX (11-20 and 10-30), KO: counts, null handling and dates as listed above.
+- The cross-check against `us_opt_chg_rpt` above.
+- **UI** (temporary page deleted afterwards; the saved AAPL fixture with synthetic OI values added, so the numbers on screen are not real): the OI column and header date show on both the plain chain and with the builder, at 1440 px; a saved layout predating the column gets OI appended; 0 px overflow. 390 px was only checked for overflow on the builder page, not by eye.
+
+**Not verified**
+- The route's 200 path with real OI in a browser (no account currently has `option_chain` or `strategy_builder`).
+- That the production keys also work on the live host (same keys locally; Vercel's env not checked).
+- When Alpaca refreshes OI during the day, and whether this call counts against the rate limit.
+
+**Follow-ups:** optional daily snapshot of the contract list into a table for per-day OI history; decide whether OI should be shown next to our own loaded OI on the Open Interest tab.
+
+---
+
 ## 2026-10-29 — Option Chain tab: plain chain without the Strategy Builder (new feature `option_chain`)
 
 Requested: when the Strategy Builder is off, the Option Chain tab should still show a simple option chain. The user chose a separate admin-tickable feature for the chain over opening it to all signed-in users or the public (each load costs 1–5 market-data calls).

@@ -114,6 +114,10 @@ Two feature codes, both ticked per plan at `/admin/plans` (plans live in the DB;
 
 Both use the same `/chain` route, rate limiter (`option_chain`) and cache.
 
+**Data source:** the chain (bid, ask, last, volume, greeks, IV and **open interest**) comes from one request per expiry to the live-chain provider (`getOptionChainContracts`); quote snapshots are only a backup when it returns nothing (no OI then). OI is the previous session's close, published once a day, with no date and no history; per-contract history stays on the contract chart (Alpaca bars + our `us_opt_chg_rpt`).
+
+**Symbols without levels:** the page's expiry list comes from our levels data, so such a symbol has none. The tab then fetches `/api/stocks/[symbol]/chain-expiries` (same gate and limiter, 6 h cache) once it is opened and shows an Expiry dropdown. Level-anchored strategies fall back to their ±10% default.
+
 ## Tests
 
 `node scripts/test-payoff.mjs` covers:

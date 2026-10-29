@@ -3,7 +3,7 @@
  * e.g. SPX). Server-only. Import only from lib/marketdata/index.ts; never expose this vendor's name.
  */
 import axios, { type AxiosInstance } from 'axios';
-import type { Bar } from '../types';
+import type { Bar, OptionChainContract } from '../types';
 import type { ChartInterval } from '../intervals';
 
 const TRADIER_API_URL = process.env.TRADIER_API_URL || 'https://api.tradier.com/v1';
@@ -302,3 +302,38 @@ export async function searchSymbols(query: string): Promise<Array<{ symbol: stri
 }
 
 export default tradierClient;
+
+// ---------------------------------------------------------------------------
+// Live option chain and expiries (verified 2026-10-29: one request per expiry, no paging; SPX 1,908
+// contracts in 0.7 s; the account allows 120 requests/min). Open interest has no date and no history
+// (date / as_of parameters are ignored); it matched the previous session's close.
+// ---------------------------------------------------------------------------
+
+const chainNum = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+
+/** Every contract of one expiry with quote, greeks and open interest. Throws on HTTP failure; [] when the symbol has none. */
+export async function getOptionChainContracts(symbol: string, expiry: string): Promise<OptionChainContract[]> {
+  const res = await tradierClient.get('/markets/options/chains', { params: { symbol: symbol.toUpperCase(), expiration: expiry, greeks: true }, timeout: 8000 });
+  const raw = res.data?.options?.option;
+  const list: any[] = !raw ? [] : Array.isArray(raw) ? raw : [raw];
+  return list
+    .filter(o => (o.option_type === 'call' || o.option_type === 'put') && typeof o.strike === 'number' && typeof o.symbol === 'string')
+    .map(o => ({
+      symbol: o.symbol,
+      root: o.root_symbol ?? symbol.toUpperCase(),
+      expiry: o.expiration_date ?? expiry,
+      optType: o.option_type,
+      strike: o.strike,
+      bid: chainNum(o.bid), ask: chainNum(o.ask), last: chainNum(o.last),
+      volume: chainNum(o.volume), openInterest: chainNum(o.open_interest),
+      iv: chainNum(o.greeks?.mid_iv),
+      delta: chainNum(o.greeks?.delta), gamma: chainNum(o.greeks?.gamma), theta: chainNum(o.greeks?.theta), vega: chainNum(o.greeks?.vega),
+    }));
+}
+
+/** Listed expiry dates (ascending, all roots, so index weeklies are included). [] for a symbol with no options. Throws on HTTP failure. */
+export async function getOptionExpirations(symbol: string): Promise<string[]> {
+  const res = await tradierClient.get('/markets/options/expirations', { params: { symbol: symbol.toUpperCase(), includeAllRoots: true }, timeout: 5000 });
+  const d = res.data?.expirations?.date;
+  return (!d ? [] : Array.isArray(d) ? d : [d]).filter((x: unknown): x is string => typeof x === 'string').sort();
+}

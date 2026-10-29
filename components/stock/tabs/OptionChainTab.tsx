@@ -30,12 +30,15 @@ function age(iso: string, now: number): string {
   return m < 60 ? `${m} min old` : `${Math.floor(m / 60)} h ${m % 60} min old`;
 }
 
-export default function OptionChainTab({ symbol, selectedExpiry, expiryMode, expiries, levels, earnings, entitled, builder, loggedIn, onOpenContract }: {
+export default function OptionChainTab({ symbol, selectedExpiry: pageExpiry, expiryMode, expiries: pageExpiries, expiriesReady, levels, earnings, entitled, builder, loggedIn, onOpenContract }: {
   symbol: string;
+  /** The page's selected expiry; '' when the symbol has no levels, then the tab lists expiries itself. */
   selectedExpiry: string;
   expiryMode: 'current' | 'historical';
-  /** Upcoming expiries, nearest first. */
+  /** Upcoming expiries from the page (levels data), nearest first. */
   expiries: string[];
+  /** The page has finished loading its expiries (so an empty list really means none). */
+  expiriesReady: boolean;
   /** This app's levels for the selected expiry (strangles / condors anchor on them). */
   levels: Levels;
   earnings: EarningsSummary | null;
@@ -55,9 +58,31 @@ export default function OptionChainTab({ symbol, selectedExpiry, expiryMode, exp
   // Why a level-anchored strike moved nearer the money (lib/payoff/chain.ts resolveTemplate).
   const [pickNotes, setPickNotes] = useState<string[]>([]);
   const [now, setNow] = useState(() => Date.now());
+  // Symbols without price levels have no expiries on the page; list them from the live feed instead
+  // (/chain-expiries, one request, only once this tab is open) and let the user pick one here.
+  const [ownExpiries, setOwnExpiries] = useState<string[] | null>(null);
+  const [localExpiry, setLocalExpiry] = useState('');
+  const selectedExpiry = pageExpiry || localExpiry;
+  const expiries = pageExpiry ? pageExpiries : ownExpiries ?? [];
   const builtForRef = useRef<string | null>(null);
   const chainsRef = useRef(chains);
   chainsRef.current = chains;
+
+  useEffect(() => {
+    if (!entitled || !expiriesReady || pageExpiry || ownExpiries) return;
+    let cancelled = false;
+    fetch(`/api/stocks/${symbol}/chain-expiries`)
+      .then(res => res.json().catch(() => null).then(json => ({ res, json })))
+      .then(({ res, json }) => {
+        if (cancelled) return;
+        if (!res.ok || !json?.success) { setError(json?.message ?? json?.error ?? 'Could not load the option expiries.'); setOwnExpiries([]); return; }
+        const d: string[] = json.data.expiryDates ?? [];
+        setOwnExpiries(d);
+        setLocalExpiry(d[0] ?? '');
+      })
+      .catch(() => { if (!cancelled) { setError('Could not reach the server.'); setOwnExpiries([]); } });
+    return () => { cancelled = true; };
+  }, [entitled, expiriesReady, pageExpiry, ownExpiries, symbol]);
 
   // Clock for the "n min old" label only (no requests).
   useEffect(() => { const id = setInterval(() => setNow(Date.now()), 30_000); return () => clearInterval(id); }, []);
@@ -102,10 +127,10 @@ export default function OptionChainTab({ symbol, selectedExpiry, expiryMode, exp
 
   // First chain for an expiry: once, when it is selected (no refetch on revisit).
   useEffect(() => {
-    if (!entitled || expiryMode !== 'current' || !selectedExpiry || chainsRef.current.has(selectedExpiry)) return;
+    if (!entitled || (pageExpiry && expiryMode !== 'current') || !selectedExpiry || chainsRef.current.has(selectedExpiry)) return;
     setError(null);
     fetchChains([selectedExpiry]);
-  }, [entitled, expiryMode, selectedExpiry, fetchChains]);
+  }, [entitled, expiryMode, pageExpiry, selectedExpiry, fetchChains]);
 
   // Expiry switched with a position open: rebuild the template on the new expiry, or move
   // the legs that were on the old one to the nearest strikes of the new one.
@@ -180,8 +205,17 @@ export default function OptionChainTab({ symbol, selectedExpiry, expiryMode, exp
       </div>
     );
   }
-  if (expiryMode !== 'current') {
+  if (pageExpiry && expiryMode !== 'current') {
     return <div className="bg-white rounded-lg shadow-md p-6 text-center text-sm text-gray-500">Live quotes exist only for expiries that have not passed. Switch to a current expiry above.</div>;
+  }
+
+  if (!selectedExpiry) {
+    return (
+      <div className="bg-white rounded-lg shadow-md p-6 text-center text-sm text-gray-500">
+        {ownExpiries === null ? <span className="inline-flex items-center gap-2"><Spinner /> Loading expiries…</span>
+          : error ?? `No listed options found for ${symbol.toUpperCase()}.`}
+      </div>
+    );
   }
 
   const chain = chains.get(selectedExpiry);
@@ -204,6 +238,7 @@ export default function OptionChainTab({ symbol, selectedExpiry, expiryMode, exp
                   <span>Spot <b className="text-gray-800">{chain.spot.toFixed(2)}</b></span>
                   {near?.atmIv && <span><Term k="atm">ATM</Term> <Term k="iv">IV</Term> <b className="text-gray-800">{(near.atmIv * 100).toFixed(1)}%</b></span>}
                   <span title="Quotes are not refreshed automatically; use Refresh quotes.">Quotes as of {etTime(chain.asOf)} ET · {age(chain.asOf, now)}</span>
+                  <span title="Open interest is published once a day by the clearing house, so this is the previous session's close, not live. The data source gives no date.">OI: previous close</span>
                   {chain.root !== symbol.toUpperCase() && <span>Root {chain.root}</span>}
                 </>
               ) : busy ? <span>Loading the chain…</span> : null}
@@ -211,6 +246,15 @@ export default function OptionChainTab({ symbol, selectedExpiry, expiryMode, exp
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {!pageExpiry && ownExpiries && ownExpiries.length > 0 && (
+              <label className="flex items-center gap-1.5 text-xs text-gray-600">
+                Expiry
+                <select value={selectedExpiry} onChange={e => { setError(null); setLocalExpiry(e.target.value); }}
+                  className="border border-gray-200 rounded-md px-2 py-1 text-xs text-gray-800 bg-white">
+                  {ownExpiries.map(d => <option key={d} value={d}>{d}</option>)}
+                </select>
+              </label>
+            )}
             {busy && <Spinner />}
             <button onClick={refresh} disabled={busy || !chain}
               title={builder ? 'Re-read the chain and re-price your legs at the new mids' : 'Re-read the chain'}

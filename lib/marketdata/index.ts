@@ -8,10 +8,10 @@
  * never this file.
  *
  *  - primary  : stock/option bars and snapshots, calendar, news
- *  - fallback : symbol search, and daily/intraday bars for symbols the primary has none for
- *               (indices such as SPX; no volume)
+ *  - fallback : symbol search, the live option chain (quotes, greeks, open interest) and its expiries,
+ *               and daily/intraday bars for symbols the primary has none for (indices such as SPX; no volume)
  */
-export type { Bar, Snapshot, OptionSnapshot, CalendarRow, NewsArticle } from './types';
+export type { Bar, Snapshot, OptionSnapshot, OptionChainContract, CalendarRow, NewsArticle } from './types';
 export type { ChartInterval } from './intervals';
 export { isIntradayInterval } from './intervals';
 
@@ -43,4 +43,6 @@ export {
   easternMidnightIso,
   searchCompanies,
   searchSymbols,
+  getOptionChainContracts,
+  getOptionExpirations,
 } from './provider/fallback';

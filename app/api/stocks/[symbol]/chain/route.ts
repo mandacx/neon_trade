@@ -4,7 +4,7 @@ import { FEATURE_OPTION_CHAIN, FEATURE_STRATEGY_BUILDER, hasFeature } from '@/li
 import { expiryAllowed, WEEKLY_EXPIRY_ERROR } from '@/lib/expiryAccess';
 import { checkRateLimit, rateLimitHeaders } from '@/lib/rateLimit';
 import { resolveLimit } from '@/lib/rateLimitConfig';
-import { getFallbackQuote, getOptionChainSnapshots, getSnapshotsMulti, type OptionSnapshot } from '@/lib/marketdata';
+import { getFallbackQuote, getOptionChainContracts, getOptionChainSnapshots, getSnapshotsMulti, type OptionChainContract, type OptionSnapshot } from '@/lib/marketdata';
 import { etDateOf, getMarketState } from '@/lib/marketSession';
 import { buildQuote } from '@/lib/quote';
 import { parseOcc } from '@/lib/occ';
@@ -19,30 +19,55 @@ export const dynamic = 'force-dynamic';
 // (`option_chain`, admin-editable). The client loads it once per expiry and
 // only re-requests on "Refresh quotes"; the 15 s cache absorbs double clicks.
 // Response is vendor-neutral: strikes with call/put bid, ask, mid, last, IV,
-// greeks and volume, plus the underlying's spot.
+// greeks, volume and open interest (the previous session's close; the source gives no date), plus the
+// underlying's spot. The chain comes from one request per expiry; if that returns nothing, quote
+// snapshots are used instead (no open interest).
 
 const LIMITER = 'option_chain';
 const CACHE_MS = 15_000;
 const YMD = /^\d{4}-\d{2}-\d{2}$/;
 const cache = new Map<string, { at: number; data: OptionChain }>();
-// Index weeklies are listed under their own underlying (verified 2026-10-28: SPX returns nothing for
-// the 10-30 weekly, SPXW returns 974 contracts), so an empty index chain is retried under this root.
+// Backup source only: its snapshots list index weeklies under their own underlying (verified 2026-10-28:
+// SPX returns nothing for the 10-30 weekly, SPXW returns 974 contracts), so an empty index chain is retried
+// under this root. The live chain needs no retry (SPX 10-30 returns 974 SPXW contracts, verified 2026-10-29).
 const WEEKLY_ROOT: Record<string, string> = { SPX: 'SPXW', NDX: 'NDXP', RUT: 'RUTW', VIX: 'VIXW' };
 
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
-function toQuote(s: OptionSnapshot): OptQuote {
-  const bid = num(s.latestQuote?.bp), ask = num(s.latestQuote?.ap);
-  const last = num(s.latestTrade?.p) ?? num(s.dailyBar?.c);
-  const mid = ask !== null && ask > 0 && bid !== null && bid >= 0 && ask >= bid
-    ? Math.round(((bid + ask) / 2) * 10000) / 10000
-    : last;
-  return {
-    bid, ask, mid, last,
-    iv: num(s.impliedVolatility),
-    delta: num(s.greeks?.delta), gamma: num(s.greeks?.gamma), theta: num(s.greeks?.theta), vega: num(s.greeks?.vega),
-    vol: num(s.dailyBar?.v),
-  };
+/** Mid of a valid two-sided quote, else the last trade. */
+function midOf(bid: number | null, ask: number | null, last: number | null): number | null {
+  return ask !== null && ask > 0 && bid !== null && bid >= 0 && ask >= bid ? Math.round(((bid + ask) / 2) * 10000) / 10000 : last;
+}
+
+interface Leg { root: string; optType: 'call' | 'put'; strike: number; q: OptQuote }
+
+/** Primary source: the live chain (quote, greeks and open interest in one request per expiry). */
+function fromContracts(list: OptionChainContract[]): Leg[] {
+  return list.map(c => ({
+    root: c.root, optType: c.optType, strike: c.strike,
+    q: { bid: c.bid, ask: c.ask, mid: midOf(c.bid, c.ask, c.last), last: c.last, iv: c.iv, delta: c.delta, gamma: c.gamma, theta: c.theta, vega: c.vega, vol: c.volume, oi: c.openInterest },
+  }));
+}
+
+/** Backup source when the live chain has nothing: quote snapshots (no open interest). */
+function fromSnapshots(snaps: Record<string, OptionSnapshot>, expiry: string): Leg[] {
+  const out: Leg[] = [];
+  for (const [occ, s] of Object.entries(snaps)) {
+    const o = parseOcc(occ);
+    if (!o || o.expiry !== expiry) continue;
+    const bid = num(s.latestQuote?.bp), ask = num(s.latestQuote?.ap);
+    const last = num(s.latestTrade?.p) ?? num(s.dailyBar?.c);
+    out.push({
+      root: o.root, optType: o.optType, strike: o.strike,
+      q: {
+        bid, ask, mid: midOf(bid, ask, last), last,
+        iv: num(s.impliedVolatility),
+        delta: num(s.greeks?.delta), gamma: num(s.greeks?.gamma), theta: num(s.greeks?.theta), vega: num(s.greeks?.vega),
+        vol: num(s.dailyBar?.v),
+      },
+    });
+  }
+  return out;
 }
 
 /** Underlying price: the session-aware regular price (live when open, else last close); fallback feed for indices. */
@@ -60,22 +85,27 @@ async function spotOf(symbol: string): Promise<number | null> {
 }
 
 async function loadChain(symbol: string, expiry: string): Promise<OptionChain | null> {
-  const range = { expiryFrom: expiry, expiryTo: expiry, maxPages: 5 };
-  const [first, spot] = await Promise.all([getOptionChainSnapshots(symbol, range), spotOf(symbol)]);
-  const snaps = !Object.keys(first).length && WEEKLY_ROOT[symbol] ? await getOptionChainSnapshots(WEEKLY_ROOT[symbol], range) : first;
-  if (!spot) return null;
+  const [live, spot] = await Promise.all([
+    getOptionChainContracts(symbol, expiry).catch(err => { console.error('Error fetching option chain:', err instanceof Error ? err.message : err); return [] as OptionChainContract[]; }),
+    spotOf(symbol),
+  ]);
+  let legs = fromContracts(live);
+  if (!legs.length) {
+    const range = { expiryFrom: expiry, expiryTo: expiry, maxPages: 5 };
+    const first = await getOptionChainSnapshots(symbol, range);
+    const snaps = !Object.keys(first).length && WEEKLY_ROOT[symbol] ? await getOptionChainSnapshots(WEEKLY_ROOT[symbol], range) : first;
+    legs = fromSnapshots(snaps, expiry);
+  }
+  if (!spot || !legs.length) return null;
   // Group by OCC root: SPX lists SPX (monthly, AM-settled) and SPXW (weekly/PM) for the same date.
   const byRoot = new Map<string, Map<number, ChainRow>>();
-  for (const [occ, snap] of Object.entries(snaps)) {
-    const o = parseOcc(occ);
-    if (!o || o.expiry !== expiry) continue;
-    let rows = byRoot.get(o.root);
-    if (!rows) byRoot.set(o.root, (rows = new Map()));
-    const row = rows.get(o.strike) ?? { strike: o.strike };
-    row[o.optType] = toQuote(snap);
-    rows.set(o.strike, row);
+  for (const l of legs) {
+    let rows = byRoot.get(l.root);
+    if (!rows) byRoot.set(l.root, (rows = new Map()));
+    const row = rows.get(l.strike) ?? { strike: l.strike };
+    row[l.optType] = l.q;
+    rows.set(l.strike, row);
   }
-  if (!byRoot.size) return null;
   const [root, rows] = [...byRoot.entries()].sort((a, b) => b[1].size - a[1].size || (a[0] === symbol ? -1 : 1))[0];
   return {
     symbol, root, expiry, spot,

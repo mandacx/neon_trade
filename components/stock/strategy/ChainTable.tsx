@@ -13,7 +13,7 @@ import { fmtPct, fmtPx, fmtStrike } from './format';
 const NEAR_ROWS = 12;
 const ROW = 'h-7';
 
-type ColId = 'ltp' | 'bid' | 'mid' | 'ask' | 'chart' | 'iv' | 'delta' | 'vol' | 'gamma' | 'theta' | 'vega';
+type ColId = 'ltp' | 'bid' | 'mid' | 'ask' | 'chart' | 'iv' | 'delta' | 'vol' | 'oi' | 'gamma' | 'theta' | 'vega';
 // Listed from the strike outwards (the menu's order); calls mirror it, so the same column sits the
 // same distance from the strike on both sides.
 const COLS: Array<ColumnMeta & { id: ColId; w: number; term?: GlossaryKey; short: string }> = [
@@ -25,6 +25,7 @@ const COLS: Array<ColumnMeta & { id: ColId; w: number; term?: GlossaryKey; short
   { id: 'iv', label: 'IV', short: 'IV', term: 'iv', w: 52 },
   { id: 'delta', label: 'Delta (Δ)', short: 'Δ', term: 'delta', w: 48 },
   { id: 'vol', label: 'Volume', short: 'Vol', term: 'vol', w: 60 },
+  { id: 'oi', label: 'Open interest', short: 'OI', term: 'oi', w: 60, hint: 'Previous session close (published once a day)' },
   { id: 'gamma', label: 'Gamma (Γ)', short: 'Γ', term: 'gamma', w: 52, defaultOff: true },
   { id: 'theta', label: 'Theta (Θ)', short: 'Θ', term: 'theta', w: 52, defaultOff: true },
   { id: 'vega', label: 'Vega', short: 'Vega', term: 'vega', w: 52, defaultOff: true },
@@ -128,6 +129,7 @@ export default function ChainTable({ chain, onAdd, onOpenContract }: {
         case 'theta': body = q.theta != null ? <span className="text-gray-600">{q.theta.toFixed(2)}</span> : dash; break;
         case 'vega': body = q.vega != null ? <span className="text-gray-600">{q.vega.toFixed(2)}</span> : dash; break;
         case 'vol': body = q.vol != null ? <span className="text-gray-500">{q.vol.toLocaleString()}</span> : dash; break;
+        case 'oi': body = q.oi != null ? <span className="text-gray-700">{q.oi.toLocaleString()}</span> : dash; break;
       }
     }
     return <div key={c.id} className={`${base} ${c.id === 'chart' ? '!justify-center' : ''}`} style={style}>{body}</div>;

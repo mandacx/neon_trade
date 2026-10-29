@@ -33,6 +33,26 @@ export interface OptionSnapshot {
   impliedVolatility?: number;
 }
 
+/** One listed option contract from the live chain: quote, greeks and open interest (prior session's close). */
+export interface OptionChainContract {
+  /** OCC symbol, e.g. AAPL261120C00340000. */
+  symbol: string;
+  root: string;
+  expiry: string;
+  optType: 'call' | 'put';
+  strike: number;
+  bid: number | null;
+  ask: number | null;
+  last: number | null;
+  volume: number | null;
+  openInterest: number | null;
+  iv: number | null;
+  delta: number | null;
+  gamma: number | null;
+  theta: number | null;
+  vega: number | null;
+}
+
 /** One trading day from the exchange calendar; times are ET wall clock 'HH:MM'. */
 export interface CalendarRow { date: string; open: string; close: string; sessionOpen: string | null; sessionClose: string | null }
 
