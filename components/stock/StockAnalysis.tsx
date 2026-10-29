@@ -15,7 +15,7 @@ import OpenInterestTab from '@/components/stock/tabs/OpenInterestTab';
 import OptionChainTab from '@/components/stock/tabs/OptionChainTab';
 import { shiftDateString } from '@/components/stock/tabs/shared';
 import { useAuthContext } from '@/components/providers/AuthContextProvider';
-import { FEATURE_STRATEGY_BUILDER, hasFeature } from '@/lib/features';
+import { FEATURE_OPTION_CHAIN, FEATURE_STRATEGY_BUILDER, hasFeature } from '@/lib/features';
 import type { EarningsResult, EarningsSummary } from '@/types/earnings';
 import { LevelCalculation, ScanAlert } from '@/types/stock';
 import { getLevelColor, getLevelDisplayName, formatCurrency, formatPercentage } from '@/lib/utils';
@@ -1292,7 +1292,7 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
       tabs={[
         { id: 'levels', tone: 'green', label: 'Chart & Price Levels', title: 'Price chart with the level lines, and all seven levels, close and OI per day for the selected expiry' },
         { id: 'oi', tone: 'orange', label: 'Open Interest', title: 'Open interest trend, OI change by strike and by contract' },
-        { id: 'chain', tone: 'blue', label: 'Option Chain', title: 'Live option chain and the Strategy Builder (payoff, POP, greeks)', badge: hasFeature(authCtx.features, FEATURE_STRATEGY_BUILDER) ? undefined : 'Pro' },
+        { id: 'chain', tone: 'blue', label: 'Option Chain', title: 'Live option chain and the Strategy Builder (payoff, POP, greeks)', badge: hasFeature(authCtx.features, FEATURE_STRATEGY_BUILDER) || hasFeature(authCtx.features, FEATURE_OPTION_CHAIN) ? undefined : 'Pro' },
         { id: 'earnings', tone: 'amber', label: 'Earnings', title: 'Reported quarters: EPS and sales vs consensus', badge: earningsLocked === true ? 'Pro' : undefined },
       ]}
     />
@@ -1449,7 +1449,8 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
                     expiries={upcomingExpiries}
                     levels={builderLevels}
                     earnings={earnings}
-                    entitled={hasFeature(authCtx.features, FEATURE_STRATEGY_BUILDER)}
+                    entitled={hasFeature(authCtx.features, FEATURE_STRATEGY_BUILDER) || hasFeature(authCtx.features, FEATURE_OPTION_CHAIN)}
+                    builder={hasFeature(authCtx.features, FEATURE_STRATEGY_BUILDER)}
                     loggedIn={authCtx.loggedIn}
                     onOpenContract={(strike, optType, occRoot) => setSelectedOptContract({ strike, optType, occRoot })}
                   />

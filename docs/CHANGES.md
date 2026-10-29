@@ -7,6 +7,40 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-29 — Option Chain tab: plain chain without the Strategy Builder (new feature `option_chain`)
+
+Requested: when the Strategy Builder is off, the Option Chain tab should still show a simple option chain. The user chose a separate admin-tickable feature for the chain over opening it to all signed-in users or the public (each load costs 1–5 market-data calls).
+
+**What changed**
+- **`lib/features.ts`:** new `FEATURE_OPTION_CHAIN = 'option_chain'` ("Live Option Chain"). The builder's label is now "Option Strategy Builder (includes the live chain)". `strategy_builder` still includes the chain, so nothing changes for plans that have it.
+- **`app/api/stocks/[symbol]/chain/route.ts`:** allows either feature (401 signed out, 403 with neither, `feature: 'option_chain'` in the 403). `enabledStrategies` is read and sent only with `strategy_builder`; chain-only users get `[]`. Same limiter and cache.
+- **`components/stock/tabs/OptionChainTab.tsx`:** new `builder` prop.
+  - Without it: the title is "Option chain", the chain card is full width, there's no picker or position, and a line under the header links to `/upgrade?feature=strategy_builder`.
+  - `entitled` now means either feature.
+- **`components/stock/StockAnalysis.tsx`:** passes `entitled` (either feature) and `builder`. The tab's "Pro" badge hides with either feature.
+- **`components/stock/strategy/ChainTable.tsx`:**
+  - `onAdd` is optional; without it bid/ask are plain coloured numbers and the hint reads "Click the chart icon…".
+  - The table is capped at its own column width and centred (`maxWidth = 2 × side width + strike + gutter`), so a full-width card has no empty bands. In the builder's left third the cap never binds; below `lg`, where the chain card is full width, the table is now centred there too.
+- **Docs:** `docs/strategy-builder.md` ("Gating and plans" table, route gate), `CLAUDE.md` (tabs line).
+
+**Verified**
+- `npx tsc --noEmit` is clean; eslint on the touched files has 0 errors (the 25 warnings in `StockAnalysis.tsx` are older).
+- **Plain chain UI** (temporary dev page rendering the real `OptionChainTab` with `builder={false}`, deleted afterwards; Playwright served `/chain` from the saved AAPL 2026-11-20 fixture; 1440 and 390 px):
+  - title "Option chain", no picker, no position, one builder upgrade link;
+  - no clickable bid/ask;
+  - the chart cell opened 340 call;
+  - one chain request on open, one more on Refresh quotes;
+  - table centred at 1440 px, 0 px overflow at both widths, no page errors.
+- **Route:** 401 signed out; 403 signed in as the owner's account, which (checked read-only) currently has neither feature: no `strategy_builder`/`option_chain` overrides and no plan with `strategy_builder`. The tab correctly shows the teaser there.
+
+**Not verified**
+- The route's 200 path for a chain-only user (needs `option_chain` on a plan or a user override; no DB write was made).
+- The builder path after this change, in a browser (no account currently has `strategy_builder`). The builder branch's markup is unchanged apart from the `builder` condition around it.
+
+**Follow-up:** tick `option_chain` (and/or `strategy_builder`) for plans at `/admin/plans`.
+
+---
+
 ## 2026-10-28 — Strategy Builder: level anchors fall back near the money; live volume ranks only the latest session
 
 Requested: fix the two issues found in the signed-in verification:

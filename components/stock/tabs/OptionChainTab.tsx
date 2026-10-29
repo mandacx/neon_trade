@@ -16,7 +16,8 @@ import ChainTable from '@/components/stock/strategy/ChainTable';
 import { Spinner } from './shared';
 
 // Option Chain tab of the stock page: live chain for the selected expiry plus the
-// Strategy Builder (docs/strategy-builder.md). Pro feature `strategy_builder`.
+// Strategy Builder (docs/strategy-builder.md). Pro feature `strategy_builder`;
+// `option_chain` alone shows the chain without the builder.
 // Quotes are read once per expiry and only re-read when the user clicks
 // "Refresh quotes" — never on a timer — so a position under review doesn't move.
 
@@ -29,7 +30,7 @@ function age(iso: string, now: number): string {
   return m < 60 ? `${m} min old` : `${Math.floor(m / 60)} h ${m % 60} min old`;
 }
 
-export default function OptionChainTab({ symbol, selectedExpiry, expiryMode, expiries, levels, earnings, entitled, loggedIn, onOpenContract }: {
+export default function OptionChainTab({ symbol, selectedExpiry, expiryMode, expiries, levels, earnings, entitled, builder, loggedIn, onOpenContract }: {
   symbol: string;
   selectedExpiry: string;
   expiryMode: 'current' | 'historical';
@@ -38,7 +39,10 @@ export default function OptionChainTab({ symbol, selectedExpiry, expiryMode, exp
   /** This app's levels for the selected expiry (strangles / condors anchor on them). */
   levels: Levels;
   earnings: EarningsSummary | null;
+  /** May read the live chain (`option_chain` or `strategy_builder`). */
   entitled: boolean;
+  /** Has the Strategy Builder; without it the plain chain is shown full width, bid/ask not clickable. */
+  builder: boolean;
   loggedIn: boolean;
   onOpenContract: (strike: number, optType: 'call' | 'put', occRoot?: string) => void;
 }) {
@@ -165,6 +169,7 @@ export default function OptionChainTab({ symbol, selectedExpiry, expiryMode, exp
     return (
       <div className="bg-white rounded-lg shadow-md p-6 text-center">
         <h3 className="text-base font-bold mb-1">Live option chain &amp; Strategy Builder</h3>
+        <p className="text-sm text-gray-600 max-w-xl mx-auto mb-1">Bid, ask, mid, last, IV, greeks and volume for every strike of the selected expiry.</p>
         <p className="text-sm text-gray-600 max-w-xl mx-auto">
           Pick a market view (bullish, bearish, neutral, volatile) or any of 45 strategies, see the payoff at expiry and before it,
           probability of profit, breakevens and greeks, priced from the live chain.
@@ -191,7 +196,7 @@ export default function OptionChainTab({ symbol, selectedExpiry, expiryMode, exp
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h3 className="text-base font-bold">
-              Strategy Builder <span className="text-xs font-normal text-gray-400">{symbol.toUpperCase()} · expiry {selectedExpiry}</span>
+              {builder ? 'Strategy Builder' : 'Option chain'} <span className="text-xs font-normal text-gray-400">{symbol.toUpperCase()} · expiry {selectedExpiry}</span>
             </h3>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500 mt-0.5">
               {chain ? (
@@ -208,16 +213,29 @@ export default function OptionChainTab({ symbol, selectedExpiry, expiryMode, exp
           <div className="flex items-center gap-2">
             {busy && <Spinner />}
             <button onClick={refresh} disabled={busy || !chain}
-              title="Re-read the chain and re-price your legs at the new mids"
+              title={builder ? 'Re-read the chain and re-price your legs at the new mids' : 'Re-read the chain'}
               className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50">
               ↻ Refresh quotes
             </button>
           </div>
         </div>
         {error && <div className="mt-3 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5">{error}</div>}
+        {!builder && (
+          <p className="mt-2 text-xs text-gray-500">
+            Build strategies from this chain (payoff, probability of profit, breakevens, greeks) with the{' '}
+            <Link href="/upgrade?feature=strategy_builder" className="text-blue-600 hover:underline">Strategy Builder</Link>.
+          </p>
+        )}
       </div>
 
-      {/* Chain on the left third (sticky while the builder scrolls), builder on the right. */}
+      {!builder ? (
+        chain && (
+          <div className="bg-white rounded-lg shadow-md p-3 min-w-0">
+            <ChainTable chain={chain} onOpenContract={(strike, t) => onOpenContract(strike, t, chain.root !== symbol.toUpperCase() ? chain.root : undefined)} />
+          </div>
+        )
+      ) : (
+      /* Chain on the left third (sticky while the builder scrolls), builder on the right. */
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] items-start">
       {chain && (
         <div className="bg-white rounded-lg shadow-md p-3 min-w-0 lg:sticky lg:top-2">
@@ -247,6 +265,7 @@ export default function OptionChainTab({ symbol, selectedExpiry, expiryMode, exp
         </div>
       )}
       </div>
+      )}
     </div>
   );
 }

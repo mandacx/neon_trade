@@ -40,7 +40,8 @@ const BY_ID = new Map(COLS.map(c => [c.id, c]));
  */
 export default function ChainTable({ chain, onAdd, onOpenContract }: {
   chain: OptionChain;
-  onAdd: (right: Right, strike: number, side: 1 | -1) => void;
+  /** Omitted for the plain chain (no Strategy Builder): bid and ask are then shown, not clickable. */
+  onAdd?: (right: Right, strike: number, side: 1 | -1) => void;
   onOpenContract: (strike: number, optType: 'call' | 'put') => void;
 }) {
   const [all, setAll] = useState(false);
@@ -100,7 +101,7 @@ export default function ChainTable({ chain, onAdd, onOpenContract }: {
         case 'ask': {
           const side: 1 | -1 = c.id === 'ask' ? 1 : -1;
           const v = side === -1 ? q.bid : q.ask;
-          body = v == null || v <= 0 ? dash : (
+          body = v == null || v <= 0 ? dash : !onAdd ? <span className={side === 1 ? 'text-green-800' : 'text-red-800'}>{fmtPx(v)}</span> : (
             <button onClick={() => onAdd(right, strike, side)}
               title={`${side === 1 ? 'Buy' : 'Sell'} the ${fmtStrike(strike)} ${right === 'C' ? 'call' : 'put'} (priced at the mid)`}
               className={`px-1 py-0.5 rounded ${side === 1 ? 'hover:bg-green-600 hover:text-white text-green-800' : 'hover:bg-red-600 hover:text-white text-red-800'}`}>
@@ -141,9 +142,11 @@ export default function ChainTable({ chain, onAdd, onOpenContract }: {
   const spotLine = (i: number) => (i === firstAbove ? 'shadow-[inset_0_2px_0_0_#3b82f6]' : '');
 
   return (
-    <div>
+    // Never wider than the columns (sides + strike + scrollbar gutter + border), so a full-width card
+    // (plain chain, no builder) centres the table instead of leaving empty bands beside it.
+    <div className="mx-auto" style={{ maxWidth: sideW * 2 + 64 + 20 }}>
       <div className="flex items-center justify-between gap-2 mb-1.5">
-        <span className="text-[11px] text-gray-400">Bid sells, ask buys; positions price at the mid.</span>
+        <span className="text-[11px] text-gray-400">{onAdd ? 'Bid sells, ask buys; positions price at the mid.' : 'Click the chart icon for a contract’s price, volume and OI history.'}</span>
         <ColumnsMenu metas={COLS} {...cols.menu} />
       </div>
       <div className={`rounded border border-gray-200 text-xs ${cols.hideUntilReady}`}>

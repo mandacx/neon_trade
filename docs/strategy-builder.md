@@ -1,7 +1,7 @@
 # Stock page tabs and the Option Strategy Builder
 
 Design and runbook for the stock page tabs and the optionstrat-style
-Strategy Builder in the **Option Chain** tab (Pro feature `strategy_builder`).
+Strategy Builder in the **Option Chain** tab (Pro feature `strategy_builder`; `option_chain` alone gives the plain chain without the builder).
 The maths is a TypeScript port of the `options-alert-lab` payoff lab
 (`backend/app/payoff.py`, `backend/app/engine/strategies.py`).
 
@@ -28,7 +28,7 @@ The maths is a TypeScript port of the `options-alert-lab` payoff lab
 
 `GET /api/stocks/[symbol]/chain?expiry=YYYY-MM-DD`
 
-- **Gate:** `requireFeatureApi('strategy_builder')`. It returns 401 when signed out and 403 without the feature.
+- **Gate:** `strategy_builder` or `option_chain`. It returns 401 when signed out and 403 with neither. `enabledStrategies` is only filled for `strategy_builder` (empty for chain-only users).
   - Weekly expiries are refused for `standard_expiry_only` plans (`WEEKLY_EXPIRY_ERROR`).
   - Past expiries get a 400.
 - **Rate limit:** limiter `option_chain`, 30 requests a minute per user by default, editable at `/admin/settings`.
@@ -104,10 +104,15 @@ Users reach a template either **by view** (cards priced from the chain, with a s
 
 ## Gating and plans
 
-The feature code is `strategy_builder`. Its label in `ALL_FEATURES` is "Option Strategy Builder".
+Two feature codes, both ticked per plan at `/admin/plans` (plans live in the DB; no plan has either until then):
 
-- **Plans:** it must be ticked for a plan at `/admin/plans`; plans live in the DB, and no plan has it until then.
-- **Without the feature:** the tab shows a teaser with Sign in / Upgrade, and nothing is fetched.
+| Feature | Label in `ALL_FEATURES` | Option Chain tab shows |
+|---|---|---|
+| `strategy_builder` | "Option Strategy Builder (includes the live chain)" | chain on the left third, builder on the right; bid/ask clicks add legs |
+| `option_chain` | "Live Option Chain" | the plain chain at full width (centred, capped at its column width), bid/ask as plain numbers, the chart cell, Refresh quotes, and a one-line link to the builder upgrade |
+| neither | | a teaser with Sign in / Upgrade; nothing is fetched |
+
+Both use the same `/chain` route, rate limiter (`option_chain`) and cache.
 
 ## Tests
 

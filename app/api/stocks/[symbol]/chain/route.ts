@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireFeatureApi } from '@/lib/routeGuards';
-import { FEATURE_STRATEGY_BUILDER } from '@/lib/features';
+import { getCurrentUserContext } from '@/lib/appUsers';
+import { FEATURE_OPTION_CHAIN, FEATURE_STRATEGY_BUILDER, hasFeature } from '@/lib/features';
 import { expiryAllowed, WEEKLY_EXPIRY_ERROR } from '@/lib/expiryAccess';
 import { checkRateLimit, rateLimitHeaders } from '@/lib/rateLimit';
 import { resolveLimit } from '@/lib/rateLimitConfig';
@@ -14,7 +14,8 @@ import type { ChainRow, OptionChain, OptQuote } from '@/lib/payoff/chain';
 export const dynamic = 'force-dynamic';
 
 // Live option chain for one expiry, for the stock page's Strategy Builder
-// (docs/strategy-builder.md). Pro feature `strategy_builder`, rate limited
+// (docs/strategy-builder.md) or the plain chain. Pro feature `strategy_builder`
+// or `option_chain` (chain only, no strategy templates), rate limited
 // (`option_chain`, admin-editable). The client loads it once per expiry and
 // only re-requests on "Refresh quotes"; the 15 s cache absorbs double clicks.
 // Response is vendor-neutral: strikes with call/put bid, ask, mid, last, IV,
@@ -84,8 +85,12 @@ async function loadChain(symbol: string, expiry: string): Promise<OptionChain | 
 }
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ symbol: string }> }) {
-  const { ctx, blocked } = await requireFeatureApi(FEATURE_STRATEGY_BUILDER);
-  if (blocked) return blocked;
+  const ctx = await getCurrentUserContext();
+  if (!ctx.loggedIn) return NextResponse.json({ success: false, error: 'Login required' }, { status: 401 });
+  const builder = hasFeature(ctx.features, FEATURE_STRATEGY_BUILDER);
+  if (!builder && !hasFeature(ctx.features, FEATURE_OPTION_CHAIN)) {
+    return NextResponse.json({ success: false, error: 'Upgrade required', feature: FEATURE_OPTION_CHAIN }, { status: 403 });
+  }
 
   const symbol = (await params).symbol.toUpperCase();
   if (!/^[A-Z][A-Z0-9.\-]{0,9}$/.test(symbol)) return NextResponse.json({ success: false, error: 'Invalid symbol' }, { status: 400 });
@@ -116,7 +121,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         cache.set(key, { at: Date.now(), data: chain });
       }
     }
-    const enabledStrategies = await enabledStrategyIds();
+    // Templates only matter to the builder; plain-chain users get none.
+    const enabledStrategies = builder ? await enabledStrategyIds() : [];
     if (!chain) {
       return NextResponse.json({ success: true, data: null, enabledStrategies, message: `No live option chain for ${symbol} on ${expiry}.` });
     }
