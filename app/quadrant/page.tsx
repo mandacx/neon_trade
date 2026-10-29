@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, Suspense } from 'react';
 import EarningsBadgeCell from '@/components/ui/EarningsBadgeCell';
 import { EarningsRangeInputs } from '@/components/watchlists/watchlistShared';
 import { EARNINGS_FILTER_OPTIONS } from '@/lib/earningsFilter';
+import { LEVEL_COMPARE_OPTIONS } from '@/lib/levelCompare';
 import { useSearchParams } from 'next/navigation';
 import QuadrantChart from '@/components/charts/QuadrantChart';
 import Header from '@/components/layout/Header';
@@ -91,6 +92,7 @@ function QuadrantPageInner() {
   const [marketCapTier, setMarketCapTier] = useState(searchParams.get('marketCapTier') || '');
   const [indexCode, setIndexCode] = useState(searchParams.get('index') || '');
   const [watchlistId, setWatchlistId] = useState(searchParams.get('watchlist') || '');
+  const [levelCompare, setLevelCompare] = useState(searchParams.get('levelCompare') || '');
   // Pro earnings filter: any EarningsFilter value or 'exclude' (see /api/quadrant/data).
   const [earningsEnabled, setEarningsEnabled] = useState(false);
   const [earningsFilter, setEarningsFilter] = useState(searchParams.get('earnings') || '');
@@ -121,7 +123,7 @@ function QuadrantPageInner() {
 
   useEffect(() => {
     if (!tradeDate || !expiryDate) return;
-    const fetchKey = [tradeDate, expiryDate, sector, industry, marketCapTier, indexCode, watchlistId, earningsFilter, earningsFrom, earningsTo].join('|');
+    const fetchKey = [tradeDate, expiryDate, sector, industry, marketCapTier, indexCode, watchlistId, levelCompare, earningsFilter, earningsFrom, earningsTo].join('|');
     const silent = refreshTick > 0 && lastKeyRef.current === fetchKey;
     lastKeyRef.current = fetchKey;
     const fetchData = async () => {
@@ -133,6 +135,7 @@ function QuadrantPageInner() {
         if (marketCapTier) params.set('marketCapTier', marketCapTier);
         if (indexCode) params.set('index', indexCode);
         if (watchlistId) params.set('watchlist', watchlistId);
+        if (levelCompare) params.set('levelCompare', levelCompare);
         if (earningsFilter) params.set('earnings', earningsFilter);
         if (earningsFilter === 'range') {
           if (earningsFrom) params.set('earningsFrom', earningsFrom);
@@ -155,7 +158,7 @@ function QuadrantPageInner() {
       }
     };
     fetchData();
-  }, [tradeDate, expiryDate, sector, industry, marketCapTier, indexCode, watchlistId, earningsFilter, earningsFrom, earningsTo, refreshTick]);
+  }, [tradeDate, expiryDate, sector, industry, marketCapTier, indexCode, watchlistId, levelCompare, earningsFilter, earningsFrom, earningsTo, refreshTick]);
 
   // Latest load date only: re-read on the market's rhythm (past dates never change).
   useEffect(() => {
@@ -182,7 +185,7 @@ function QuadrantPageInner() {
     || (filterOptions.marketCapTiers?.length ?? 0) > 0
     || (filterOptions.indices?.length ?? 0) > 0;
 
-  const hasActiveFilters = !!(sector || industry || marketCapTier || indexCode || watchlistId || earningsFilter);
+  const hasActiveFilters = !!(sector || industry || marketCapTier || indexCode || watchlistId || levelCompare || earningsFilter);
 
   const selectClass = "px-2 py-1.5 border border-gray-200 rounded-md text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white max-w-[180px]";
   const labelClass = "block text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-0.5";
@@ -304,6 +307,12 @@ function QuadrantPageInner() {
                       </select>
                     </div>
                   )}
+                  <div>
+                    <label className={labelClass} title="Compares the Put/Call Int, Put High, Call Low and Call Int levels. Stocks missing a needed level are excluded.">Level compare</label>
+                    <select value={levelCompare} onChange={e => setLevelCompare(e.target.value)} className={selectClass}>
+                      {LEVEL_COMPARE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                  </div>
                   {earningsEnabled && (
                     <div>
                       <label className={labelClass}>Earnings</label>
@@ -322,7 +331,7 @@ function QuadrantPageInner() {
                   {hasActiveFilters && (
                     <div className="flex items-end pb-0.5">
                       <button
-                        onClick={() => { setSector(''); setIndustry(''); setMarketCapTier(''); setIndexCode(''); setWatchlistId(''); setEarningsFilter(''); setEarningsFrom(''); setEarningsTo(''); }}
+                        onClick={() => { setSector(''); setIndustry(''); setMarketCapTier(''); setIndexCode(''); setWatchlistId(''); setLevelCompare(''); setEarningsFilter(''); setEarningsFrom(''); setEarningsTo(''); }}
                         className="px-2.5 py-1.5 text-xs text-gray-500 border border-gray-200 rounded-md hover:bg-gray-50"
                       >
                         Clear

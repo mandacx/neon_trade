@@ -10,6 +10,7 @@ import { FEATURE_EARNINGS, FEATURE_QUADRANT, FEATURE_WATCHLISTS, hasFeature } fr
 import { earningsBadge, getEarningsSummary, todayET } from '@/lib/earnings';
 import { EARNINGS_FILTER_OPTIONS, earningsFilterMatches, type EarningsFilter } from '@/lib/earningsFilter';
 import { getWatchlistsForUser, getWatchlistSymbols } from '@/lib/watchlists';
+import { isLevelCompare, levelCompareMatches } from '@/lib/levelCompare';
 import { expiryAllowed, filterByExpiry, filterExpiries, WEEKLY_EXPIRY_ERROR } from '@/lib/expiryAccess';
 
 export async function GET(request: NextRequest) {
@@ -36,6 +37,9 @@ export async function GET(request: NextRequest) {
     const rawEarnings = earningsEnabled ? searchParams.get('earnings') : null;
     // Unknown values are ignored rather than filtering everything out.
     const earningsFilter = rawEarnings === 'exclude' || EARNINGS_FILTER_OPTIONS.some(o => o.value === rawEarnings) ? rawEarnings : null;
+    // Put/Call Int vs Put High / Call Low (lib/levelCompare.ts); unknown values are ignored.
+    const rawCompare = searchParams.get('levelCompare');
+    const levelCompare = isLevelCompare(rawCompare) ? rawCompare : null;
     const isoDate = (v: string | null) => (v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null);
     const earningsFrom = isoDate(searchParams.get('earningsFrom'));
     const earningsTo = isoDate(searchParams.get('earningsTo'));
@@ -150,6 +154,15 @@ export async function GET(request: NextRequest) {
     if (watchlistSymbols) {
       const allowed = new Set(watchlistSymbols);
       filteredStocks = filteredStocks.filter(stock => allowed.has(stock.symbol));
+    }
+
+    // Put/Call Int against Put High / Call Low (and Put High against Call Int), on the levels' own prices (no reference price involved).
+    if (levelCompare) {
+      const raw = new Map(stocksData.map(d => [`${d.SYMBOL}|${d.EXPIRY_DT}`, d]));
+      filteredStocks = filteredStocks.filter(stock => {
+        const d = raw.get(`${stock.symbol}|${stock.expiryDate}`);
+        return !!d && levelCompareMatches(levelCompare, d.PUT_CALL_INT, d.put_HIGH, d.call_low, d.CALL_INT);
+      });
     }
 
     // Filter by threshold

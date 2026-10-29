@@ -7,6 +7,24 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-29 — Quadrant: Put/Call Int vs Put High / Call Low filter
+
+Requested: filters for Put/Call Int above both Put High and Call Low, below both, below Put High, and above Call Low.
+
+**What changed**
+- `lib/levelCompare.ts` (new, pure): the four options and `levelCompareMatches`. "Both" means strictly greater / less than each of the two levels. A level of 0 means no data (CLAUDE.md), so a row missing any level the test needs never matches.
+- `app/api/quadrant/data/route.ts`: new `levelCompare` param (unknown values ignored), applied on the raw level prices (`comb_int`, `put_high`, `call_low`) of each row before the proximity threshold and before levels are withheld for delayed viewers. No reference price is involved.
+- `app/quadrant/page.tsx`: a "Put/Call Int vs" dropdown in Filters; it counts toward the Active chip and is cleared by Clear. Not stored in the URL beyond the initial `?levelCompare=` read.
+
+**Verified**
+- Type check clean.
+- Live route (signed in, 2026-10-29): for expiry 2026-12-18 the API counts (above both 239, below both 83, below Put High 282, above Call Low 440 of 658) equal a direct SQL count of `eod_usmkts_price`; expiry 2026-10-29 (6 stocks) gave 1 / 3 / 3 / 1. An unknown value returns everything.
+- Browser: the dropdown has 5 options, picking one changes "Showing X of Y" (6 -> 3), Clear restores it, no page errors.
+
+**Added later the same day:** a fifth option, "Put High above Call Int" (`putHighAboveCallInt`; needs both levels > 0; `levelCompareMatches` gained a `callInt` argument). The dropdown label is now "Level compare". Verified: API count for expiry 2026-12-18 = 72 of 658, equal to the direct SQL count; type check clean; in the browser the dropdown has 6 options and the 6-stock expiry shows 0 (not cross-checked in SQL).
+
+**Not verified:** the combination with the other filters (watchlist, earnings) and a past trade date in the browser; the "all levels 100%" pre-filter can drop a row the SQL count includes (counts matched on the two expiries checked).
+
 ## 2026-10-29 — Open Interest tab: message for stocks without levels
 
 **What changed**
