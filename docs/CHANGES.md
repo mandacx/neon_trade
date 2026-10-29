@@ -7,6 +7,30 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-29 — Earnings page: table scrolls inside a fixed-height box, header stays put
+
+Requested: a vertical scroll bar on the earnings table and a fixed table size so the page height stays roughly constant.
+
+**What changed** (`app/earnings/page.tsx`)
+- The table's container is now `overflow-auto` with `max-h-[calc(100vh-14rem)]` and `min-h-[24rem]`: long lists scroll inside the box; the min height keeps the page from collapsing while loading or when filters match few rows.
+- The header row is sticky. `ColRow` forces `position: relative` on header cells whose class has no `sticky`, so `sticky` is in the `th` class itself, not only in a `[&_th]:sticky` selector.
+
+**Verified** (signed in, 299 rows): at 1440x900 the box is 674 px high with 9,902 px of content; at 1920x1080 854 px. After scrolling the box 400 px the header cells stay at the top (offset 1 px before and after); no horizontal page overflow; no page errors; type check clean.
+
+**Not verified:** phone width; the exact page height with very few rows (it relies on the 24 rem minimum).
+
+## 2026-10-29 — Quadrant stock tooltip: levels highest first, plus Put High / Call Low
+
+Requested: in the quadrant's stock info box, order the levels from Call High down to Put Low and add the alt levels (Put High, Call Low).
+
+**What changed**
+- `app/api/quadrant/data/route.ts`: each stock gets `altLevels` (`put_high`, `call_low`, price and % distance from the same reference price as the other levels). A level of 0 (no data) is left out. They never take part in the closest-level / ladder logic. Withheld (delayed) viewers get `altLevels: []` like `levels`.
+- `types/stock.ts`: optional `QuadrantStock.altLevels`. `components/charts/QuadrantChart.tsx`: tooltip lists the five levels reversed (Call High, Call Int, Put/Call Int, Put Int, Put Low), then an "Alt levels" block. The chart is shared with the scan-alerts pages, which have no `altLevels` and show no alt block.
+
+**Verified:** type check clean; route returns `altLevels` for LMT (Put High 601.12, Call Low 586.27); in the browser (signed in) hovering a dot shows Call High to Put Low then Alt levels (Put High, Call Low), no page errors.
+
+**Not verified:** the scan-alerts pages' tooltips (unchanged except the reversed order, which they also get); a delayed-plan viewer.
+
 ## 2026-10-29 — Quadrant: Put/Call Int vs Put High / Call Low filter
 
 Requested: filters for Put/Call Int above both Put High and Call Low, below both, below Put High, and above Call Low.

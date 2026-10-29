@@ -65,6 +65,8 @@ export interface QuadrantStock {
   tradeDate: string;
   expiryDate?: string;
   levels: LevelCalculation[];
+  /** Put High / Call Low (quadrant tooltip only; absent where a level has no data). */
+  altLevels?: { name: 'put_high' | 'call_low'; price: number; value: number }[];
   closestLevel: string;
   closestValue: number;
   sector?: string | null;

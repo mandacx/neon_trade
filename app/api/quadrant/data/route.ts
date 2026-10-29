@@ -126,6 +126,14 @@ export async function GET(request: NextRequest) {
           value: l.value,
           price: l.price,
         })),
+        // Put High / Call Low: shown in the stock tooltip only; they never decide the closest level.
+        // 0 = no data, so such a level is left out.
+        altLevels: ([['put_high', data.put_HIGH], ['call_low', data.call_low]] as const)
+          .filter(([, price]) => price > 0)
+          .map(([name, price]) => ({
+            name, price,
+            value: (refPrice ?? data.CLOSE) ? ((refPrice ?? data.CLOSE) - price) / (refPrice ?? data.CLOSE) : 0,
+          })),
         closestLevel: closest.name,
         closestValue: closest.value,
       };
@@ -193,7 +201,7 @@ export async function GET(request: NextRequest) {
         const withheld = gate.withheld(s.tradeDate);
         return {
           ...s,
-          ...(withheld ? { levels: [] } : {}),
+          ...(withheld ? { levels: [], altLevels: [] } : {}),
           ...(earningsMap ? { earnings: earningsBadge(earningsMap.get(s.symbol), s.expiryDate) } : {}),
         };
       })

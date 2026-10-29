@@ -152,6 +152,7 @@ export default function QuadrantChart({ data, onStockClick, height = 600, title 
           refSource: stock.refSource,
           closestLevel: stock.closestLevel,
           levels: stock.levels,
+          altLevels: stock.altLevels,
           tradeDate: stock.tradeDate,
           expiryDate: stock.expiryDate,
           sector: (stock as any).sector,
@@ -369,7 +370,8 @@ export default function QuadrantChart({ data, onStockClick, height = 600, title 
             </span>
           </p>
           <div className="text-xs space-y-1">
-            {d.levels.map((level: any) => (
+            {/* Highest first: Call High down to Put Low, then the alt levels. */}
+            {[...d.levels].reverse().map((level: any) => (
               <div key={level.name} className="flex justify-between gap-4">
                 <span style={{ color: getLevelColor(level.name) }}>{getLevelDisplayName(level.name)}</span>
                 <div className="flex gap-2 text-right">
@@ -378,6 +380,20 @@ export default function QuadrantChart({ data, onStockClick, height = 600, title 
                 </div>
               </div>
             ))}
+            {d.altLevels?.length > 0 && (
+              <>
+                <p className="text-[10px] uppercase tracking-wide text-gray-400 pt-1 mt-1 border-t border-gray-100">Alt levels</p>
+                {d.altLevels.map((level: any) => (
+                  <div key={level.name} className="flex justify-between gap-4">
+                    <span style={{ color: getLevelColor(level.name) }}>{getLevelDisplayName(level.name)}</span>
+                    <div className="flex gap-2 text-right">
+                      <span className="font-semibold">{formatCurrency(level.price)}</span>
+                      <span className="text-gray-500">{formatPercentage(level.value)}</span>
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
           </div>
         </div>
       );

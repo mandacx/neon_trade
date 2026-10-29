@@ -251,7 +251,8 @@ export default function EarningsPage() {
   const showExt = sorted.some(r => r.ext);
   const openChart = (symbol: string) => window.open(`/stock/${encodeURIComponent(symbol)}`, '_blank', 'noopener,noreferrer');
   const periodLabel = mode === 'custom' ? `${from} to ${to}` : `${mode === 'upcoming' ? 'Next' : 'Past'} ${days} day${days === 1 ? '' : 's'}`;
-  const th = 'px-3 py-2 text-[11px] font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap';
+  // `sticky` is also needed in the class itself: ColRow forces position:relative on header cells without it.
+  const th = 'sticky px-3 py-2 text-[11px] font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap';
   const td = 'px-3 py-1 whitespace-nowrap';
 
   const sortHead = (label: string, k: SortKey, right = true) => <SortHeader label={label} k={k} sortKey={sortKey} dir={sortDir} onSort={toggleSort} right={right} />;
@@ -511,7 +512,7 @@ export default function EarningsPage() {
           </button>
           <ColumnsMenu metas={EARNINGS_COLUMNS} {...cols.menu} notes={showExt ? undefined : { ext: 'no after-hours prints right now' }} />
         </div>
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-x-auto">
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-auto max-h-[calc(100vh-14rem)] min-h-[24rem]">
           {loading || !cols.ready ? (
             <div className="p-10 text-center text-sm text-gray-400">
               <div className="inline-block animate-spin h-4 w-4 border-2 border-blue-600 border-t-transparent rounded-full mr-2 align-middle" />
@@ -523,7 +524,7 @@ export default function EarningsPage() {
             <div className="p-10 text-center text-sm text-gray-400">No reports match these dates and filters.</div>
           ) : (
             <table className="w-full text-sm">
-              <thead className="bg-gray-50 border-b border-gray-200">
+              <thead className="[&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-gray-50 [&_th]:shadow-[inset_0_-1px_0_0_#e5e7eb]">
                 <ColRow layout={cols.layout} header className="text-left">
                   {shownCols.map(id => <th key={id} data-col={id} className={`${th}${colDefs[id].right ? ' text-right' : ''}`}>{colDefs[id].head}</th>)}
                 </ColRow>
