@@ -7,6 +7,15 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-29 — Open Interest tab: message for stocks without levels
+
+**What changed**
+- `components/stock/StockAnalysis.tsx`: the Open Interest tab only mounted when an expiry was selected, so for stocks with no levels data (no expiries) it was blank. It now shows "Open interest change for this stock is not available." ("Loading…" while the page is still loading).
+
+**Verified:** type check clean; in the browser (signed in) BAC (no levels) shows the message, AAPL still shows the OI tables.
+
+**Not verified:** whether the message shows for a symbol that has levels but no OI-change rows (that case already shows the in-table empty text).
+
 ## 2026-10-29 — Option chain on the live-chain source (quotes, greeks, OI in one call); chain for symbols without levels
 
 Requested: after comparing the two feeds, build the Option Chain tab on Tradier (quotes, greeks, open interest), fix the blank tab for stocks that aren't in our levels, and keep contract-level history as it is (price bars from Alpaca, OI changes from our `us_opt_chg_rpt`, when present).

@@ -1430,6 +1430,11 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
                   />
                 </div>
               )}
+              {visitedTabs.has('oi') && !selectedExpiry && (
+                <div hidden={tab !== 'oi'} className="bg-white rounded-lg shadow-md p-6 text-center text-sm text-gray-500">
+                  {isLoading ? 'Loading…' : 'Open interest change for this stock is not available.'}
+                </div>
+              )}
               {visitedTabs.has('oi') && selectedExpiry && (
                 <div hidden={tab !== 'oi'}>
                   <OpenInterestTab
