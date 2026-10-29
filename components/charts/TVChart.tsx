@@ -103,6 +103,11 @@ interface TVChartProps {
   // Rendered under the chips in the symbol block — expiry/trade dates, the
   // closest-level analysis and the section jump buttons.
   headerBelow?: ReactNode;
+  // Rendered between the header and the chart (not while enlarged) — the stock page's tab bar.
+  afterHeader?: ReactNode;
+  // Hide the chart and level chips but keep the header (the stock page's other tabs). The chart
+  // stays mounted, so its zoom and loaded data survive; the ResizeObserver ignores the zero width.
+  chartHidden?: boolean;
   // Rendered at the very end of the chart toolbar, after the enlarge button —
   // the page's collapse control for the whole block.
   toolbarEnd?: ReactNode;
@@ -148,6 +153,8 @@ export default function TVChart({
   currentPrice,
   headerExtra,
   topAside,
+  afterHeader,
+  chartHidden = false,
   headerBelow,
   toolbarEnd,
   dayChange,
@@ -1297,12 +1304,15 @@ export default function TVChart({
             )}
             {headerBelow}
           </div>
-        {topAside && <div className="min-w-0 flex-1 flex justify-end">{topAside}</div>}
+        {/* basis-80: wraps under the quote on phones instead of squeezing beside it. */}
+        {topAside && <div className="min-w-0 flex-1 basis-80 flex justify-end">{topAside}</div>}
       </div>
+
+      {!isEnlarged && afterHeader}
 
       {/* `lg:flex-1` rather than plain `flex-1` because on mobile this row is a
           column, where flex-1's 0% basis would collapse the chart's fixed height. */}
-      <div className={`flex flex-col lg:flex-row gap-4 items-stretch ${isEnlarged ? 'flex-1 min-h-0' : ''}`}>
+      <div className={`${chartHidden ? 'hidden' : 'flex'} flex-col lg:flex-row gap-4 items-stretch ${isEnlarged ? 'flex-1 min-h-0' : ''}`}>
       <div
         ref={chartContainerRef}
         className={`relative w-full lg:flex-1 lg:min-w-0 bg-white rounded-lg border border-gray-200 shadow-sm ${isEnlarged ? 'min-h-0' : ''}`}
@@ -1457,7 +1467,7 @@ export default function TVChart({
 
       </div>
 
-      {levels.length > 0 && (
+      {levels.length > 0 && !chartHidden && (
         <div className="mt-4 flex flex-wrap items-center gap-2">
           {['call_high', 'call_int', 'put_call_int', 'put_int', 'put_low'].map(name => {
             const level = levels.find(l => l.name === name);

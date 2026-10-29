@@ -5,6 +5,7 @@ import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAx
 import Modal from '@/components/ui/Modal';
 import OptionContractModal from '@/components/stock/OptionContractModal';
 import DataTable, { type Column } from '@/components/oi/DataTable';
+import LiveVolumeTable, { type LiveOption } from '@/components/oi/LiveVolumeTable';
 import {
   ExpiryCell, HintBadge, Money, Segmented, SignedCount, Spinner, StrategyList, TrackForm, TypeBadge, VolToChg,
   fmtExp, fmtStrike, inputClass, labelClass, strategyToLegs, type TrackLegInput,
@@ -12,28 +13,19 @@ import {
 import { fmtCount, fmtMoneyCompact, fmtSigned } from '@/lib/format';
 import type { OiContractRow, OiGroupRow, OiSummary, StrategyCandidate } from '@/types/oiTracker';
 
-interface LiveOption {
-  contract: string; vol: number | null; barDate: string | null; prevVol: number | null; last: number | null;
-  bid: number | null; ask: number | null; iv: number | null; delta: number | null; gamma: number | null; theta: number | null;
-}
 interface StockData {
   symbol: string; from: string; to: string; loadDates: string[]; summary: OiSummary;
   volumeCoverage: { loads: number; withVolume: number };
   contracts: OiContractRow[]; truncated: boolean; byExpiry: OiGroupRow[]; byStrike: OiGroupRow[]; byDate: OiGroupRow[];
   fullOi: { tradeDate: string | null; rows: Array<{ expiry: string; callOi: number; putOi: number }> };
   strategies: StrategyCandidate[]; tol: number; minLeg: number;
-  live: { contracts: Record<string, LiveOption>; top: LiveOption[]; count: number } | null;
+  live: { contracts: Record<string, LiveOption>; top: LiveOption[]; count: number; session: string | null; stale: number } | null;
   quote: { price: number | null; prevClose: number | null } | null;
 }
 type Row = OiContractRow & { live: LiveOption | null };
 type Tab = 'contracts' | 'ladder' | 'expiries' | 'timeline' | 'strategies' | 'live';
 
 const RANGES: Array<[string, string]> = [['1', '1D'], ['5', '5D'], ['10', '10D'], ['20', '20D'], ['60', '60D']];
-
-function parseOcc(c: string) {
-  const m = /^([A-Z][A-Z0-9.]*?)(\d{2})(\d{2})(\d{2})([CP])(\d{8})$/.exec(c);
-  return m ? { expiry: `20${m[2]}-${m[3]}-${m[4]}`, optType: m[5] === 'C' ? 'call' as const : 'put' as const, strike: Number(m[6]) / 1000 } : null;
-}
 
 export default function StockOiModal({ symbol, loadDates, to, initialRange = '1', onClose, onTracked }: {
   symbol: string;
@@ -138,19 +130,6 @@ export default function StockOiModal({ symbol, loadDates, to, initialRange = '1'
   const ladderMax = Math.max(1, ...ladder.flatMap(l => [Math.abs(l.callChg), Math.abs(l.putChg)]));
   const nearestStrike = close == null || ladder.length === 0 ? null : ladder.reduce((b, l) => (Math.abs(l.strike - close) < Math.abs(b.strike - close) ? l : b)).strike;
 
-  const liveTopCols: Column<LiveOption>[] = [
-    { key: 'contract', label: 'Contract', type: 'text', value: r => r.contract, render: r => {
-      const o = parseOcc(r.contract);
-      return o ? <span className="flex items-center gap-1.5"><ExpiryCell expiry={o.expiry} /><b>{fmtStrike(o.strike)}</b><TypeBadge t={o.optType} /></span> : r.contract;
-    } },
-    { key: 'vol', label: 'Volume', type: 'number', value: r => r.vol, render: r => <b>{(r.vol ?? 0).toLocaleString()}</b> },
-    { key: 'prevVol', label: 'Prev vol', type: 'number', value: r => r.prevVol, render: r => (r.prevVol ?? 0).toLocaleString() },
-    { key: 'x', label: 'Vol ×', type: 'number', value: r => (r.prevVol ? (r.vol ?? 0) / r.prevVol : null), render: r => (r.prevVol ? `${((r.vol ?? 0) / r.prevVol).toFixed(1)}×` : '—'), title: 'Latest session volume / the session before' },
-    { key: 'last', label: 'Last', type: 'number', value: r => r.last, render: r => r.last?.toFixed(2) ?? '—' },
-    { key: 'iv', label: 'IV', type: 'number', value: r => r.iv, render: r => (r.iv == null ? '—' : `${(r.iv * 100).toFixed(0)}%`) },
-    { key: 'delta', label: 'Δ', type: 'number', value: r => r.delta, render: r => r.delta?.toFixed(2) ?? '—' },
-    { key: 'barDate', label: 'Session', type: 'date', value: r => r.barDate },
-  ];
 
   const s = data?.summary;
   const chgPct = data?.quote?.price != null && data.quote.prevClose ? ((data.quote.price - data.quote.prevClose) / data.quote.prevClose) * 100 : null;
@@ -278,8 +257,7 @@ export default function StockOiModal({ symbol, loadDates, to, initialRange = '1'
                 </div>
               )}
               {tab === 'live' && data.live && (
-                <DataTable tableId="oiStockLive" rows={data.live.top} columns={liveTopCols} rowKey={r => r.contract} initialSort={{ key: 'vol', dir: 'desc' }} maxHeight="60vh"
-                  csvName={`${symbol}-live-volume`} toolbar={<span className="text-[11px] text-gray-400">Top 100 by latest session volume, of {data.live.count.toLocaleString()} live contracts</span>} />
+                <LiveVolumeTable symbol={symbol} rows={data.live.top} count={data.live.count} session={data.live.session} stale={data.live.stale} />
               )}
             </>
           )}

@@ -39,6 +39,7 @@ export type { DailyClose, PacedBarsResult } from './provider/primary';
 
 export {
   getBarsForChart as getFallbackBars,
+  getQuote as getFallbackQuote,
   easternMidnightIso,
   searchCompanies,
   searchSymbols,

@@ -34,6 +34,7 @@ export const TABLE_IDS = [
   'stockEarnings',
   'stockPriceHistory',
   'stockOptionChain',
+  'stockChain',
   'oiFlowContract',
   'oiFlowUnderlying',
   'oiFlowExpiry',

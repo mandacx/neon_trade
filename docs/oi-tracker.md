@@ -181,7 +181,10 @@ Controls: a period card (load date, range 1/5/10/20/60 loads or custom), the fil
   - **Expiries:** including total OI from the levels table.
   - **Timeline:** opened/closed per day.
   - **Strategies**
-  - **Live volume:** top 100 contracts by the latest session's volume, with the change against the previous session.
+  - **Live volume:** top 100 contracts by volume in the latest session, with the change against the previous session.
+    - Only bars from that session are ranked (`topBySessionVolume` in `lib/oiLive.ts`). A snapshot's daily bar is the contract's last *traded* session, so quiet contracts carry older bars.
+    - The toolbar names the session and how many contracts were left out.
+    - The same table (`components/oi/LiveVolumeTable.tsx`) is on the stock page's Open Interest tab, via `/api/oi-tracker/live/[symbol]` (top 200, 30 s cache).
 - A contract row opens the existing `OptionContractModal` (OI history and bars).
 - "Track" opens `TrackForm` (`components/oi/oiShared.tsx`).
 

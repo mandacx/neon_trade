@@ -146,6 +146,19 @@ export function catalogTradeDates(source: CatalogSource, limit: number, fallback
   }, fallback);
 }
 
+/** Most recent `limit` trade dates for a source on or before `upTo`, newest first. */
+export function catalogTradeDatesUpTo(source: CatalogSource, upTo: string, limit: number, fallback: () => Promise<string[]>): Promise<string[]> {
+  return withFallback(async () => {
+    const rows = await sql`
+      SELECT trade_date::text AS d FROM public.nt_market_dates
+      WHERE source = ${source} AND trade_date <= ${upTo}::date
+      ORDER BY trade_date DESC
+      LIMIT ${limit}
+    `;
+    return rows.map((r: any) => r.d as string);
+  }, fallback);
+}
+
 /**
  * Distinct expiries for a source. `symbols` narrows to those symbols;
  * `when` picks unexpired (ascending) or already-expired (descending) relative

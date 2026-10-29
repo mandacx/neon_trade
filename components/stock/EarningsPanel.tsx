@@ -95,11 +95,11 @@ const HISTORY_COLUMNS: ColumnMeta[] = [
   { id: 'salesResult', label: 'Sales result', hint: 'Beat / miss / in-line' },
 ];
 
-export function EarningsHistoryTable({ history, loading }: { history: EarningsResult[] | null; loading: boolean }) {
+export function EarningsHistoryTable({ history, loading, className = 'mt-6' }: { history: EarningsResult[] | null; loading: boolean; className?: string }) {
   const cols = useColumnPrefs('stockEarnings', HISTORY_COLUMNS);
   const show = (id: string) => cols.isShown(id);
   return (
-    <div className="mt-6 bg-white rounded-lg shadow-md p-4">
+    <div className={`${className} bg-white rounded-lg shadow-md p-4`}>
       <div className="flex items-start justify-between gap-3 mb-3">
         <div>
           <h2 className="text-lg font-semibold text-gray-900 mb-1">Earnings History</h2>

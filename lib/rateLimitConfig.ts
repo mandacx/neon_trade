@@ -58,6 +58,14 @@ export const LIMITERS: LimiterDef[] = [
     standard: 120,
     entitled: null,
   },
+  {
+    name: 'option_chain',
+    label: 'Option chain requests',
+    description: 'Live option chain for the Strategy Builder on the stock page: one per expiry opened and one per "Refresh quotes" click (Pro-only, so one tier).',
+    windowSeconds: 60,
+    standard: 30,
+    entitled: null,
+  },
 ];
 
 export const RATE_LIMITS_KEY = 'rate_limits';

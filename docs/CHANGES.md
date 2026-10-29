@@ -7,6 +7,403 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-28 — Strategy Builder: level anchors fall back near the money; live volume ranks only the latest session
+
+Requested: fix the two issues found in the signed-in verification:
+- level-anchored strategies fall back to strikes near the money;
+- live volume ranks only the latest session.
+
+**What changed**
+- **`lib/payoff/chain.ts`:**
+  - `resolveTemplate`: a `call_high` / `put_low` anchor whose option mid is below the new `minAnchorPremium(spot)` (the larger of $0.05 and 0.1% of spot) walks toward the money until an option has that premium. It stops at the last strike before spot.
+  - Anchors are computed once per expiry + right + anchor, so a condor's wings keep their 1-strike spacing from the moved short strike.
+  - `ResolveResult` gains `notes` ("Put Low (176.38) is too far out for 2026-10-30: its puts have no premium, so the strike moved nearer the money to 335.").
+  - Templates using level anchors: Short Strangle, Iron Condor, Covered Strangle, Long Strangle.
+- **UI:** `OptionChainTab` shows the notes under the position (cleared on manual chain picks and expiry moves); `StrategyInfo` shows them in the hover explainer.
+- **`lib/oiLive.ts`:** new `topBySessionVolume(all, n)`.
+  - It ranks only contracts whose bar date is the newest one among traded contracts.
+  - It returns `session` and `stale`, the count of traded contracts left out.
+  - Used by `/api/oi-tracker/live/[symbol]` (top 200) and `/api/oi-tracker/stock/[symbol]` (top 100, popup).
+  - `LiveVolumeTable` shows "Top N by volume in the YYYY-MM-DD session … (n last traded earlier, not ranked)".
+- **Fixtures (`scripts/test-payoff.mjs`):**
+  - New test: on a 2-day chain with 85 / 115 levels (options ~$0), the condor shorts move inside, with ≥ $0.10 premium, 1-strike wings, two notes, a credit and POP > 0.
+  - The old condor test assumed an 85 short put worth $0.036 (now correctly moved), so it uses priced levels 90 / 110 ($0.25 / $0.42) and asserts no notes.
+- **Docs:** `docs/strategy-builder.md` (strike rules), `docs/oi-tracker.md` (live volume), and the `lib/payoff/strategies.ts` header.
+
+**Verified**
+- `node scripts/test-payoff.mjs`: 23 passed. `npx tsc --noEmit` is clean.
+- **Live, signed in (dev :3003):**
+  - **AAPL 2026-10-30 Iron Condor card:** now Credit $37, POP 63.6%, Max L −$214 (was $0 / 0% / −$500).
+    - Explainer and position both show the two notes: Put Low 176.38 → 335, Call High 363.67 → 350.
+  - **`/api/oi-tracker/live`** (AAPL, SPY, KO): `session` 2026-10-28; every top row's bar date is 2026-10-28; `stale` 1,507 / 1,932 / 486. The 10-23 `AAPL261030P00170000` row is gone.
+  - **The tracker popup route** (`/api/oi-tracker/stock/AAPL`): top 100, all 2026-10-28.
+  - **OI tab toolbar:** "Top 200 by volume in the 2026-10-28 session, of 3,192 live contracts (1,507 last traded earlier, not ranked)". No page errors.
+
+**Not verified**
+- The other level-anchored templates (Short / Long / Covered Strangle) on a near expiry were only covered by the shared code path and the "every template resolves" fixture.
+- During market hours, before most contracts trade, the "latest session" is today and the ranking holds only today's prints. That is intended, not observed.
+
+## 2026-10-28 — Signed-in Pro verification of the stock page tabs, chain and live volume (no code change)
+
+Requested: test what was left unverified:
+- the Option Chain tab against the real chain route as a Pro user;
+- live volume returning data;
+- the OI tracker popup's Live volume tab after the shared-table refactor;
+- `npm run test:e2e`.
+
+**How:** Google refuses sign-in in a browser launched by automation. So the user's installed Chrome was started normally (separate scratch profile, `--remote-debugging-port`), and the user signed in themselves. Playwright attached over CDP only to save the localhost session (`storageState`). The tests ran headless with that session against `next dev` on :3003. The account is Pro Plus with both features.
+
+**Results**
+- **`npm run test:e2e`:** 470 passed (7.6 min, chromium, `PLAYWRIGHT_BASE_URL=http://localhost:3003`).
+- **`/api/stocks/[symbol]/chain`** (signed in):
+  - AAPL 2026-11-20: 200, 94 strikes, 0.7 s.
+  - SPY 10-30 weekly: 249 strikes, 0.4 s.
+  - SPX 10-30: root `SPXW` via the weekly-root retry, 487 strikes, 2.5 s, spot 7743.98 from the fallback quote.
+  - `enabledStrategies` 45; no vendor names in the bodies; a past expiry gets 400.
+- **Option Chain tab** (`/stock/AAPL?tab=chain`):
+  - On open, one `/chain` request (sent twice in dev, StrictMode).
+  - 25 strike rows.
+  - Hovering Iron Condor showed the A–D recipe; picking it built the position and metrics.
+  - **35 s idle: no requests.**
+  - **Refresh quotes: exactly one `/chain` request**, and the quote time updated.
+  - Calendar Spread fetched the next expiry's chain (`2026-11-04`) once, with legs on 10-30 and 11-04.
+  - The chain's chart cell opened `AAPL 2026-10-30 327.5 Call`.
+  - No page errors.
+- **`/api/oi-tracker/live/[symbol]`:**
+  - AAPL: 200, top 200 of 3,192, 3.0 s; repeat 0.3 s with the same `asOf` (**30 s cache works**).
+  - SPY: 200 of 6,000 (page cap), 5.0 s.
+  - SPX: 200.
+  - No vendor names.
+- **OI tab > Live volume:** one request on opening, a table of 200 ("of 3,192 live contracts"), Refresh makes one request, and a row opens `AAPL 2026-10-30 350 Call`.
+- **OI tracker popup > Live volume tab** (META, via `/oi-tracker`): the shared `LiveVolumeTable` renders 100 rows ("of 6,000 live contracts").
+
+**Found, not changed**
+- **Iron Condor on a 2-day expiry** (AAPL 10-30): the card shows Debit $0, POP 0%, Max P $0, Max L −$500. Its short strikes anchor on this app's Put Low / Call High for the expiry, which are far enough out that every leg's mid is ~0. The maths is consistent, but the suggestion is useless that close to expiry. Possible fix: fall back to listed-strike steps from ATM when the level-anchored legs carry no premium.
+- **Live volume ranks stale sessions:** rows whose last bar is an older session (e.g. `Oct 30 170 P` with session 2026-10-23, 18,505) rank among today's volume. This is the same in the OI tracker popup (pre-existing; `toLive` takes the snapshot's `dailyBar` whatever its date). Possible fix: rank only bars from the latest session, or show the session prominently.
+
+## 2026-10-28 — Option Chain tab: chain left third with mirrored selectable columns, builder right, strategy explainer; OI tab: sub-views, live volume, trend 7D
+
+Requested:
+- **Option Chain tab:**
+  - the chain on the left third, the strategy builder on the right;
+  - a chart column on the call and put sides;
+  - LTP and mid columns;
+  - columns selectable, mirrored on both sides and scrolling sideways together;
+  - an optionstrat-style explainer when hovering a strategy.
+- **Open Interest tab:**
+  - more trend windows, with 7D as the default;
+  - the trend button looking like an option inside the tab rather than a tab, placed at the right end;
+  - "Open Int" shortened to "OI" to save space, and the title renamed "Open interest change by contracts";
+  - the OI tracker's live volume as a separate view.
+- Mid-task questions: confirm the duplicate requests are dev-only, and the cost of the live-volume call.
+
+**What changed**
+- **`components/stock/strategy/ChainTable.tsx`** (rewritten):
+  - **Layout:** calls | fixed strike column | puts, built from fixed-width div cells.
+  - **Columns:** LTP, Bid, Mid, Ask, Chart, IV, Δ, Vol, Γ, Θ, Vega. Γ, Θ and Vega are off by default. They are chosen and reordered with a Columns menu saved as `stockChain` (new id in `TABLE_IDS`).
+    - Columns run from the strike outwards, and the calls side mirrors them.
+    - Bid sells and ask buys, as before. The chart cell opens the contract chart.
+  - **Sideways scroll:** when the columns don't fit, both sides scroll together, mirrored, so the strike stays centred. This works by wheel or trackpad on either side, or by a "More columns" slider under the table.
+    - The headers are separate overflow-hidden rows kept in sync.
+    - Header and body both use `scrollbar-gutter: stable`, so the columns line up beside the vertical scrollbar.
+    - The Calls / Puts labels sit in a static row; they scrolled and clipped at first.
+- **`components/stock/tabs/OptionChainTab.tsx`:**
+  - The header (spot, ATM IV, quote time, Refresh quotes, errors) spans the full width.
+  - Below it is a `lg` grid of `1fr | 2fr`: the chain card on the left (sticky) and the picker and position cards on the right.
+- **`components/stock/strategy/StrategyInfo.tsx`** (new) and **`StrategyPicker.tsx`**: hovering or focusing a card or list entry shows an explainer under the picker; with nothing hovered it shows the picked strategy. The explainer has:
+  - the name, the view, and Limited/Unlimited profit and loss badges (from `analyze` on the live chain);
+  - the description;
+  - "Buy a call at strike A…" lines, with letters A, B, C… from the lowest resolved strike (far legs say "later expiry");
+  - the strike values;
+  - an expiry payoff SVG with green/red fill, lettered strikes and spot, framed by the strike spread.
+  - Cards are 1 / 2 / 3 columns at sm / xl. List descriptions are clamped to one line.
+- **Live volume:**
+  - **`lib/oiLive.ts`** (new): `LiveOption` and `toLive`, moved out of `app/api/oi-tracker/stock/[symbol]/route.ts`.
+  - **New `GET /api/oi-tracker/live/[symbol]`:**
+    - Same gate and limiter as the OI tracker (`guardOi(true)`, feature `oi_tracker`).
+    - Returns the top 200 contracts by live session volume across unexpired expiries. Weekly expiries are dropped for monthly/quarterly-only plans.
+    - **30 s shared cache per symbol.**
+  - **`components/oi/LiveVolumeTable.tsx`** (new) is now used by both the OI tracker's stock modal (its private columns, `LiveOption` and the unused `parseOcc` copy were removed) and the stock page.
+- **`components/stock/tabs/OpenInterestTab.tsx`:**
+  - **Sub-views:** an underlined sub-nav "OI changes | Live volume", deliberately unlike the coloured page tabs.
+    - Live volume loads when first opened, then only on Refresh. Without `oi_tracker` it shows a sign-in/upgrade note and makes no request.
+    - Its rows open the contract chart (OCC root passed for index roots).
+  - **Trend button:** now a small outline button with a line icon at the right end of the window row.
+  - **Column labels:** OI, Chg OI, ABS Chg OI, Chg OI $, ABS Chg OI $ (ids unchanged, so saved column choices still apply). Cell padding is tighter.
+  - **Title:** "Open interest change by contracts".
+- **`components/stock/tabs/OiTrendModal.tsx`:** windows 7D · 14D · 1M · 3M · 6M · 1Y · All, default 7D.
+
+**Live volume cost** (measured 2026-10-28 after the close, via the facade): each load reads the chain in pages of ≤1,000 contracts, at most 6 pages.
+
+| Symbol | Pages | Time | Downloaded | Note |
+|---|---|---|---|---|
+| KO | 2 | 0.25 s | 0.5 MB | |
+| AAPL | 4 | 1.6 s | 1.7 MB | |
+| NVDA | 5 | 0.8 s | 2.2 MB | |
+| TSLA | 6 | 1.4 s | 2.7 MB | |
+| SPY | 6 | 1.3 s | 3.2 MB | hit the 6-page cap at 6,000 contracts, so its furthest expiries are cut |
+
+- The browser gets only the top 200 rows.
+- The OI tracker's stock modal makes the same upstream calls on every open, with no cache.
+- The account limit is 200 market-data requests/min.
+
+**Verified**
+- **Production build:** an isolated copy of the working tree was built in the scratchpad (sharing `node_modules`). Building in place failed with `PageNotFoundError` while another `next` process from this folder was running on port 3000 and sharing `.next`.
+  - `npm run build` succeeds there, and the vendor grep of `.next/static` prints nothing.
+  - **Duplicate requests are dev-only.** On `next start` (port 3002), opening `/stock/SPY?tab=oi` sent **one** `opt-chain?loads=1` request and the trend popup **one** `levels` request. Dev sends each twice (React StrictMode).
+- **Option Chain tab** (temporary dev page rendering the real `OptionChainTab`, deleted afterwards; Playwright served `/chain` from a real AAPL chain read through the facade for 2026-11-20 and 2026-12-18; 1440 and 390 px):
+  - chain card on the left third (411 of 1,248 px);
+  - headers mirrored `Vol|Δ|IV|Chart|LTP|Ask|Mid|Bid | Bid|Mid|Ask|LTP|Chart|IV|Δ|Vol`;
+  - scrolling the puts side 60 px moved the calls side 60 px from the strike;
+  - hovering Bull Call Spread showed the explainer ("Buy a call at strike A / Sell a call at strike B"), and Long Call Butterfly showed A/B/C with Limited profit and Limited loss;
+  - the chart cell opened 310 call;
+  - picking a strategy built the position and payoff;
+  - clicking an ask made a custom position;
+  - a calendar fetched the 12-18 chain once;
+  - 0 px overflow, no page errors.
+- **Open Interest tab** (dev, signed out, SPY): the title and the "OI" header are in place; the trend button is right of the window picker at 1440 px (wraps under it on a phone); the trend popup opens on 7D (`from=2026-10-21`); Live volume shows the upgrade note with no request; 0 px overflow.
+- **Live-volume route:** answers 401 signed out.
+- `npx tsc --noEmit` is clean.
+
+**Not verified**
+- **Signed in with `oi_tracker`:** the live-volume route's 200 path and its cache in a browser.
+- **The tracker modal's live tab** after the `LiveVolumeTable` refactor: only type-checked.
+- **The Option Chain tab against the real `/chain` route as a Pro user:** still only rendered via the temporary page.
+- `npm run test:e2e` was not re-run.
+
+---
+
+## 2026-10-28 — Open Interest tab: trend in a modal, strike ladder beside the contract table, trading-day windows, all-expiries mode, more filters
+
+Requested:
+- the OI trend becomes a button that opens a modal and calls the API only when clicked;
+- OI change by strike and OI changes by contract sit side by side, with most of the width going to the contracts, and share one window picker;
+- add 1D/2D/3D/5D windows, with 1D the default;
+- more filters on the contract table;
+- the contract table can include or exclude the expiry filter (the strike ladder may keep its own scope).
+
+**What changed**
+- **`app/api/stocks/[symbol]/opt-chain/route.ts`** (back-compatible; the contract modal's calls are unchanged):
+  - **`loads=N`** (1–260) means the last N loads, i.e. trading days, up to `to` (default today). They come from `nt_market_dates` (source `opt_chg`) via the new `catalogTradeDatesUpTo` in `lib/marketCatalog.ts`. The fallback is a per-symbol `DISTINCT load_dt` (uses the `us_opt_chg_rpt_key` index prefix).
+  - **`expiry=all`** returns every expiry of the symbol in the window, each row carrying `expiry`. Weekly expiries are dropped for monthly/quarterly-only plans (`filterByExpiry`). Rows are capped at 5,000, keeping the largest |OI change| (`truncated: true`).
+    - Measured 2026-10-28: busy names report ~200–1,500 changed contracts per load across 20–49 expiries (SPY ~900, SPX ~1,100). SPY over 5 loads: index scan, 4,301 rows, 3 ms.
+  - Expiry and dates are validated (400 otherwise).
+  - Single-expiry rows now also carry `expiry`.
+- **`components/stock/tabs/OpenInterestTab.tsx`** (rewritten):
+  - **Top row:** an "Open interest trend" button, then the window picker 1D · 2D · 3D · 5D · 10D · 30D · 90D · All (default 1D; trading days, so 10D/30D/90D now count sessions, not calendar days), then the reported range.
+  - **Side by side** from `lg` up (`1fr | 2fr`): the strike ladder and the contract table, both on the shared window.
+  - **Expiry scope:** the ladder always uses the selected expiry, since summing the same strike across expiries means nothing. The contract table has an **Expiry YYYY-MM-DD | All expiries** switch. "All expiries" makes one more request (`expiry=all`), only when switched on, and shows a note when the result is capped.
+  - **Filters:** search (strike, type, expiry), type, change (OI added / cut), moneyness (ITM / OTM against the row's underlying close), trade date, expiry (all-expiries mode), strike min–max, min |ΔOI|, min |$ ΔOI|, and Clear filters (n). Expiry is sortable too.
+  - The default sort is now |ΔOI| descending (it was trade date).
+  - A row opens the contract chart for **that row's expiry**.
+- **`components/stock/tabs/OiTrendModal.tsx`** (new): the call/put OI trend and PCR in a modal, with 1M / 3M / 6M / 1Y windows (default 3M).
+  - It reads `/levels?range=true` when opened and on each window change, so it gets the same rate limit and delayed-plan clamp as the chart.
+  - It shows the route's message on errors such as 429.
+- **`components/stock/StockAnalysis.tsx`:** the `oiTrend` memo and `oiHistory` prop are gone. `selectedOptContract` carries `expiry`, and the contract modal uses it.
+
+**Verified** (dev server, Playwright, `/stock/SPY?tab=oi`, signed out, 1440 and 390 px; screenshots checked)
+- **Opening the tab:** only `opt-chain?expiry=2026-11-20&loads=1` → 69 rows (2026-10-28 only).
+- **3D:** `loads=3` → 223 rows (10-26 to 10-28).
+- **All expiries:** one `expiry=all&loads=3` request → 587 rows.
+- **Filters:** Type = put with min |ΔOI| 1000 → 48 of 587.
+- **Row click:** a 2026-12-18 row opened `SPY 2026-12-18 810 Call` and requested that expiry's history.
+- **Trend button:** one `levels?range=true` request, and only on click.
+- **Route by curl:**
+  - `loads=2&to=2026-10-20` → 10-19 and 10-20.
+  - `expiry=all` signed out → only monthly/quarterly expiries (11 for SPY on 1 load).
+  - 90 loads → capped, `truncated: true`.
+  - `expiry=bad` → 400.
+- **Layout:** 0 px overflow at both widths after fixing the window picker (it overflowed by 15 px on a phone before getting `min-w-0`). No page errors.
+- `npx tsc --noEmit` is clean. Lint shows only `any` warnings, matching the existing route style.
+
+**Not verified / notes**
+- **Signed-in plans:** I didn't test signed in. That covers weekly expiries in all-expiries mode, and the trend modal's full 1Y window. Signed out, the 3M window showed only 2026-10-12 to 10-22, which looks like the levels route's delayed-plan clamp working as designed.
+- **Duplicate requests in dev:** every newly mounted fetch effect (the tab, both modals) sends its request twice, back to back. This fits React StrictMode in dev. Unverified in a production build.
+- **Mixed roots:** `expiry=all` still mixes SPX/SPXW roots, as the single-expiry query already did (see the trade-date entry below).
+- `npm run build` and `npm run test:e2e` were not re-run.
+
+---
+
+## 2026-10-28 — Stock page tabs: solid coloured boxes
+
+Requested: the tab names as solid boxes, each a different light colour, with a darker one for the selected tab.
+
+- **`components/ui/Tabs.tsx`:**
+  - Each tab is a rounded, bordered box with a light fill. `TabDef` gains `tone` (gray / green / orange / blue / amber / violet; gray by default).
+  - The selected tab is the same hue's 600 fill with white text.
+  - Class strings are literal so Tailwind keeps them.
+  - The underline and the thin dividers are gone; the gap between boxes separates the tabs.
+- **`StockAnalysis.tsx`:** Chart & Price Levels is green, Open Interest orange, Option Chain blue, Earnings amber. These are the colours of the old jump buttons.
+- **Verified:**
+  - `npx tsc --noEmit` is clean.
+  - Playwright screenshots of the tab bar at 1366 and 390 px show the idle and selected states (chart tab, then Earnings selected).
+  - 0 px overflow, no page errors.
+  - The stock page is the only user of `Tabs`.
+
+---
+
+## 2026-10-28 — Stock page: tabs sit under the quote and expiry selector
+
+Requested: put the tabs below the stock info and the expiry selector, and fetch a tab's data only when that tab is opened.
+
+**What changed**
+- `components/charts/TVChart.tsx`: two new props.
+  - `afterHeader` renders between the header (quote, Analysis, expiry selector) and the chart. It is not shown while the chart is enlarged.
+  - `chartHidden` hides the chart row and the level chips but keeps the header. The chart stays mounted. The row swaps `flex` for `hidden`, because the `hidden` attribute loses to Tailwind's `flex`.
+- `components/stock/StockAnalysis.tsx`:
+  - The tab bar (`tabBar`) is passed as `afterHeader`. The quote, Analysis and expiry selector stay above the tabs in every tab; only the chart belongs to the first tab.
+  - The slim bar is back to being only the collapsed state. The tab bar renders under it when collapsed, and its expand button shows in every tab.
+- **Lazy loading is unchanged and was re-measured** (below).
+  - Price levels table: reuses the chart's levels when they cover the range.
+  - Earnings history: still loads with the page for viewers who have the feature, because the chart's earnings markers use it. The "Next / Last earnings" header lines come from the details call.
+
+**Verified** (Playwright, dev server, `/stock/AAPL`, signed out, 1366 and 390 px; screenshots checked)
+- Order: quote and expiry selector, then the tab bar, then the chart (or the tab's content).
+- **Page open** makes only the chart's requests: quote, expiry-dates, details, and then ohlc, scan-alerts and `levels?range` twice (the initial window plus one scroll-back chunk, as before).
+- **Clicking each tab:**
+  - Open Interest → `opt-chain` (on first open only);
+  - Option Chain and Earnings → none (signed out: both locked);
+  - back to the chart tab, and to Open Interest again → none.
+- 0 px horizontal overflow; no page errors. `npx tsc --noEmit` is clean.
+
+**Not verified**
+- Signed in with the Pro features (Option Chain's `/chain` fetch on first open, earnings history).
+- The `opt-chain` request still appears twice on the first OI open in dev, back to back with identical parameters (see the entry below). Unverified in a production build.
+- `npm run build` and `npm run test:e2e` were not re-run.
+
+---
+
+## 2026-10-28 — Stock page: the chart moves into the first tab; tab dividers, no icons
+
+Requested: the chart belongs in the first tab, tabs get a divider between them, and tab labels need no icons.
+
+**What changed**
+- `components/stock/StockAnalysis.tsx`:
+  - The tab bar now sits at the top of the page, under the alerts ticker. Tabs: **Chart & Price Levels** · Open Interest · Option Chain · Earnings (no emoji).
+  - The chart block (quote, Analysis, expiry selector, chart) shows only in the first tab. The other tabs show the slim bar the collapse button already used: quote plus expiry selector, which those tabs depend on.
+  - The chart is *hidden* in the other tabs, not unmounted. Unmounting it was tried first: each switch back re-fitted the view and fired a load-more, costing an extra `ohlc` call and a rate-limited `/levels?range=true` call. TVChart's ResizeObserver ignores a zero width, so `display:none` leaves its size and visible range alone. Collapsing still unmounts the chart, as before.
+  - The jump buttons are gone (under the quote and in the slim bar). The tab bar now sits directly above, so they duplicated it. `openTab` lost its scroll argument and `tabsRef`.
+- `components/ui/Tabs.tsx`: a thin vertical divider between tabs.
+- `components/charts/TVChart.tsx`: the `topAside` wrapper gets `basis-80`. The jump buttons used to make the quote column wide enough that on phones the Analysis box and expiry selector wrapped under it. Without them, the panel squeezed in beside the quote and the expiry card overflowed the page by 85 px at 390 px.
+
+**Verified** (Playwright on the dev server, `/stock/AAPL`, signed out, at 1366 and 390 px)
+- 4 tabs without icons, 3 dividers.
+- Switching to Open Interest and back to the chart tab made no `ohlc`, `levels` or `scan-alerts` request; with the unmount version it made 2–3.
+- 0 px horizontal overflow at both widths; no page errors. Screenshots checked for both layouts.
+- `npx tsc --noEmit` is clean. Lint on the two files shows only warnings that were already there.
+
+**Not verified / noticed**
+- **Opening the OI tab sends `/opt-chain` twice in dev**, back to back with identical parameters. This is most likely React StrictMode's double effect (on by default for the App Router in dev; `next.config.ts` doesn't set it). Unverified in a production build.
+- **The chart's top-right toolbar on a phone** sits partly past the chart's left edge. Not touched; unknown whether it predates this change.
+- `npm run build` and `npm run test:e2e` were not re-run for this change.
+
+---
+
+## 2026-10-28 — Stock page tabs; Open Interest tab; live Option Chain + Strategy Builder (optionstrat-style)
+
+Requested:
+- the stock page's scroll-down sections become tabs, with a separate Open Interest tab to track OI;
+- the Option Chain tab gets an optionstrat-like payoff builder, where users pick a market view (bullish / bearish / neutral) or any strategy from a list, reusing the parallel repo's options lab;
+- TradingView charts, not Recharts;
+- clicking a strike opens a TradingView chart of that contract's OHLCV and OI change;
+- quotes refresh only on demand;
+- admins can enable and disable strategies;
+- hover titles explain every greek and acronym.
+
+Full design: **`docs/strategy-builder.md`**.
+
+### What changed
+
+**Tabs** (`components/stock/StockAnalysis.tsx`, now 1,530 lines, down from 1,864)
+- Price Levels · Open Interest · Option Chain · Earnings, using the new `components/ui/Tabs.tsx`. The open tab is kept in `?tab=` via `history.replaceState`.
+- Tabs are lazy: each mounts and fetches on first open, then stays mounted. **Opening a stock no longer requests `/opt-chain`.**
+- The per-section collapse toggles are gone. The jump buttons switch tab, and there is a new 🧮 Option Chain button.
+- The Earnings tab shows an upgrade teaser when locked; it used to be hidden.
+
+**Tab components** (`components/stock/tabs/`)
+- `PriceLevelsTab.tsx` (presentational; the fetch stays in `StockAnalysis`).
+- `OpenInterestTab.tsx`: owns the OI-change report's state and fetch, moved unchanged from `StockAnalysis`. It adds:
+  - an **OI trend** chart (`components/charts/OiTrendChart.tsx`, lightweight-charts): call vs put OI per day plus PCR, built from the levels history the chart already loaded, so it costs no request;
+  - an **OI change by strike** ladder.
+- `OptionChainTab.tsx` and `shared.tsx`.
+
+**Contract chart** (`components/charts/OptionContractChart.tsx`)
+- Adds an OI-change histogram band and a volume band under the candles, for every caller (OI tab, chain, OI tracker).
+- The modal legend notes the bands, and the chart is 460 px tall.
+
+**Live chain route** (`app/api/stocks/[symbol]/chain/route.ts`, new)
+- Feature `strategy_builder`, limiter `option_chain` (30/min, added to `LIMITERS`), weekly-expiry gate, 15 s cache.
+- Retries index weeklies under SPXW / NDXP / RUTW / VIXW.
+- `lib/marketdata/index.ts` exports `getFallbackQuote`, used for index spot.
+
+**Payoff engine** (`lib/payoff/{bs,carry,chain,evaluate,strategies,glossary}.ts`, new, pure)
+- A port of the lab's Python: Black-76 with put-call-parity-fitted carry, per-leg calibration (`ivPx`), payoff and metrics, POP, heatmap and the 45 templates.
+- It is generalised so each leg has its own time to expiry (calendars and diagonals).
+- It runs in the browser, so edits make no requests.
+
+**Builder UI** (`components/stock/strategy/`)
+- `StrategyPicker` (view cards with sparklines, or the searchable list), `LegEditor`, `StrikeRuler` (draggable), `StrategyBuilder` (scenario controls), `MetricsPanel`, `PayoffTable` (P&L heatmap), `ChainTable` (bid = sell, ask = buy, C📈 / 📈P opens the contract chart).
+- `PayoffChart` uses lightweight-charts `createChartEx` with a custom numeric `IHorzScaleBehavior`, so the x-axis is price.
+- **The custom scale was the risk, and it works in the installed 4.2.3** (rendered and screenshotted, below).
+
+**Admin**
+- `components/admin/StrategySettingsEditor.tsx` on `/admin/settings`.
+- `PUT /api/admin/settings/strategies`.
+- `lib/strategySettings.ts`, using `nt_app_settings` key `strategy_templates`.
+
+**Feature and other changes**
+- `FEATURE_STRATEGY_BUILDER = 'strategy_builder'` in `lib/features.ts` and `ALL_FEATURES`.
+- `components/ui/Term.tsx` gives hover explanations from `lib/payoff/glossary.ts`.
+- `lib/occ.ts` holds `parseOcc`, moved from `lib/oiTracked.ts`, which re-exports it. `StockOiModal`'s private looser copy was left as is (a different regex, so swapping it would change behaviour).
+- `EarningsHistoryTable` takes `className`.
+
+### Design notes
+- **Math in the browser rather than server POSTs** (the lab debounces a POST per edit). One chain request per expiry is the only API and rate-limit cost, and leg edits, sliders and template switches are instant.
+- **Level anchors use this app's own levels.** Strangles and condors anchor on Call High / Put Low of the selected expiry instead of the lab's spot ±10% default, which remains the fallback.
+- **Chain OI per strike is not shown.** The snapshots have no OI; the Open Interest tab has it from the report.
+
+### Verified
+- `npx tsc --noEmit` clean.
+- eslint: 0 errors on the touched files. The only warnings are pre-existing `any`s, plus the existing exhaustive-deps warning on the price-history effect.
+- `npm run test:e2e`: 188 passed (responsive suite; it has no stock-page tab tests of its own). `npm run build` succeeds, and `grep -rlE '[Aa]lpaca|ALPACA|[Tt]radier|TRADIER|APCA-' .next/static` prints nothing.
+- Fixtures: `node scripts/test-payoff.mjs` 22 passed (new); `test-oi-strategies`, `test-earnings-parse` and `test-us-scanner` all pass.
+- **Live chain through the facade, using the same grouping as the route (scratch script, market hours):**
+  - AAPL 2026-11-20: 188 contracts, spot 345.02, fitted carry disc 1.0035 / basis 0.9984 (inside the bands), ATM IV 27.4%.
+  - **45/45 templates resolve**, including calendars against 2026-12-18.
+  - Bull call spread 345/347.5: max P/L = width − debit.
+  - Iron condor breakevens sit outside the short strikes.
+  - No vendor strings in the chain JSON.
+  - SPY weekly 10-30 and 11-06 also resolve 45/45.
+- **SPX:**
+  - The primary feed has no SPX spot; the fallback quote returned 7743.98, which is the route's fallback path.
+  - SPX lists no 10-30 weekly under `SPX`; SPXW does, which led to the weekly-root retry.
+- **Dev server, anonymous:**
+  - `/chain` returns 401 and the admin strategies API returns 403.
+  - On the `/stock/AAPL` walkthrough in Playwright, page open made no `/opt-chain` request; opening the OI tab made exactly one.
+  - `?tab=oi` deep link works.
+  - At 390 px width there is no horizontal overflow.
+  - The Option Chain tab shows the sign-in teaser.
+  - No page errors.
+- **Builder rendering:** checked on a temporary dev-only page (deleted afterwards) fed a synthetic chain. The payoff chart, date slider, IV shift, crosshair readout, P&L table, calendar and Auto range all rendered with no console errors.
+- **Bugs found and fixed during verification:**
+  1. The OI trend chart crashed the page: OI arrives as numeric strings from Postgres, and lightweight-charts asserts on that. It is now coerced with `Number()`.
+  2. A calendar reported a meaningless breakeven at 3× spot (carry drift far out); breakevens are now limited to ¼×–2× spot.
+  3. The default ±10% range hid condor wings, so Auto is now the default.
+
+### Not verified
+- **The Option Chain tab against the real route as a signed-in Pro user.** No session was available here: the 200 path of `/chain`, the 429 limiter, Refresh quotes, far-chain loading and leg-expiry moves in the real page are untested.
+- **The admin strategies card** (needs an admin session).
+- **The contract modal's new bands in a browser** (type-checked only).
+- **POP and greeks** were not cross-checked against the options-alert-lab backend on the same chain (it wasn't running). The formulas are ported line for line and fixture-tested.
+
+### Follow-ups
+- **Tick `strategy_builder` for Pro / Pro Plus in `/admin/plans` after deploy.** No plan has it yet, so everyone sees the teaser. This needs a DB write; ask first.
+- **To-do (user):** "Track this strategy", saving built legs to the private OI-tracker positions (`nt_oi_tracked`).
+- The orphan `/api/stocks/[symbol]/oi` route (no expiry filter, no gating) is still unused.
+- Spot-vol skew in scenarios.
+
+---
+
 ## 2026-10-28 — OI-change dates shown as the trading day behind them (trade date), everywhere they were load dates
 
 Requested: the OI tracker already shows the session behind an OI change (the report loaded on D reflects D-1; `docs/oi-tracker.md`), but the option contract chart's OI markers and the stock page's Option Chain list still used the load date (user screenshot: the 2026-10-28 7725 Call marker sat on Oct 28's bar while its change happened on Oct 27).

@@ -6,40 +6,10 @@ import { detectStrategies } from '@/lib/oiStrategies';
 import { getOptionChainSnapshots, getSnapshotsMulti, type OptionSnapshot } from '@/lib/marketdata';
 import { etDateOf } from '@/lib/marketSession';
 import type { OiContractRow, OiGroupRow } from '@/types/oiTracker';
+import { toLive, topBySessionVolume, type LiveOption } from '@/lib/oiLive';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
-
-export interface LiveOption {
-  contract: string;
-  /** Volume of the snapshot's daily bar and the ET date of that bar. */
-  vol: number | null;
-  barDate: string | null;
-  prevVol: number | null;
-  last: number | null;
-  bid: number | null;
-  ask: number | null;
-  iv: number | null;
-  delta: number | null;
-  gamma: number | null;
-  theta: number | null;
-}
-
-function toLive(contract: string, s: OptionSnapshot): LiveOption {
-  return {
-    contract,
-    vol: s.dailyBar?.v ?? null,
-    barDate: s.dailyBar?.t ? etDateOf(Date.parse(s.dailyBar.t) + 6 * 3_600_000) : null,
-    prevVol: s.prevDailyBar?.v ?? null,
-    last: s.latestTrade?.p ?? s.dailyBar?.c ?? null,
-    bid: s.latestQuote?.bp ?? null,
-    ask: s.latestQuote?.ap ?? null,
-    iv: s.impliedVolatility ?? null,
-    delta: s.greeks?.delta ?? null,
-    gamma: s.greeks?.gamma ?? null,
-    theta: s.greeks?.theta ?? null,
-  };
-}
 
 /**
  * Everything the stock OI modal needs for one underlying: report contracts over
@@ -86,7 +56,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     ]);
 
     const chainKeys = Object.keys(chain);
-    let live: { contracts: Record<string, LiveOption>; top: LiveOption[]; count: number } | null = null;
+    let live: { contracts: Record<string, LiveOption>; top: LiveOption[]; count: number; session: string | null; stale: number } | null = null;
     if (chainKeys.length) {
       // OCC symbol = root + YYMMDD + C/P + 8-digit strike, so the expiry is the 6 digits before the last 9 characters.
       const occExpiry = (c: string) => `20${c.slice(-15, -13)}-${c.slice(-13, -11)}-${c.slice(-11, -9)}`;
@@ -94,10 +64,13 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         .filter(k => !standardExpiryOnly(ctx.features) || isStandardExpiry(occExpiry(k)))
         .map(k => toLive(k, chain[k]));
       const inReport = new Set((contracts.rows as OiContractRow[]).map(r => r.contract));
+      const ranked = topBySessionVolume(all, 100);
       live = {
         contracts: Object.fromEntries(all.filter(o => inReport.has(o.contract)).map(o => [o.contract, o])),
-        top: all.filter(o => (o.vol ?? 0) > 0).sort((a, b) => (b.vol ?? 0) - (a.vol ?? 0)).slice(0, 100),
+        top: ranked.top,
         count: all.length,
+        session: ranked.session,
+        stale: ranked.stale,
       };
     }
     const snap = stock[symbol];

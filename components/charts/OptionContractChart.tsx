@@ -6,6 +6,7 @@ import {
   IChartApi,
   ISeriesApi,
   CandlestickData,
+  HistogramData,
   LineData,
   SeriesMarker,
   Time,
@@ -76,6 +77,8 @@ export default function OptionContractChart({
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const underlyingSeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
+  const oiChgSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
   // `x` is already corrected for the left price scale — see handleMove.
   const [tooltip, setTooltip] = useState<{ x: number; y: number; lines: string[] } | null>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
@@ -110,9 +113,24 @@ export default function OptionContractChart({
       lastValueVisible: true,
     });
 
+    // Bands below the price: OI change (session of the change, green up / red down)
+    // above volume. Overlay scales, since lightweight-charts v4 has no separate panes.
+    chart.priceScale('right').applyOptions({ scaleMargins: { top: 0.05, bottom: 0.38 } });
+    chart.priceScale('left').applyOptions({ scaleMargins: { top: 0.05, bottom: 0.38 } });
+    const oiChgSeries = chart.addHistogramSeries({
+      priceScaleId: 'oichg', priceFormat: { type: 'volume' }, priceLineVisible: false, lastValueVisible: false,
+    });
+    chart.priceScale('oichg').applyOptions({ scaleMargins: { top: 0.64, bottom: 0.19 } });
+    const volumeSeries = chart.addHistogramSeries({
+      priceScaleId: 'vol', color: '#94a3b8', priceFormat: { type: 'volume' }, priceLineVisible: false, lastValueVisible: false,
+    });
+    chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.84, bottom: 0 } });
+
     chartRef.current = chart;
     candleSeriesRef.current = candleSeries;
     underlyingSeriesRef.current = underlyingSeries;
+    volumeSeriesRef.current = volumeSeries;
+    oiChgSeriesRef.current = oiChgSeries;
 
     const handleResize = () => {
       if (containerRef.current) chart.applyOptions({ width: containerRef.current.clientWidth });
@@ -125,6 +143,8 @@ export default function OptionContractChart({
       chartRef.current = null;
       candleSeriesRef.current = null;
       underlyingSeriesRef.current = null;
+      volumeSeriesRef.current = null;
+      oiChgSeriesRef.current = null;
     };
   }, [height, isIntraday]);
 
@@ -135,8 +155,26 @@ export default function OptionContractChart({
       time: b.time as Time, open: b.open, high: b.high, low: b.low, close: b.close,
     }));
     candleSeriesRef.current.setData(data);
+    volumeSeriesRef.current?.setData(optionBars.map((b): HistogramData => ({
+      time: b.time as Time, value: b.volume, color: b.close >= b.open ? 'rgba(34,197,94,0.45)' : 'rgba(239,68,68,0.45)',
+    })));
     chartRef.current?.timeScale().fitContent();
   }, [optionBars]);
+
+  // OI change per session, on the first bar of its trade date (same placement as the markers below).
+  useEffect(() => {
+    if (!oiChgSeriesRef.current) return;
+    const firstBarTimeByDay = new Map<string, number>();
+    optionBars.forEach(b => { if (!firstBarTimeByDay.has(b.dayKey)) firstBarTimeByDay.set(b.dayKey, b.time); });
+    const byTime = new Map<number, number>();
+    for (const p of historyPoints) {
+      const t = firstBarTimeByDay.get(p.tradeDate);
+      if (t !== undefined) byTime.set(t, p.oiChg);
+    }
+    oiChgSeriesRef.current.setData([...byTime.entries()].sort((a, b) => a[0] - b[0]).map(([t, v]): HistogramData => ({
+      time: t as Time, value: v, color: v >= 0 ? '#16a34a' : '#dc2626',
+    })));
+  }, [optionBars, historyPoints]);
 
   // Underlying comparison line.
   useEffect(() => {

@@ -9,6 +9,13 @@ import Header from '@/components/layout/Header';
 import ScanAlertsTicker from '@/components/ui/ScanAlertsTicker';
 import OptionContractModal from '@/components/stock/OptionContractModal';
 import { EarningsHeaderLines, EarningsExpiryChip, EarningsHistoryTable } from '@/components/stock/EarningsPanel';
+import Tabs from '@/components/ui/Tabs';
+import PriceLevelsTab, { RANGE_PRESET_DAYS, type RangePreset } from '@/components/stock/tabs/PriceLevelsTab';
+import OpenInterestTab from '@/components/stock/tabs/OpenInterestTab';
+import OptionChainTab from '@/components/stock/tabs/OptionChainTab';
+import { shiftDateString } from '@/components/stock/tabs/shared';
+import { useAuthContext } from '@/components/providers/AuthContextProvider';
+import { FEATURE_STRATEGY_BUILDER, hasFeature } from '@/lib/features';
 import type { EarningsResult, EarningsSummary } from '@/types/earnings';
 import { LevelCalculation, ScanAlert } from '@/types/stock';
 import { getLevelColor, getLevelDisplayName, formatCurrency, formatPercentage } from '@/lib/utils';
@@ -17,11 +24,7 @@ import type { ExtendedQuote } from '@/lib/quote';
 import type { MarketSession } from '@/lib/marketSession';
 import { pollDelayMs } from '@/lib/pollDelay';
 import ExtendedMove from '@/components/ui/ExtendedMove';
-import ColumnsMenu from '@/components/ui/ColumnsMenu';
-import { useColumnPrefs } from '@/components/ui/useColumnPrefs';
 import { useChartPrefs } from '@/components/charts/useChartPrefs';
-import ColRow from '@/components/ui/ColRow';
-import type { ColumnMeta } from '@/lib/tableColumns';
 import { format, subDays } from 'date-fns';
 
 type SelectableInterval = '1min' | '5min' | '15min' | '30min' | '1hour' | 'daily';
@@ -74,53 +77,9 @@ const coversRange = (c: LevelsCoverage | null, symbol: string, expiry: string, f
 
 const NO_LEVELS = new Map<string, LevelHistoryEntry>();
 
-const SEVEN_LEVEL_ORDER = ['put_low', 'put_int', 'put_call_int', 'call_int', 'call_high', 'call_low', 'put_high'];
-
-// Column registries for the two tables below; each choice is saved per user (account when
-// signed in, this browser otherwise) through the Columns menu.
-const PRICE_HISTORY_COLUMNS: ColumnMeta[] = [
-  { id: 'date', label: 'Date', required: true },
-  { id: 'open', label: 'Open' },
-  { id: 'high', label: 'High' },
-  { id: 'low', label: 'Low' },
-  { id: 'close', label: 'Close', hint: 'Close of that date (the candle close); level distances are measured against it' },
-  { id: 'eodClose', label: 'EOD close', hint: 'Stored close for this load date (the previous session close)', defaultOff: true },
-  ...SEVEN_LEVEL_ORDER.map(name => ({ id: name, label: getLevelDisplayName(name) })),
-  { id: 'callOi', label: 'Call OI' },
-  { id: 'putOi', label: 'Put OI' },
-  { id: 'oiDiff', label: 'OI Diff' },
-  { id: 'upc', label: 'UPC' },
-  { id: 'ucpr', label: 'UCPR' },
-];
-const OPT_CHAIN_COLUMNS: ColumnMeta[] = [
-  { id: 'symbol', label: 'Symbol', required: true },
-  { id: 'expiry', label: 'Expiry' },
-  { id: 'loadDate', label: 'Trade Date' },
-  { id: 'cmp', label: 'CMP' },
-  { id: 'strike', label: 'Strike Price' },
-  { id: 'optType', label: 'Opt Typ' },
-  { id: 'ltp', label: 'Opt LTP' },
-  { id: 'oi', label: 'Open Int' },
-  { id: 'oiChg', label: 'Chg Open Int' },
-  { id: 'absOiChg', label: 'ABS Chg Open Int' },
-  { id: 'chgPrice', label: 'Chg Open Int Price' },
-  { id: 'absChgPrice', label: 'ABS Chg Open Int Price' },
-];
-
-type RangePreset = '10d' | '30d' | '90d' | 'custom';
-const RANGE_PRESET_DAYS: Record<Exclude<RangePreset, 'custom'>, number> = { '10d': 10, '30d': 30, '90d': 90 };
-const RANGE_PRESET_LABELS: Record<RangePreset, string> = { '10d': '10D', '30d': '30D', '90d': '90D', custom: 'Custom' };
-
-type OptChainRow = { optType: 'put' | 'call'; strike: number; ltp: number; oi: number; oiChg: number; close: number; loadDate: string; /** Session behind the OI change (the day before the load date). */ tradeDate?: string };
-type OptChainSortKey = 'loadDate' | 'close' | 'strike' | 'optType' | 'ltp' | 'oi' | 'oiChg' | 'absOiChg' | 'chgOpenIntPrice' | 'absChgOpenIntPrice';
-
-type OptChainPreset = '10d' | '30d' | '90d' | 'all';
-const OPT_CHAIN_PRESET_DAYS: Record<Exclude<OptChainPreset, 'all'>, number> = { '10d': 10, '30d': 30, '90d': 90 };
-const OPT_CHAIN_PRESET_LABELS: Record<OptChainPreset, string> = { '10d': '10D', '30d': '30D', '90d': '90D', all: 'All' };
-// us_opt_chg_rpt history per symbol+expiry runs to roughly a few months
-// (confirmed ~80 trading days for a typical contract) — far enough back to
-// stand in for "all" without a separate unbounded-query code path.
-const OPT_CHAIN_ALL_FROM = '2000-01-01';
+// Tabs below the chart (docs/CHANGES.md 2026-10-28 "stock page tabs"); `?tab=` keeps the open one.
+type StockTab = 'levels' | 'oi' | 'chain' | 'earnings';
+const STOCK_TABS: StockTab[] = ['levels', 'oi', 'chain', 'earnings'];
 
 // Shape of /api/stocks/[symbol]/quote. Every field but `price` can be null —
 // The snapshot omits prevDailyBar/dailyBar for names that haven't printed, and the
@@ -162,17 +121,6 @@ function formatMarketCap(value: number | null): string | null {
 
 type ExpiryMode = 'current' | 'historical';
 
-// Shifts a 'YYYY-MM-DD' date-only string by `days` calendar days, entirely
-// in UTC. `new Date('YYYY-MM-DD')` parses as UTC midnight, but date-fns'
-// format() reads back in the LOCAL timezone — mixing the two silently
-// shifts the result by a day whenever local time trails UTC (any
-// negative-offset timezone). Doing the arithmetic in UTC throughout avoids
-// ever crossing that boundary.
-function shiftDateString(dateStr: string, days: number): string {
-  const d = new Date(`${dateStr}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
 
 // TVChart's onLoadMore reports its bars' `firstVisibleTime`/`lastVisibleTime`
 // as epoch-second strings (chart time values), used only as a fallback for
@@ -304,20 +252,6 @@ const EXPIRY_KIND_STYLES: Record<ExpiryKind, { idle: string; legend: string; lab
   quarterly: { idle: 'border-violet-300 bg-violet-100 text-violet-800 hover:bg-violet-200', legend: 'border-violet-300 bg-violet-100 text-violet-800', label: 'Quarterly' },
 };
 
-function Spinner() {
-  return <div className="inline-block animate-spin h-3.5 w-3.5 border-2 border-blue-600 border-t-transparent rounded-full" />;
-}
-
-function OptChainSortLabel({ label, active, dir, onClick, align = 'right' }: {
-  label: string; active: boolean; dir: 'asc' | 'desc'; onClick: () => void; align?: 'left' | 'right';
-}) {
-  return (
-    <button onClick={onClick} className={`flex items-center gap-0.5 hover:text-gray-700 ${align === 'right' ? 'ml-auto' : ''}`}>
-      {label}
-      <span className={active ? 'text-blue-500' : 'text-gray-300'}>{active ? (dir === 'asc' ? '▲' : '▼') : '↕'}</span>
-    </button>
-  );
-}
 
 // `embedded` renders just the chart block for use inside another page (the
 // Watchlist View's split pane): no site Header, scan-alerts ticker, section
@@ -367,7 +301,7 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
   const [earnings, setEarnings] = useState<EarningsSummary | null>(null);
   const [earningsLocked, setEarningsLocked] = useState<boolean | null>(null);
   const [earningsHistory, setEarningsHistory] = useState<EarningsResult[] | null>(null);
-  const earningsSectionRef = useRef<HTMLDivElement>(null);
+  const authCtx = useAuthContext();
   const livePrice = quote?.price;
   // The price everything "current" is measured against. Live data is
   // deliberately withheld in historical-expiry mode — those levels belong to
@@ -387,38 +321,33 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
   // fetch, its own date window, defaulting to the last 10 days.
   const [priceHistoryMap, setPriceHistoryMap] = useState<Map<string, LevelHistoryEntry>>(new Map());
   const [priceHistoryLoading, setPriceHistoryLoading] = useState(false);
-  const [priceHistoryCollapsed, setPriceHistoryCollapsed] = useState(false);
   const [priceHistoryPreset, setPriceHistoryPreset] = useState<RangePreset>('10d');
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
 
-  // Option-chain OI (public.us_opt_chg_rpt) — per-strike put/call OI snapshot
-  // for the selected expiry, refetched whenever the expiry changes.
-  const [optChainRows, setOptChainRows] = useState<OptChainRow[]>([]);
-  const [optChainLoading, setOptChainLoading] = useState(false);
-  const [optChainRange, setOptChainRange] = useState<{ from: string; to: string } | null>(null);
-  const [optChainCollapsed, setOptChainCollapsed] = useState(false);
-  // The embedded chart (watchlist W Chart) doesn't show these tables, so it doesn't load their preferences.
-  const phCols = useColumnPrefs(embedded ? null : 'stockPriceHistory', PRICE_HISTORY_COLUMNS);
-  const ocCols = useColumnPrefs(embedded ? null : 'stockOptionChain', OPT_CHAIN_COLUMNS);
-  const ph = (id: string) => phCols.isShown(id);
-  const oc = (id: string) => ocCols.isShown(id);
-  const [optChainPreset, setOptChainPreset] = useState<OptChainPreset>('10d');
-  const [optChainSearch, setOptChainSearch] = useState('');
-  const [optChainTypeFilter, setOptChainTypeFilter] = useState<'all' | 'call' | 'put'>('all');
-  const [optChainColFilters, setOptChainColFilters] = useState({ strike: '' });
-  const [optChainSortKey, setOptChainSortKey] = useState<OptChainSortKey>('loadDate');
-  const [optChainSortDir, setOptChainSortDir] = useState<'asc' | 'desc'>('desc');
 
-  // Selected contract for the OHLCV popup — set by clicking an Option Chain row.
-  const [selectedOptContract, setSelectedOptContract] = useState<{ strike: number; optType: 'call' | 'put' } | null>(null);
+  // Selected contract for the OHLCV popup — set from the Open Interest or Option Chain tab.
+  const [selectedOptContract, setSelectedOptContract] = useState<{ strike: number; optType: 'call' | 'put'; occRoot?: string; expiry?: string } | null>(null);
 
-  const priceLevelsSectionRef = useRef<HTMLDivElement>(null);
-  const optChainSectionRef = useRef<HTMLDivElement>(null);
-
-  function jumpToSection(ref: React.RefObject<HTMLDivElement | null>, expand?: () => void) {
-    expand?.();
-    requestAnimationFrame(() => ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  // Tabs below the chart. Each tab mounts (and fetches) the first time it is opened and then stays
+  // mounted, so switching back is instant. The open tab is kept in ?tab= via history.replaceState
+  // (read once on mount; no useSearchParams, so the embedded chart needs no Suspense boundary).
+  const [tab, setTab] = useState<StockTab>('levels');
+  const [visitedTabs, setVisitedTabs] = useState<Set<StockTab>>(() => new Set(['levels']));
+  useEffect(() => {
+    if (embedded) return;
+    const t = new URLSearchParams(window.location.search).get('tab') as StockTab | null;
+    if (t && STOCK_TABS.includes(t)) { setTab(t); setVisitedTabs(v => new Set([...v, t])); }
+  }, [embedded]);
+  // The chart belongs to the first tab (the quote, Analysis and expiry selector above the tabs stay
+  // visible in every tab); embedded always shows it.
+  const showChart = embedded || tab === 'levels';
+  function openTab(t: StockTab) {
+    setTab(t);
+    setVisitedTabs(v => (v.has(t) ? v : new Set([...v, t])));
+    const url = new URL(window.location.href);
+    if (t === 'levels') url.searchParams.delete('tab'); else url.searchParams.set('tab', t);
+    window.history.replaceState(window.history.state, '', url);
   }
 
   function handleExpiryModeChange(mode: ExpiryMode) {
@@ -833,8 +762,9 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
   // Price Levels History table — its own independent fetch/date-range, not
   // tied to the chart's (see state comment above). Re-fetches on symbol,
   // expiry, or range-preset/custom-date change.
+  const levelsTabOpened = visitedTabs.has('levels');
   useEffect(() => {
-    if (embedded || !symbol || !selectedExpiry) return;
+    if (embedded || !levelsTabOpened || !symbol || !selectedExpiry) return;
 
     let from: string, to: string;
     if (priceHistoryPreset === 'custom') {
@@ -885,35 +815,7 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
       .finally(() => { if (!cancelled) setPriceHistoryLoading(false); });
 
     return () => { cancelled = true; };
-  }, [embedded, symbol, selectedExpiry, expiryMode, priceHistoryPreset, customFrom, customTo]);
-
-  // Option-chain OI — fetches every daily snapshot within the selected
-  // window (10D/30D/90D/All) for the selected expiry, not just the latest day.
-  useEffect(() => {
-    if (embedded || !symbol || !selectedExpiry) return;
-
-    // Same expiry-anchoring as the Price Levels History effect above.
-    const to = expiryMode === 'historical' ? selectedExpiry : format(new Date(), 'yyyy-MM-dd');
-    const from = optChainPreset === 'all' ? OPT_CHAIN_ALL_FROM : shiftDateString(to, -OPT_CHAIN_PRESET_DAYS[optChainPreset]);
-
-    let cancelled = false;
-    setOptChainLoading(true);
-    fetch(`/api/stocks/${symbol}/opt-chain?expiry=${selectedExpiry}&from=${from}&to=${to}`)
-      .then(res => res.json())
-      .then(json => {
-        if (cancelled) return;
-        if (json.success) {
-          setOptChainRows(json.data.rows || []);
-          setOptChainRange({ from: json.data.from, to: json.data.to });
-        } else {
-          setOptChainRows([]);
-          setOptChainRange(null);
-        }
-      })
-      .catch(() => { if (!cancelled) { setOptChainRows([]); setOptChainRange(null); } })
-      .finally(() => { if (!cancelled) setOptChainLoading(false); });
-    return () => { cancelled = true; };
-  }, [embedded, symbol, selectedExpiry, expiryMode, optChainPreset]);
+  }, [embedded, levelsTabOpened, symbol, selectedExpiry, expiryMode, priceHistoryPreset, customFrom, customTo]);
 
   // Live price — polls the quote snapshot on the real market schedule: every
   // 10s in the regular session, every 30s in pre-market / after-hours (the
@@ -1156,68 +1058,15 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
       .sort((a, b) => b.date.localeCompare(a.date));
   }, [priceHistoryMap]);
 
-  function handleOptChainSort(key: OptChainSortKey) {
-    if (optChainSortKey === key) {
-      setOptChainSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
-    } else {
-      setOptChainSortKey(key);
-      setOptChainSortDir('desc');
-    }
-  }
-
-  const visibleOptChainRows = optChainRows
-    .filter(r => {
-      if (oc('optType') && optChainTypeFilter !== 'all' && r.optType !== optChainTypeFilter) return false;
-      const q = optChainSearch.trim().toLowerCase();
-      if (q && !String(r.strike).includes(q) && !r.optType.includes(q)) return false;
-      if (oc('strike') && optChainColFilters.strike && !String(r.strike).includes(optChainColFilters.strike)) return false;
-      return true;
-    })
-    // Notional $ value of the OI change: contracts changed * premium * 100 shares/contract.
-    .map(r => ({ ...r, chgOpenIntPrice: r.oiChg * r.ltp * 100 }))
-    .sort((a, b) => {
-      const dir = optChainSortDir === 'asc' ? 1 : -1;
-      let av: number | string;
-      let bv: number | string;
-      switch (optChainSortKey) {
-        case 'absOiChg':
-          av = Math.abs(a.oiChg); bv = Math.abs(b.oiChg); break;
-        case 'absChgOpenIntPrice':
-          av = Math.abs(a.chgOpenIntPrice); bv = Math.abs(b.chgOpenIntPrice); break;
-        default:
-          av = a[optChainSortKey]; bv = b[optChainSortKey];
-      }
-      if (typeof av === 'string' && typeof bv === 'string') return av.localeCompare(bv) * dir;
-      return ((av as number) - (bv as number)) * dir;
-    });
-
-  // Quick jump to the two data-heavy sections below the chart. Sits under the
-  // stock quote while the chart stack is open, and in the toggle row once it
-  // collapses (the quote block is gone then).
-  const jumpButtons = (
-    <div className="flex flex-wrap gap-2">
-      <button
-        onClick={() => jumpToSection(priceLevelsSectionRef, () => setPriceHistoryCollapsed(false))}
-        className="px-3 py-1.5 rounded-full text-xs font-bold border-2 border-green-600 bg-green-50 text-green-700 hover:bg-green-600 hover:text-white transition-colors"
-      >
-        📊 Price Levels
-      </button>
-      <button
-        onClick={() => jumpToSection(optChainSectionRef, () => setOptChainCollapsed(false))}
-        className="px-3 py-1.5 rounded-full text-xs font-bold border-2 border-orange-600 bg-orange-50 text-orange-700 hover:bg-orange-600 hover:text-white transition-colors"
-      >
-        📈 Open Interest
-      </button>
-      {earningsLocked === false && (
-        <button
-          onClick={() => jumpToSection(earningsSectionRef, () => {})}
-          className="px-3 py-1.5 rounded-full text-xs font-bold border-2 border-amber-600 bg-amber-50 text-amber-700 hover:bg-amber-600 hover:text-white transition-colors"
-        >
-          📣 Earnings
-        </button>
-      )}
-    </div>
-  );
+  // Call High / Put Low for the selected expiry: strangle and condor templates anchor on them.
+  const builderLevels = useMemo(() => {
+    const by = new Map(levels.map(l => [l.name, l.price]));
+    return { call_high: by.get('call_high') || undefined, put_low: by.get('put_low') || undefined };
+  }, [levels]);
+  const upcomingExpiries = useMemo(() => {
+    const today = format(new Date(), 'yyyy-MM-dd');
+    return expiryDates.filter(d => d >= today).sort();
+  }, [expiryDates]);
 
   // One expiry pill — shared by the current and historical ladders.
   function renderExpiryButton(date: string) {
@@ -1397,7 +1246,7 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
     </button>
   );
 
-  // Dates and jump buttons, tucked under the quote in the chart header
+  // Dates and earnings lines, tucked under the quote in the chart header
   // (replaces the old side panel's Stock Information card).
   const headerBelow = (
     <div className="mt-2 space-y-2 max-w-md">
@@ -1413,7 +1262,6 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
         </div>
       )}
       <EarningsHeaderLines earnings={earnings} locked={earningsLocked} />
-      {!embedded && jumpButtons}
     </div>
   );
 
@@ -1433,6 +1281,21 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
         </button>
       ))}
     </div>
+  );
+
+  // Tab bar: between the header and the chart, or under the slim bar when the block is collapsed.
+  const tabBar = (
+    <Tabs<StockTab>
+      className="mb-4"
+      value={tab}
+      onChange={t => openTab(t)}
+      tabs={[
+        { id: 'levels', tone: 'green', label: 'Chart & Price Levels', title: 'Price chart with the level lines, and all seven levels, close and OI per day for the selected expiry' },
+        { id: 'oi', tone: 'orange', label: 'Open Interest', title: 'Open interest trend, OI change by strike and by contract' },
+        { id: 'chain', tone: 'blue', label: 'Option Chain', title: 'Live option chain and the Strategy Builder (payoff, POP, greeks)', badge: hasFeature(authCtx.features, FEATURE_STRATEGY_BUILDER) ? undefined : 'Pro' },
+        { id: 'earnings', tone: 'amber', label: 'Earnings', title: 'Reported quarters: EPS and sales vs consensus', badge: earningsLocked === true ? 'Pro' : undefined },
+      ]}
+    />
   );
 
   if (isLoading) {
@@ -1464,10 +1327,9 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
             </div>
           )}
 
-          {/* The whole block (header, expiry selector, chart) collapses behind
-              one icon button in the chart toolbar. Collapsed, it shrinks to a
-              slim bar that keeps the quote, the section jumps and the expiry
-              selector — the tables below still depend on the selected expiry. */}
+          {/* The whole block (header, expiry selector, chart) collapses behind one icon button in
+              the chart toolbar, to a slim bar that keeps the quote and the expiry selector — the
+              tabs still depend on the selected expiry. */}
           {chartStackCollapsed && (
             <div className="mb-8 space-y-3">
               <div className="flex flex-wrap items-center gap-x-4 gap-y-2 bg-white rounded-lg shadow-md px-3 py-2">
@@ -1482,16 +1344,18 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
                   </span>
                 )}
                 {livePrice !== undefined && quote?.ext && <ExtendedMove ext={quote.ext} full />}
-                {!embedded && <div className="ml-2">{jumpButtons}</div>}
                 {collapseButton}
               </div>
               {expiryPanel}
+              {!embedded && tabBar}
             </div>
           )}
 
-          {/* Main Chart + side panel */}
+          {/* Header (quote, Analysis, expiry selector), then the tab bar, then the chart. Other tabs
+              hide only the chart, not unmount it: a remount re-fits the view and fires a load-more
+              (an extra ohlc + rate-limited levels call) on every switch back. */}
           {!chartStackCollapsed && (
-            <div className={embedded ? 'relative' : 'relative mb-8'}>
+            <div className={embedded || !showChart ? 'relative' : 'relative mb-8'}>
               <TVChart
                 symbol={symbol.toUpperCase()}
                 candleData={candleData}
@@ -1523,6 +1387,8 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
                   </div>
                 )}
                 headerBelow={headerBelow}
+                afterHeader={!embedded && tabBar}
+                chartHidden={!showChart}
                 toolbarEnd={collapseButton}
                 height={embedded ? 520 : 600}
                 resizable={!embedded}
@@ -1547,315 +1413,74 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
             </div>
           )}
 
-          {!embedded && (<>
-          {/* Price Levels History — close price, all 7 raw DB levels, OI, and the UPC/UCPR ratio columns.
-              Independently rangeable (10D default, or 7D/30D/90D/Custom) rather than tied to the chart. */}
-          <div ref={priceLevelsSectionRef} className="mt-6 bg-white rounded-lg shadow-md p-4">
-            <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
-              <button
-                onClick={() => setPriceHistoryCollapsed(v => !v)}
-                className="flex items-center gap-1.5 text-base font-bold hover:text-gray-700"
-              >
-                <span className={`inline-block transition-transform text-gray-400 ${priceHistoryCollapsed ? '' : 'rotate-90'}`}>▶</span>
-                Price Levels History
-              </button>
-
-              {!priceHistoryCollapsed && (
-                <div className="flex flex-wrap items-center gap-2">
-                  <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
-                    {(['10d', '30d', '90d', 'custom'] as RangePreset[]).map(p => (
-                      <button
-                        key={p}
-                        onClick={() => setPriceHistoryPreset(p)}
-                        className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-colors ${
-                          priceHistoryPreset === p ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500'
-                        }`}
-                      >
-                        {RANGE_PRESET_LABELS[p]}
-                      </button>
-                    ))}
-                  </div>
-                  {priceHistoryPreset === 'custom' && (
-                    <div className="flex items-center gap-1.5 text-xs">
-                      <input
-                        type="date"
-                        value={customFrom}
-                        onChange={e => setCustomFrom(e.target.value)}
-                        className="px-2 py-1 border border-gray-200 rounded text-xs"
-                      />
-                      <span className="text-gray-400">to</span>
-                      <input
-                        type="date"
-                        value={customTo}
-                        onChange={e => setCustomTo(e.target.value)}
-                        className="px-2 py-1 border border-gray-200 rounded text-xs"
-                      />
+          {!embedded && (
+            <div>
+              {visitedTabs.has('levels') && (
+                <div hidden={tab !== 'levels'}>
+                  <PriceLevelsTab
+                    rows={priceHistoryRows}
+                    loading={priceHistoryLoading}
+                    selectedExpiry={selectedExpiry}
+                    preset={priceHistoryPreset}
+                    onPreset={setPriceHistoryPreset}
+                    customFrom={customFrom}
+                    customTo={customTo}
+                    onCustomFrom={setCustomFrom}
+                    onCustomTo={setCustomTo}
+                  />
+                </div>
+              )}
+              {visitedTabs.has('oi') && selectedExpiry && (
+                <div hidden={tab !== 'oi'}>
+                  <OpenInterestTab
+                    symbol={symbol}
+                    selectedExpiry={selectedExpiry}
+                    expiryMode={expiryMode}
+                    onOpenContract={(strike, optType, expiry, occRoot) => setSelectedOptContract({ strike, optType, expiry, occRoot })}
+                  />
+                </div>
+              )}
+              {visitedTabs.has('chain') && selectedExpiry && (
+                <div hidden={tab !== 'chain'}>
+                  <OptionChainTab
+                    symbol={symbol.toUpperCase()}
+                    selectedExpiry={selectedExpiry}
+                    expiryMode={expiryMode}
+                    expiries={upcomingExpiries}
+                    levels={builderLevels}
+                    earnings={earnings}
+                    entitled={hasFeature(authCtx.features, FEATURE_STRATEGY_BUILDER)}
+                    loggedIn={authCtx.loggedIn}
+                    onOpenContract={(strike, optType, occRoot) => setSelectedOptContract({ strike, optType, occRoot })}
+                  />
+                </div>
+              )}
+              {visitedTabs.has('earnings') && (
+                <div hidden={tab !== 'earnings'}>
+                  {earningsLocked === false ? (
+                    <EarningsHistoryTable history={earningsHistory} loading={earningsHistory === null} className="" />
+                  ) : (
+                    <div className="bg-white rounded-lg shadow-md p-6 text-center text-sm text-gray-600">
+                      {earningsLocked === null ? 'Loading…' : (
+                        <>Earnings dates and results (EPS and sales vs consensus) are a Pro feature.{' '}
+                          <Link href="/upgrade?feature=earnings" className="font-semibold text-blue-600 hover:underline">Upgrade</Link></>
+                      )}
                     </div>
                   )}
-                  {priceHistoryLoading && <Spinner />}
-                  <ColumnsMenu metas={PRICE_HISTORY_COLUMNS} {...phCols.menu} />
                 </div>
               )}
-            </div>
-
-            {!priceHistoryCollapsed && (
-              priceHistoryRows.length === 0 ? (
-                <div className="text-center py-4 text-gray-500 text-sm">
-                  {priceHistoryLoading
-                    ? 'Loading…'
-                    : `No historical level data available${selectedExpiry ? ` for expiry ${selectedExpiry}` : ''} in this range.`}
-                </div>
-              ) : (
-                // Bounded height + internal scroll, so the panel's own header
-                // (range presets, custom dates) stays on screen while paging
-                // through rows, and the column headers stick to the top of
-                // this box rather than scrolling away with them.
-                <div className={`overflow-auto max-h-[65vh] ${phCols.hideUntilReady}`}>
-                  <table className="w-full text-xs whitespace-nowrap">
-                    {/* bg-white on the th, not just the thead — a transparent
-                        cell would let rows show through as they scroll under.
-                        The divider is an inset shadow rather than the tr's
-                        border-b: preflight sets border-collapse:collapse, and
-                        collapsed borders don't travel with a sticky cell. */}
-                    <thead className="[&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-white [&_th]:shadow-[inset_0_-1px_0_0_#e5e7eb]">
-                      <ColRow layout={phCols.layout} header className="text-gray-500">
-                        <th data-col="date" className="sticky text-left py-1.5 pr-3 font-medium">Date</th>
-                        {ph('open') && (<th data-col="open" className="sticky text-right py-1.5 px-2 font-medium">Open</th>)}
-                        {ph('high') && (<th data-col="high" className="sticky text-right py-1.5 px-2 font-medium">High</th>)}
-                        {ph('low') && (<th data-col="low" className="sticky text-right py-1.5 px-2 font-medium">Low</th>)}
-                        {ph('close') && (<th data-col="close" className="sticky text-right py-1.5 px-2 font-medium" title="The date's own close; level distances are measured against it">Close</th>)}
-                        {ph('eodClose') && (<th data-col="eodClose" className="sticky text-right py-1.5 px-2 font-medium" title="Stored close for this load date (the previous session's close)">EOD close</th>)}
-                        {SEVEN_LEVEL_ORDER.filter(name => ph(name)).map((name) => (
-                          <th key={name} data-col={name} className="sticky text-right py-1.5 px-2 font-medium">
-                            {getLevelDisplayName(name)}
-                          </th>
-                        ))}
-                        {ph('callOi') && (<th data-col="callOi" className="sticky text-right py-1.5 px-2 font-medium">Call OI</th>)}
-                        {ph('putOi') && (<th data-col="putOi" className="sticky text-right py-1.5 px-2 font-medium">Put OI</th>)}
-                        {ph('oiDiff') && (<th data-col="oiDiff" className="sticky text-right py-1.5 px-2 font-medium">OI Diff</th>)}
-                        {ph('upc') && (<th data-col="upc" className="sticky text-right py-1.5 pl-2 font-medium">UPC</th>)}
-                        {ph('ucpr') && (<th data-col="ucpr" className="sticky text-right py-1.5 pl-2 font-medium">UCPR</th>)}
-                      </ColRow>
-                    </thead>
-                    <tbody>
-                      {priceHistoryRows.map((row) => {
-                        const closest = row.sevenLevels.length > 0
-                          ? row.sevenLevels.reduce((c, l) => Math.abs(l.value) < Math.abs(c.value) ? l : c)
-                          : null;
-                        const levelsByName = new Map(row.sevenLevels.map(l => [l.name, l]));
-
-                        return (
-                          <ColRow layout={phCols.layout} key={row.date} className="border-b border-gray-100 last:border-0 hover:bg-gray-50">
-                            <td data-col="date" className="py-1.5 pr-3 text-gray-600">{row.date}</td>
-                            {ph('open') && (<td data-col="open" className="text-right py-1.5 px-2 text-gray-600">{row.open != null ? formatCurrency(row.open) : '—'}</td>)}
-                            {ph('high') && (<td data-col="high" className="text-right py-1.5 px-2 text-gray-600">{row.high != null ? formatCurrency(row.high) : '—'}</td>)}
-                            {ph('low') && (<td data-col="low" className="text-right py-1.5 px-2 text-gray-600">{row.low != null ? formatCurrency(row.low) : '—'}</td>)}
-                            {ph('close') && (<td data-col="close" className="text-right py-1.5 px-2 font-semibold">{formatCurrency(row.close)}</td>)}
-                            {ph('eodClose') && (<td data-col="eodClose" className="text-right py-1.5 px-2 text-gray-400">{row.eodClose != null ? formatCurrency(row.eodClose) : '—'}</td>)}
-                            {SEVEN_LEVEL_ORDER.filter(name => ph(name)).map((name) => {
-                              const lvl = levelsByName.get(name);
-                              const isClosest = !!closest && lvl && closest.name === lvl.name;
-                              return (
-                                <td
-                                  key={name}
-                                  data-col={name}
-                                  className={`text-right py-1.5 px-2 font-mono ${
-                                    isClosest ? 'bg-blue-50 text-blue-700 font-bold rounded' : ''
-                                  }`}
-                                >
-                                  {lvl ? formatCurrency(lvl.price) : '—'}
-                                  {lvl && (
-                                    <span className={`ml-1 ${isClosest ? 'text-blue-500' : 'text-gray-400'}`}>
-                                      ({formatPercentage(lvl.value)})
-                                    </span>
-                                  )}
-                                </td>
-                              );
-                            })}
-                            {ph('callOi') && (<td data-col="callOi" className="text-right py-1.5 px-2 text-gray-600">{row.oi?.callOi?.toLocaleString() ?? '—'}</td>)}
-                            {ph('putOi') && (<td data-col="putOi" className="text-right py-1.5 px-2 text-gray-600">{row.oi?.putOi?.toLocaleString() ?? '—'}</td>)}
-                            {ph('oiDiff') && (<td data-col="oiDiff" className="text-right py-1.5 px-2 text-gray-600">{row.oi?.oiDiff?.toLocaleString() ?? '—'}</td>)}
-                            {ph('upc') && (<td data-col="upc" className="text-right py-1.5 pl-2 text-gray-600">{row.ratios?.upc ?? '—'}</td>)}
-                            {ph('ucpr') && (<td data-col="ucpr" className="text-right py-1.5 pl-2 text-gray-600">{row.ratios?.ucpr ?? '—'}</td>)}
-                          </ColRow>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )
-            )}
-          </div>
-
-          {/* Option Chain OI (public.us_opt_chg_rpt) — per-strike put/call OI
-              snapshot for the selected expiry (latest available load_dt),
-              with per-column filters plus a strike/type search. */}
-          <div ref={optChainSectionRef} className="mt-6 bg-white rounded-lg shadow-md p-4">
-            <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
-              <button
-                onClick={() => setOptChainCollapsed(v => !v)}
-                className="flex items-center gap-1.5 text-base font-bold hover:text-gray-700"
-              >
-                <span className={`inline-block transition-transform text-gray-400 ${optChainCollapsed ? '' : 'rotate-90'}`}>▶</span>
-                Open Interest — Option Chain
-                {optChainRange && <span className="text-xs font-normal text-gray-400">{optChainRange.from} to {optChainRange.to}</span>}
-              </button>
-
-              {!optChainCollapsed && (
-                <div className="flex items-center gap-2">
-                  <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
-                    {(['10d', '30d', '90d', 'all'] as OptChainPreset[]).map(p => (
-                      <button
-                        key={p}
-                        onClick={() => setOptChainPreset(p)}
-                        className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-colors ${
-                          optChainPreset === p ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500'
-                        }`}
-                      >
-                        {OPT_CHAIN_PRESET_LABELS[p]}
-                      </button>
-                    ))}
-                  </div>
-                  {optChainLoading && <Spinner />}
-                  <ColumnsMenu metas={OPT_CHAIN_COLUMNS} {...ocCols.menu} />
-                </div>
-              )}
-            </div>
-
-            {!optChainCollapsed && (
-              <>
-                <div className="flex flex-wrap items-end gap-3 mb-3">
-                  <div>
-                    <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1">Search</label>
-                    <input
-                      value={optChainSearch}
-                      onChange={e => setOptChainSearch(e.target.value)}
-                      placeholder="Strike or type…"
-                      className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white w-40"
-                    />
-                  </div>
-                  {visibleOptChainRows.length !== optChainRows.length && (
-                    <span className="text-[11px] text-gray-400 pb-1.5">{visibleOptChainRows.length} of {optChainRows.length} rows</span>
-                  )}
-                </div>
-
-                {optChainRows.length === 0 ? (
-                  <div className="text-center py-4 text-gray-500 text-sm">
-                    {optChainLoading ? 'Loading…' : `No option chain data available${selectedExpiry ? ` for expiry ${selectedExpiry}` : ''}.`}
-                  </div>
-                ) : (
-                  // Same bounded scroll box as the Price Levels History table
-                  // above, so the range presets and search stay reachable and
-                  // the sort/filter row sticks while scrolling strikes.
-                  <div className={`overflow-auto max-h-[65vh] ${ocCols.hideUntilReady}`}>
-                    <table className="w-full text-xs whitespace-nowrap">
-                      <thead className="[&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-white [&_th]:shadow-[inset_0_-1px_0_0_#e5e7eb]">
-                        <ColRow layout={ocCols.layout} header className="text-gray-500 align-bottom">
-                          <th data-col="symbol" className="sticky text-left py-1.5 pr-3 font-medium">Symbol</th>
-                          {oc('expiry') && (<th data-col="expiry" className="sticky text-left py-1.5 px-2 font-medium">Expiry</th>)}
-                          {oc('loadDate') && (<th data-col="loadDate" className="sticky text-left py-1.5 px-2 font-medium">
-                            <OptChainSortLabel label="Trade Date" align="left" active={optChainSortKey === 'loadDate'} dir={optChainSortDir} onClick={() => handleOptChainSort('loadDate')} />
-                          </th>)}
-                          {oc('cmp') && (<th data-col="cmp" className="sticky text-right py-1.5 px-2 font-medium">
-                            <OptChainSortLabel label="CMP" active={optChainSortKey === 'close'} dir={optChainSortDir} onClick={() => handleOptChainSort('close')} />
-                          </th>)}
-                          {oc('strike') && (<th data-col="strike" className="sticky text-right py-1.5 px-2 font-medium">
-                            <OptChainSortLabel label="Strike Price" active={optChainSortKey === 'strike'} dir={optChainSortDir} onClick={() => handleOptChainSort('strike')} />
-                            <input
-                              value={optChainColFilters.strike}
-                              onChange={e => setOptChainColFilters(prev => ({ ...prev, strike: e.target.value }))}
-                              placeholder="Filter…"
-                              className="mt-1 w-full px-1.5 py-0.5 border border-gray-200 rounded text-[11px] text-right font-normal focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
-                            />
-                          </th>)}
-                          {oc('optType') && (<th data-col="optType" className="sticky text-left py-1.5 px-2 font-medium">
-                            <OptChainSortLabel label="Opt Typ" align="left" active={optChainSortKey === 'optType'} dir={optChainSortDir} onClick={() => handleOptChainSort('optType')} />
-                            <select
-                              value={optChainTypeFilter}
-                              onChange={e => setOptChainTypeFilter(e.target.value as 'all' | 'call' | 'put')}
-                              className="mt-1 px-1 py-0.5 border border-gray-200 rounded text-[11px] font-normal capitalize focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
-                            >
-                              <option value="all">All</option>
-                              <option value="call">Call</option>
-                              <option value="put">Put</option>
-                            </select>
-                          </th>)}
-                          {oc('ltp') && (<th data-col="ltp" className="sticky text-right py-1.5 px-2 font-medium">
-                            <OptChainSortLabel label="Opt LTP" active={optChainSortKey === 'ltp'} dir={optChainSortDir} onClick={() => handleOptChainSort('ltp')} />
-                          </th>)}
-                          {oc('oi') && (<th data-col="oi" className="sticky text-right py-1.5 px-2 font-medium">
-                            <OptChainSortLabel label="Open Int" active={optChainSortKey === 'oi'} dir={optChainSortDir} onClick={() => handleOptChainSort('oi')} />
-                          </th>)}
-                          {oc('oiChg') && (<th data-col="oiChg" className="sticky text-right py-1.5 px-2 font-medium">
-                            <OptChainSortLabel label="Chg Open Int" active={optChainSortKey === 'oiChg'} dir={optChainSortDir} onClick={() => handleOptChainSort('oiChg')} />
-                          </th>)}
-                          {oc('absOiChg') && (<th data-col="absOiChg" className="sticky text-right py-1.5 px-2 font-medium">
-                            <OptChainSortLabel label="ABS Chg Open Int" active={optChainSortKey === 'absOiChg'} dir={optChainSortDir} onClick={() => handleOptChainSort('absOiChg')} />
-                          </th>)}
-                          {oc('chgPrice') && (<th data-col="chgPrice" className="sticky text-right py-1.5 px-2 font-medium">
-                            <OptChainSortLabel label="Chg Open Int Price" active={optChainSortKey === 'chgOpenIntPrice'} dir={optChainSortDir} onClick={() => handleOptChainSort('chgOpenIntPrice')} />
-                          </th>)}
-                          {oc('absChgPrice') && (<th data-col="absChgPrice" className="sticky text-right py-1.5 pl-2 font-medium">
-                            <OptChainSortLabel label="ABS Chg Open Int Price" active={optChainSortKey === 'absChgOpenIntPrice'} dir={optChainSortDir} onClick={() => handleOptChainSort('absChgOpenIntPrice')} />
-                          </th>)}
-                        </ColRow>
-                      </thead>
-                      <tbody>
-                        {visibleOptChainRows.map((r, i) => {
-                          const chgOpenIntPrice = r.chgOpenIntPrice;
-                          return (
-                            <ColRow
-                              layout={ocCols.layout}
-                              key={`${r.loadDate}-${r.optType}-${r.strike}-${i}`}
-                              onClick={() => setSelectedOptContract({ strike: r.strike, optType: r.optType })}
-                              title="View option contract chart"
-                              className="border-b border-gray-100 last:border-0 hover:bg-blue-50 cursor-pointer"
-                            >
-                              <td data-col="symbol" className="py-1.5 pr-3 text-gray-600">{symbol.toUpperCase()}</td>
-                              {oc('expiry') && (<td data-col="expiry" className="py-1.5 px-2 text-gray-600">{selectedExpiry}</td>)}
-                              {oc('loadDate') && (<td data-col="loadDate" className="py-1.5 px-2 text-gray-600" title={`Session behind the OI change; reported in the ${r.loadDate} load`}>{r.tradeDate ?? r.loadDate}</td>)}
-                              {oc('cmp') && (<td data-col="cmp" className="text-right py-1.5 px-2 text-gray-600">{r.close}</td>)}
-                              {oc('strike') && (<td data-col="strike" className="text-right py-1.5 px-2 font-mono">{r.strike}</td>)}
-                              {oc('optType') && (<td data-col="optType" className={`py-1.5 px-2 font-semibold capitalize ${r.optType === 'call' ? 'text-green-600' : 'text-red-600'}`}>{r.optType}</td>)}
-                              {oc('ltp') && (<td data-col="ltp" className="text-right py-1.5 px-2 text-gray-600">{r.ltp}</td>)}
-                              {oc('oi') && (<td data-col="oi" className="text-right py-1.5 px-2 text-gray-600">{r.oi.toLocaleString()}</td>)}
-                              {oc('oiChg') && (<td data-col="oiChg" className={`text-right py-1.5 px-2 font-semibold ${r.oiChg > 0 ? 'text-green-600' : r.oiChg < 0 ? 'text-red-600' : 'text-gray-500'}`}>
-                                {r.oiChg > 0 ? '+' : ''}{r.oiChg.toLocaleString()}
-                              </td>)}
-                              {oc('absOiChg') && (<td data-col="absOiChg" className="text-right py-1.5 px-2 text-gray-600">{Math.abs(r.oiChg).toLocaleString()}</td>)}
-                              {oc('chgPrice') && (<td data-col="chgPrice" className={`text-right py-1.5 px-2 font-semibold ${chgOpenIntPrice > 0 ? 'text-green-600' : chgOpenIntPrice < 0 ? 'text-red-600' : 'text-gray-500'}`}>
-                                {chgOpenIntPrice > 0 ? '+' : ''}{chgOpenIntPrice.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                              </td>)}
-                              {oc('absChgPrice') && (<td data-col="absChgPrice" className="text-right py-1.5 pl-2 text-gray-600">{Math.abs(chgOpenIntPrice).toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>)}
-                            </ColRow>
-                          );
-                        })}
-                        {visibleOptChainRows.length === 0 && (
-                          <tr><td colSpan={OPT_CHAIN_COLUMNS.filter(c => oc(c.id)).length} className="text-center py-4 text-gray-400">No rows match your filters.</td></tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-
-          {earningsLocked === false && (
-            <div ref={earningsSectionRef}>
-              <EarningsHistoryTable history={earningsHistory} loading={earningsHistory === null} />
             </div>
           )}
-          </>)}
         </div>
       </div>
 
       {selectedOptContract && selectedExpiry && (
         <OptionContractModal
           symbol={symbol}
-          expiry={selectedExpiry}
+          expiry={selectedOptContract.expiry ?? selectedExpiry}
           strike={selectedOptContract.strike}
           optType={selectedOptContract.optType}
+          occRoot={selectedOptContract.occRoot}
           onClose={() => setSelectedOptContract(null)}
         />
       )}
