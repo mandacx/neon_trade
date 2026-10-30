@@ -172,7 +172,7 @@ export default function OptionContractModal({ symbol, expiry, strike, optType, o
           <span className="inline-block w-2 h-2 rounded-full bg-blue-500 mr-1" />{symbol.toUpperCase()} price
           <span className="inline-block w-2 h-2 rounded-full bg-green-500 ml-3 mr-1" />OI ↑
           <span className="inline-block w-2 h-2 rounded-full bg-red-500 ml-3 mr-1" />OI ↓
-          <span className="ml-3" title="Lower bands: OI change for each session (green opened, red closed) above the contract's volume">bands: ΔOI · volume</span>
+          <span className="ml-3" title="Lower band, one scale: the contract's volume (blue, left) beside the session's OI change (green opened, red closed, right)">band: volume | ΔOI</span>
         </div>
       </div>
 

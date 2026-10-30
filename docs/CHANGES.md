@@ -7,6 +7,14 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-30 — Contract chart: volume and OI change share one band and scale
+
+- **Files:** `components/charts/OptionContractChart.tsx`, `components/stock/OptionContractModal.tsx` (legend).
+- **What:** the OI-change histogram and the volume histogram were two stacked bands on separate scales. They now sit on one overlay scale (`band`): grey volume bars behind, green / red OI-change bars in front. Volume lost its green/red candle tint so it cannot be confused with OI up / down. The price scales reserve 34% at the bottom (was 38%).
+- **Then, same day:** the two histograms became one custom series (`VolOiPaneView`, `addCustomSeries`, available in the installed 4.2.3) that draws volume (blue, left half) and OI change (green / red, right half) side by side per session on the shared scale, so nothing overlaps. Legend: "band: volume | ΔOI". Histogram series cannot be offset inside a bar slot, hence the custom series.
+- **Verified:** SPX 2026-10-30 6730 put screenshots (one band; final version has volume and OI bars side by side); `npx tsc --noEmit` clean.
+- **Not verified:** a contract with negative OI change in the same window (axis/zero line placement), tooltip text.
+
 ## 2026-10-30 — Contract chart: no negative price labels on the axes
 
 - **Files:** `components/charts/OptionContractChart.tsx`.

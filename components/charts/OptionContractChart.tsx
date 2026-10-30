@@ -6,12 +6,55 @@ import {
   IChartApi,
   ISeriesApi,
   CandlestickData,
-  HistogramData,
   LineData,
   SeriesMarker,
   Time,
   MouseEventParams,
+  CustomData,
+  CustomSeriesOptions,
+  ICustomSeriesPaneView,
+  ICustomSeriesPaneRenderer,
+  PaneRendererCustomData,
+  customSeriesDefaultOptions,
 } from 'lightweight-charts';
+
+// Volume (grey) and OI change (green up / red down) for one session, drawn side by side on one scale.
+// lightweight-charts v4 histograms cannot be offset within a bar slot, hence a custom series.
+interface VolOiData extends CustomData<Time> { volume: number; oiChg: number | null }
+
+class VolOiPaneView implements ICustomSeriesPaneView<Time, VolOiData, CustomSeriesOptions> {
+  private data: PaneRendererCustomData<Time, VolOiData> | null = null;
+  private rend: ICustomSeriesPaneRenderer = {
+    draw: (target, priceConverter) => {
+      target.useMediaCoordinateSpace(({ context }) => {
+        const d = this.data;
+        if (!d || !d.visibleRange) return;
+        const zero = priceConverter(0);
+        if (zero === null) return;
+        const half = Math.max(1, Math.floor(d.barSpacing * 0.8) / 2);
+        const bar = (x: number, value: number, color: string) => {
+          const y = priceConverter(value);
+          if (y === null) return;
+          context.fillStyle = color;
+          const h = Math.max(1, Math.abs(zero - y));
+          context.fillRect(x, value >= 0 ? zero - h : zero, half, h);
+        };
+        for (let i = d.visibleRange.from; i <= d.visibleRange.to; i++) {
+          const b = d.bars[i];
+          if (!b) continue;
+          const { volume, oiChg } = b.originalData;
+          bar(b.x - half, volume, 'rgba(59,130,246,0.75)');
+          if (oiChg) bar(b.x, oiChg, oiChg >= 0 ? '#16a34a' : '#dc2626');
+        }
+      });
+    },
+  };
+  renderer() { return this.rend; }
+  update(data: PaneRendererCustomData<Time, VolOiData>) { this.data = data; }
+  priceValueBuilder(d: VolOiData) { return [Math.min(0, d.oiChg ?? 0), Math.max(d.volume, d.oiChg ?? 0), d.volume]; }
+  isWhitespace(d: VolOiData | { time: Time }): d is { time: Time } { return (d as VolOiData).volume === undefined; }
+  defaultOptions() { return { ...customSeriesDefaultOptions, priceLineVisible: false, lastValueVisible: false }; }
+}
 
 // Gap between the crosshair and the tooltip, and the minimum breathing room
 // kept between the tooltip and the container's edges. Same values as TVChart's
@@ -77,8 +120,7 @@ export default function OptionContractChart({
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const underlyingSeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
-  const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
-  const oiChgSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
+  const bandSeriesRef = useRef<ISeriesApi<'Custom'> | null>(null);
   // `x` is already corrected for the left price scale — see handleMove.
   const [tooltip, setTooltip] = useState<{ x: number; y: number; lines: string[] } | null>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
@@ -98,7 +140,7 @@ export default function OptionContractChart({
       timeScale: { borderColor: '#d1d4dc', timeVisible: isIntraday, secondsVisible: false },
     });
 
-    // The bottom 38% of both price scales is reserved for the OI-change and volume bands, so the scales
+    // The bottom 34% of both price scales is reserved for the volume / OI-change band, so the scales
     // run below the data's minimum and would label impossible negative prices; leave those ticks blank.
     const priceOnly = { type: 'custom' as const, minMove: 0.01, formatter: (v: number) => (v < 0 ? '' : v.toFixed(2)) };
     const candleSeries = chart.addCandlestickSeries({
@@ -118,24 +160,17 @@ export default function OptionContractChart({
       lastValueVisible: true,
     });
 
-    // Bands below the price: OI change (session of the change, green up / red down)
-    // above volume. Overlay scales, since lightweight-charts v4 has no separate panes.
-    chart.priceScale('right').applyOptions({ scaleMargins: { top: 0.05, bottom: 0.38 } });
-    chart.priceScale('left').applyOptions({ scaleMargins: { top: 0.05, bottom: 0.38 } });
-    const oiChgSeries = chart.addHistogramSeries({
-      priceScaleId: 'oichg', priceFormat: { type: 'volume' }, priceLineVisible: false, lastValueVisible: false,
-    });
-    chart.priceScale('oichg').applyOptions({ scaleMargins: { top: 0.64, bottom: 0.19 } });
-    const volumeSeries = chart.addHistogramSeries({
-      priceScaleId: 'vol', color: '#94a3b8', priceFormat: { type: 'volume' }, priceLineVisible: false, lastValueVisible: false,
-    });
-    chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.84, bottom: 0 } });
+    // One band below the price: volume and OI change side by side on the same scale. Overlay scale,
+    // since lightweight-charts v4 has no separate panes.
+    chart.priceScale('right').applyOptions({ scaleMargins: { top: 0.05, bottom: 0.34 } });
+    chart.priceScale('left').applyOptions({ scaleMargins: { top: 0.05, bottom: 0.34 } });
+    const bandSeries = chart.addCustomSeries(new VolOiPaneView(), { priceScaleId: 'band', priceFormat: { type: 'volume' } });
+    chart.priceScale('band').applyOptions({ scaleMargins: { top: 0.68, bottom: 0.02 } });
 
     chartRef.current = chart;
     candleSeriesRef.current = candleSeries;
     underlyingSeriesRef.current = underlyingSeries;
-    volumeSeriesRef.current = volumeSeries;
-    oiChgSeriesRef.current = oiChgSeries;
+    bandSeriesRef.current = bandSeries;
 
     const handleResize = () => {
       if (containerRef.current) chart.applyOptions({ width: containerRef.current.clientWidth });
@@ -148,8 +183,7 @@ export default function OptionContractChart({
       chartRef.current = null;
       candleSeriesRef.current = null;
       underlyingSeriesRef.current = null;
-      volumeSeriesRef.current = null;
-      oiChgSeriesRef.current = null;
+      bandSeriesRef.current = null;
     };
   }, [height, isIntraday]);
 
@@ -160,25 +194,20 @@ export default function OptionContractChart({
       time: b.time as Time, open: b.open, high: b.high, low: b.low, close: b.close,
     }));
     candleSeriesRef.current.setData(data);
-    volumeSeriesRef.current?.setData(optionBars.map((b): HistogramData => ({
-      time: b.time as Time, value: b.volume, color: b.close >= b.open ? 'rgba(34,197,94,0.45)' : 'rgba(239,68,68,0.45)',
-    })));
     chartRef.current?.timeScale().fitContent();
   }, [optionBars]);
 
-  // OI change per session, on the first bar of its trade date (same placement as the markers below).
+  // Volume per bar, with the session's OI change on the first bar of its trade date (same placement as the markers below).
   useEffect(() => {
-    if (!oiChgSeriesRef.current) return;
+    if (!bandSeriesRef.current) return;
     const firstBarTimeByDay = new Map<string, number>();
     optionBars.forEach(b => { if (!firstBarTimeByDay.has(b.dayKey)) firstBarTimeByDay.set(b.dayKey, b.time); });
-    const byTime = new Map<number, number>();
+    const oiByTime = new Map<number, number>();
     for (const p of historyPoints) {
       const t = firstBarTimeByDay.get(p.tradeDate);
-      if (t !== undefined) byTime.set(t, p.oiChg);
+      if (t !== undefined) oiByTime.set(t, p.oiChg);
     }
-    oiChgSeriesRef.current.setData([...byTime.entries()].sort((a, b) => a[0] - b[0]).map(([t, v]): HistogramData => ({
-      time: t as Time, value: v, color: v >= 0 ? '#16a34a' : '#dc2626',
-    })));
+    bandSeriesRef.current.setData(optionBars.map((b): VolOiData => ({ time: b.time as Time, volume: b.volume, oiChg: oiByTime.get(b.time) ?? null })));
   }, [optionBars, historyPoints]);
 
   // Underlying comparison line.
