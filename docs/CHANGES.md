@@ -7,6 +7,27 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-30 — SPX / NDX quotes on the other pages (watchlists, quadrant, OI tracker, option chain)
+
+- **Files:** new `lib/snapshots.ts` (`getSnapshotsWithIndices(symbols, fetchStocks?)`: primary-feed snapshots for stocks, `getIndexSnapshots` for SPX/NDX, merged; the market state is read only when an index is in the list). Used by `app/api/watchlists/[id]/quotes/route.ts`, `lib/quadrantPrices.ts` (current prices, with the chunked reader), `lib/oiTracked.ts` (`underlyingOn` for today, `withPerformance`), `app/api/oi-tracker/stock/[symbol]/route.ts` (quote), `app/api/stocks/[symbol]/chain/route.ts` (`spotOf`, whose fallback quote stays for other symbols), and the `/quote` and `/indices` routes from the entry below (now one-liners).
+- **Quadrant, past dates:** `dayCloses` also reads SPX / NDX closes from the fallback daily bars when the primary feed has none.
+- **Left alone on purpose:** earnings list and home earnings (no indices), the scanner and `nt_daily_bars` (own pipelines), diagnostics.
+- **Verified:** `tsc --noEmit` clean; `/quote` and `/indices` return SPX and NDX through the new helper (AAPL unchanged, still with `ext`). **After the close** (20:02 UTC, session `post`): SPX last 7579.83 equals Tradier's daily close 7579.83 and `prevclose` is still the previous day's 7720.39, so the route shows −1.82% rather than a reset; this settles the "after the close" item left open in the entry below for SPX.
+- **Not verified:** the watchlist, quadrant, OI tracker and chain routes need a login and were not exercised (type-checked only); the quadrant past-date index close; any page in a browser.
+- **NDX accuracy (open question):** after the close Tradier's NDX quote said 28561.44 (−2.87%) while its daily close was 28305.30 (−3.73%) and its last 1-minute bar (15:47 ET) 28307; QQQ was −3.48%, SPY −1.78% vs SPX −1.83% (consistent). So the NDX quote and NDX bars disagree by ~0.9% and I could not tell which is right. SPX has no such gap.
+
+## 2026-10-30 — Live SPX / NDX quotes (header strip, stock page) and NDX intraday bars
+
+- **Files:** `lib/marketdata/provider/fallback.ts`, `lib/marketdata/index.ts`, `app/api/stocks/[symbol]/quote/route.ts`, `app/api/market/indices/route.ts`.
+- **Why:** the primary feed has no snapshot for indices, so `/quote` returned `data: null` for SPX/NDX (no header price, no live candle) and the header strip only had ETF proxies. Daily and intraday bars for SPX already fell back to the fallback source; NDX intraday returned nothing.
+- **What:**
+  - `getIndexSnapshots(symbols, sessionDate)` (facade, fallback provider): one `/markets/quotes` call for SPX and NDX, mapped into the neutral `Snapshot` shape (`dailyBar` = open/high/low and `last` as the close, `prevDailyBar.c` = `prevclose`, no `latestTrade`), so `buildQuote` works unchanged and gives live price/change in the session and the last value after it. `INDEX_QUOTE_SYMBOLS` = SPX, NDX. A failure returns `{}`.
+  - `/api/stocks/[symbol]/quote` uses it for those two symbols; `/api/market/indices` adds SPX and NDX (first) to the strip; the ETFs stay.
+  - NDX intraday: Tradier's `session_filter=open` returns no data for NDX after a ~10 s wait (measured), `all` returns in ~0.3 s and runs to 17:15 ET. NDX is queried with `all` and trimmed to 09:30–16:00 ET (`DERIVED_INDEX_SYMBOLS`, `inRegularSession`).
+- **Verified (market open, regular session):** `tsc --noEmit` clean. Quote route: SPX 7561.37 (−2.06%), NDX 28397.13 (−3.42%), AAPL unchanged. Strip route returns SPX, NDX plus the six ETFs, no vendor names in the body. OHLC: NDX 5min/15min/1hour now 207/69/19 bars (09:30 start, was 0 after a 10 s timeout); SPX unchanged. `/stock/SPX`, `/stock/NDX`, `expiry-dates` and `levels` return 200. `grep` for vendor names in `.next/static` (dev build) empty.
+- **Not verified:** the header strip and stock header in a browser; behaviour after the close (relies on Tradier keeping `last` at the close and `prevclose` at the prior session until the next open); pre-market of a new day (`prevclose` may roll to the previous close, giving a 0 change until the open); production build; the watchlist, earnings and home quote routes (still primary-feed only, so SPX/NDX there are empty).
+- **Caveat:** NDX is a *derived* index at Tradier with no trade timestamp. Its bars and daily history lag the quote (at the time of testing: last 5-minute bar 13:40 ET, close 28309.6 vs quote 28397.1, ~0.3%), so the live header price and the last chart candle can differ for NDX. SPX bars matched its quote within a few points.
+
 ## 2026-10-30 — Contract chart: volume and OI change share one band and scale
 
 - **Files:** `components/charts/OptionContractChart.tsx`, `components/stock/OptionContractModal.tsx` (legend).

@@ -9,7 +9,8 @@
  *
  *  - primary  : stock/option bars and snapshots, calendar, news
  *  - fallback : symbol search, the live option chain (quotes, greeks, open interest) and its expiries,
- *               and daily/intraday bars for symbols the primary has none for (indices such as SPX; no volume)
+ *               and daily/intraday bars and live quotes (getIndexSnapshots) for the indices the primary
+ *               has none for (SPX, NDX; no volume)
  */
 export type { Bar, Snapshot, OptionSnapshot, OptionChainContract, CalendarRow, NewsArticle } from './types';
 export type { ChartInterval } from './intervals';
@@ -40,6 +41,8 @@ export type { DailyClose, PacedBarsResult } from './provider/primary';
 export {
   getBarsForChart as getFallbackBars,
   getQuote as getFallbackQuote,
+  getIndexSnapshots,
+  INDEX_QUOTE_SYMBOLS,
   easternMidnightIso,
   searchCompanies,
   searchSymbols,

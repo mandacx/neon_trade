@@ -3,7 +3,7 @@
  * e.g. SPX). Server-only. Import only from lib/marketdata/index.ts; never expose this vendor's name.
  */
 import axios, { type AxiosInstance } from 'axios';
-import type { Bar, OptionChainContract } from '../types';
+import type { Bar, OptionChainContract, Snapshot } from '../types';
 import type { ChartInterval } from '../intervals';
 
 const TRADIER_API_URL = process.env.TRADIER_API_URL || 'https://api.tradier.com/v1';
@@ -187,9 +187,9 @@ export async function getBarsForChart(
   const source: '1min' | '5min' | '15min' = interval === '1min' ? '1min' : interval === '5min' ? '5min' : '15min';
   const sessionFilter = sessions === 'all' ? 'all' : 'open';
   // Resolves to the rows, or to the oldest start date Tradier allows when `start` is too old.
-  const fetchRows = async (start: string): Promise<{ rows: any[] } | { oldest: string }> => {
+  const fetchRows = async (start: string, filter: 'open' | 'all'): Promise<{ rows: any[] } | { oldest: string }> => {
     const res = await tradierClient.get('/markets/timesales', {
-      params: { symbol: sym, interval: source, start: `${start} 00:00`, end: `${to} 23:59`, session_filter: sessionFilter },
+      params: { symbol: sym, interval: source, start: `${start} 00:00`, end: `${to} 23:59`, session_filter: filter },
       validateStatus: () => true,
       ...longTimeout,
     });
@@ -202,12 +202,17 @@ export async function getBarsForChart(
     return { rows: !data ? [] : Array.isArray(data) ? data : [data] };
   };
 
-  let first = await fetchRows(from);
+  // NDX (a derived index) returns nothing under the 'open' filter, after a ~10 s wait (measured
+  // 2026-10-30), but has bars under 'all', which run past the close (to 17:15 ET). Ask for 'all' and
+  // keep the regular session when that is what the caller wanted.
+  const queryFilter = DERIVED_INDEX_SYMBOLS.has(sym) ? 'all' : sessionFilter;
+  let first = await fetchRows(from, queryFilter);
   if ('oldest' in first) {
     if (first.oldest > to) return []; // the whole range is older than Tradier keeps
-    first = await fetchRows(first.oldest);
+    first = await fetchRows(first.oldest, queryFilter);
   }
-  const rows = 'rows' in first ? first.rows : [];
+  let rows = 'rows' in first ? first.rows : [];
+  if (queryFilter !== sessionFilter) rows = rows.filter(r => inRegularSession(Number(r.timestamp) * 1000));
 
   const bars: Bar[] = rows.map(r => ({
     t: new Date(Number(r.timestamp) * 1000).toISOString(),
@@ -216,6 +221,50 @@ export async function getBarsForChart(
   if (dailyFromBars) return aggregateBars(bars, 24 * 60);
   if (interval === '30min' || interval === '1hour') return aggregateBars(bars, interval === '30min' ? 30 : 60);
   return bars;
+}
+
+/** True when the instant falls in 09:30–16:00 America/New_York (the end is exclusive). */
+function inRegularSession(ms: number): boolean {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(new Date(ms));
+  const get = (t: string) => Number(parts.find(p => p.type === t)?.value ?? 0);
+  const mins = (get('hour') % 24) * 60 + get('minute');
+  return mins >= 9 * 60 + 30 && mins < 16 * 60;
+}
+
+/** Indices whose intraday bars exist only under the 'all' session filter. */
+const DERIVED_INDEX_SYMBOLS = new Set(['NDX']);
+
+/** Index symbols the primary feed has no snapshot for; their live quote comes from getIndexSnapshots. */
+export const INDEX_QUOTE_SYMBOLS = new Set(['SPX', 'NDX']);
+
+/**
+ * Live index values (SPX, NDX) in the snapshot shape, so lib/quote.ts treats them like any stock.
+ * One request for all symbols. `last` is the live value in the session and the close after it;
+ * indices have no volume and no extended hours, so there is no latest trade (no `ext`). `sessionDate`
+ * is the last regular session's 'YYYY-MM-DD', which dates the daily bar. A failure returns {}.
+ */
+export async function getIndexSnapshots(symbols: string[], sessionDate: string): Promise<Record<string, Snapshot>> {
+  const wanted = symbols.map(s => s.toUpperCase()).filter(s => INDEX_QUOTE_SYMBOLS.has(s));
+  if (wanted.length === 0) return {};
+  try {
+    const res = await tradierClient.get('/markets/quotes', { params: { symbols: wanted.join(',') } });
+    const raw = res.data?.quotes?.quote;
+    const rows: any[] = !raw ? [] : Array.isArray(raw) ? raw : [raw];
+    const out: Record<string, Snapshot> = {};
+    for (const q of rows) {
+      const last = Number(q.last);
+      const prev = Number(q.prevclose);
+      if (!INDEX_QUOTE_SYMBOLS.has(q.symbol) || !Number.isFinite(last) || q.last == null) continue;
+      out[q.symbol] = {
+        dailyBar: { o: Number(q.open) || last, h: Number(q.high) || last, l: Number(q.low) || last, c: last, v: 0, t: easternMidnightIso(sessionDate) },
+        prevDailyBar: Number.isFinite(prev) && q.prevclose != null ? { c: prev } : undefined,
+      };
+    }
+    return out;
+  } catch (error) {
+    console.error('Error fetching index quotes:', error instanceof Error ? error.message : error);
+    return {};
+  }
 }
 
 /** UTC ISO instant of 00:00 America/New_York on a 'YYYY-MM-DD' date (04:00Z in EDT, 05:00Z in EST). */

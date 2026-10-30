@@ -22,7 +22,8 @@
  * they are not asked for again on every request; 0 is never returned to callers.
  */
 import { sql } from '@/lib/db';
-import { getSnapshotsChunked, getDailyBarsMulti } from '@/lib/marketdata';
+import { getSnapshotsChunked, getDailyBarsMulti, getFallbackBars, INDEX_QUOTE_SYMBOLS } from '@/lib/marketdata';
+import { getSnapshotsWithIndices } from '@/lib/snapshots';
 import { getMarketState, type MarketSession } from '@/lib/marketSession';
 import { buildQuote } from '@/lib/quote';
 
@@ -154,7 +155,7 @@ async function loadLatest(symbols: string[]): Promise<ReferencePrices> {
 async function priceSymbols(symbols: string[], state: Awaited<ReturnType<typeof getMarketState>>): Promise<Record<string, number>> {
   const out: Record<string, number> = Object.fromEntries(symbols.map(s => [s, 0]));
   if (symbols.length === 0) return out;
-  const snaps = await getSnapshotsChunked(symbols);
+  const snaps = await getSnapshotsWithIndices(symbols, getSnapshotsChunked);
   for (const [sym, snap] of Object.entries(snaps)) {
     const p = buildQuote(snap, state).price;
     if (p) out[sym] = p;
@@ -197,5 +198,15 @@ async function dayCloses(date: string, symbols: string[]): Promise<Record<string
     const bar = list.find(b => b.date === date);
     if (bar?.close) out[sym] = bar.close;
   }
+  // The primary feed has no bars for SPX / NDX: read their close from the fallback source.
+  await Promise.all(symbols.filter(s => INDEX_QUOTE_SYMBOLS.has(s) && !out[s]).map(async s => {
+    try {
+      const rows = await getFallbackBars(s, 'daily', date, date);
+      const close = rows.length ? rows[rows.length - 1].c : 0;
+      if (close) out[s] = close;
+    } catch (err) {
+      console.error(`[quadrantPrices] index close failed for ${s}:`, err instanceof Error ? err.message : err);
+    }
+  }));
   return out;
 }

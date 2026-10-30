@@ -41,6 +41,8 @@ Three services this app depends on, all configured via env vars (see `.env.examp
 
 Tradier also serves the **live option chain** on the stock page's Option Chain tab (`getOptionChainContracts` / `getOptionExpirations`: quotes, greeks and open interest, one request per expiry; `/api/stocks/[symbol]/chain`, and `/chain-expiries` for symbols without levels; Alpaca quote snapshots are only the backup). Its open interest is the previous session's close, undated, with no history; contract-level history stays on Alpaca bars + our `us_opt_chg_rpt`. Details in `docs/CHANGES.md` (2026-10-29) and `docs/strategy-builder.md`.
 
+Tradier also supplies the **live quote for SPX and NDX** (`getIndexSnapshots`, mapped into the snapshot shape). Quote readers that may be handed an index call `getSnapshotsWithIndices` (`lib/snapshots.ts`) instead of `getSnapshotsMulti`; the NDX quote disagrees with its own bars by ~0.9% (see `docs/CHANGES.md`, 2026-10-30).
+
 Tradier is also the **OHLC fallback for symbols Alpaca has no bars for** (indices such as SPX): `getFallbackBars` (facade name), called from `app/api/stocks/[symbol]/ohlc/route.ts` only when Alpaca returns nothing. Index bars have no volume.
 
 Note the split from what `README.md`/`QUICK_START.md` describe: those docs predate the current code and describe Tradier as the OHLC source — in the actual code, **Alpaca provides OHLC/bars, Tradier provides symbol search plus the index OHLC fallback above**. Trust the code in `lib/` over the older docs when they disagree.

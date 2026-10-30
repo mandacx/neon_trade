@@ -3,7 +3,8 @@ import { guardOi, parseScreenParams, scopeExpiry, serverError } from '@/lib/oiTr
 import { filterByExpiry, isStandardExpiry, standardExpiryOnly } from '@/lib/expiryAccess';
 import { getOiScreen, getStockFullOi, getStrategyRows, getOiLoadDates } from '@/lib/oiTracker';
 import { detectStrategies } from '@/lib/oiStrategies';
-import { getOptionChainSnapshots, getSnapshotsMulti, type OptionSnapshot } from '@/lib/marketdata';
+import { getOptionChainSnapshots, type OptionSnapshot } from '@/lib/marketdata';
+import { getSnapshotsWithIndices } from '@/lib/snapshots';
 import { etDateOf } from '@/lib/marketSession';
 import type { OiContractRow, OiGroupRow } from '@/types/oiTracker';
 import { toLive, topBySessionVolume, type LiveOption } from '@/lib/oiLive';
@@ -52,7 +53,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       getStockFullOi(symbol, parsed.to),
       getStrategyRows({ ...base, groupBy: 'contract', minLeg }),
       getOptionChainSnapshots(symbol, { expiryFrom: today, maxPages: 6 }).catch(() => ({} as Record<string, OptionSnapshot>)),
-      getSnapshotsMulti([symbol]),
+      getSnapshotsWithIndices([symbol]),
     ]);
 
     const chainKeys = Object.keys(chain);

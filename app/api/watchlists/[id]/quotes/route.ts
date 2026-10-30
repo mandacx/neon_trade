@@ -3,7 +3,7 @@ import { requireFeatureApi } from '@/lib/routeGuards';
 import { FEATURE_EARNINGS, FEATURE_WATCHLISTS, hasFeature } from '@/lib/features';
 import { getWatchlistSymbols } from '@/lib/watchlists';
 import { getSecuritiesMeta } from '@/lib/securitiesFilters';
-import { getSnapshotsMulti } from '@/lib/marketdata';
+import { getSnapshotsWithIndices } from '@/lib/snapshots';
 import { getEarningsSummary } from '@/lib/earnings';
 import { getMarketState } from '@/lib/marketSession';
 import { buildQuote, rowQuote } from '@/lib/quote';
@@ -35,7 +35,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 
   const [secMeta, snapshots, earnings, market] = await Promise.all([
     getSecuritiesMeta(symbols),
-    getSnapshotsMulti(symbols),
+    getSnapshotsWithIndices(symbols),
     earningsEnabled ? getEarningsSummary(symbols) : Promise.resolve(null),
     getMarketState(),
   ]);

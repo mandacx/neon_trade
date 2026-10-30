@@ -4,7 +4,8 @@ import { FEATURE_OPTION_CHAIN, FEATURE_STRATEGY_BUILDER, hasFeature } from '@/li
 import { expiryAllowed, WEEKLY_EXPIRY_ERROR } from '@/lib/expiryAccess';
 import { checkRateLimit, rateLimitHeaders } from '@/lib/rateLimit';
 import { resolveLimit } from '@/lib/rateLimitConfig';
-import { getFallbackQuote, getOptionChainContracts, getOptionChainSnapshots, getSnapshotsMulti, type OptionChainContract, type OptionSnapshot } from '@/lib/marketdata';
+import { getFallbackQuote, getOptionChainContracts, getOptionChainSnapshots, type OptionChainContract, type OptionSnapshot } from '@/lib/marketdata';
+import { getSnapshotsWithIndices } from '@/lib/snapshots';
 import { etDateOf, getMarketState } from '@/lib/marketSession';
 import { buildQuote } from '@/lib/quote';
 import { parseOcc } from '@/lib/occ';
@@ -72,7 +73,7 @@ function fromSnapshots(snaps: Record<string, OptionSnapshot>, expiry: string): L
 
 /** Underlying price: the session-aware regular price (live when open, else last close); fallback feed for indices. */
 async function spotOf(symbol: string): Promise<number | null> {
-  const [snaps, market] = await Promise.all([getSnapshotsMulti([symbol]), getMarketState()]);
+  const [snaps, market] = await Promise.all([getSnapshotsWithIndices([symbol]), getMarketState()]);
   const q = buildQuote(snaps[symbol], market);
   if (q.price !== null && q.price > 0) return q.price;
   try {

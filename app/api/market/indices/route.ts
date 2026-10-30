@@ -1,11 +1,13 @@
 import { NextResponse } from 'next/server';
-import { getSnapshotsMulti } from '@/lib/marketdata';
+import { getSnapshotsWithIndices } from '@/lib/snapshots';
 import { getMarketState } from '@/lib/marketSession';
 import { buildQuote } from '@/lib/quote';
 
 export const dynamic = 'force-dynamic';
 
 const INDICES = [
+  { symbol: 'SPX', label: 'S&P 500 Index' },
+  { symbol: 'NDX', label: 'Nasdaq-100 Index' },
   { symbol: 'SPY', label: 'S&P 500' },
   { symbol: 'DIA', label: 'Dow Jones' },
   { symbol: 'QQQ', label: 'Nasdaq' },
@@ -20,7 +22,7 @@ const INDICES = [
 // lets the strip poll on the real open/close schedule.
 export async function GET() {
   const symbols = INDICES.map(i => i.symbol);
-  const [snapshots, market] = await Promise.all([getSnapshotsMulti(symbols), getMarketState()]);
+  const [snapshots, market] = await Promise.all([getSnapshotsWithIndices(symbols), getMarketState()]);
 
   const result = INDICES.map(({ symbol, label }) => {
     const q = buildQuote(snapshots[symbol], market);

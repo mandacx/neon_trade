@@ -15,8 +15,9 @@ import { sql } from '@/lib/db';
 import { etDateOf } from '@/lib/marketSession';
 import { occSql } from '@/lib/oiTracker';
 import {
-  getDailyBarsMulti, getOptionBarsMulti, getOptionSnapshotsMulti, getSnapshotsMulti, type Bar, type OptionSnapshot,
+  getDailyBarsMulti, getOptionBarsMulti, getOptionSnapshotsMulti, type Bar, type OptionSnapshot,
 } from '@/lib/marketdata';
+import { getSnapshotsWithIndices } from '@/lib/snapshots';
 import type { TrackedPosition } from '@/types/oiTracker';
 import { parseOcc } from '@/lib/occ';
 
@@ -129,7 +130,7 @@ async function priceOn(contract: string, underlying: string, date: string): Prom
 /** Underlying price on a date (market-data stock bars; the report's close for indices such as SPX). */
 async function underlyingOn(underlying: string, date: string): Promise<number | null> {
   if (date >= todayET()) {
-    const snap = (await getSnapshotsMulti([underlying]))[underlying];
+    const snap = (await getSnapshotsWithIndices([underlying]))[underlying];
     const p = snap?.latestTrade?.p ?? snap?.dailyBar?.c;
     if (p != null) return p;
   } else {
@@ -274,7 +275,7 @@ export async function withPerformance(positions: TrackedPosition[]): Promise<Tra
 
   const [optSnaps, stockSnaps, reportCloses] = await Promise.all([
     getOptionSnapshotsMulti(live.map(p => p.contract)),
-    getSnapshotsMulti(underlyings),
+    getSnapshotsWithIndices(underlyings),
     sql`
       SELECT DISTINCT ON (symbol_und) symbol_und, close FROM public.us_opt_chg_rpt
       WHERE symbol_und = ANY(${underlyings}) AND load_dt >= CURRENT_DATE - 10

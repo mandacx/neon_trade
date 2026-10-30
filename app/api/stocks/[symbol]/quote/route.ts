@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSnapshotsMulti } from '@/lib/marketdata';
+import { getSnapshotsWithIndices } from '@/lib/snapshots';
 import { getMarketState } from '@/lib/marketSession';
 import { buildQuote } from '@/lib/quote';
 
@@ -27,7 +27,7 @@ export async function GET(
     }
 
     const upper = symbol.toUpperCase();
-    const [snapshots, market] = await Promise.all([getSnapshotsMulti([upper]), getMarketState()]);
+    const [snapshots, market] = await Promise.all([getSnapshotsWithIndices([upper]), getMarketState()]);
     const snapshot = snapshots[upper];
     const q = buildQuote(snapshot, market);
     if (!snapshot || q.price === null) {
