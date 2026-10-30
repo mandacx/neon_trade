@@ -10,7 +10,9 @@ import type { OptQuote, OptionChain } from '@/lib/payoff/chain';
 import type { ColumnMeta } from '@/lib/tableColumns';
 import { fmtPct, fmtPx, fmtStrike } from './format';
 
-const NEAR_ROWS = 12;
+// Strikes shown each side of the money, and how many one "more" click adds at either end.
+const COUNTS = [12, 24, 36, 48] as const;
+const MORE_STEP = 12;
 const ROW = 'h-7';
 
 type ColId = 'ltp' | 'bid' | 'mid' | 'ask' | 'chart' | 'iv' | 'delta' | 'vol' | 'oi' | 'gamma' | 'theta' | 'vega';
@@ -45,14 +47,20 @@ export default function ChainTable({ chain, onAdd, onOpenContract }: {
   onAdd?: (right: Right, strike: number, side: 1 | -1) => void;
   onOpenContract: (strike: number, optType: 'call' | 'put') => void;
 }) {
-  const [all, setAll] = useState(false);
+  const [count, setCount] = useState<(typeof COUNTS)[number] | 'all'>(12);
+  // Extra rows revealed with the buttons above / below the table (reset when the count changes).
+  const [moreTop, setMoreTop] = useState(0);
+  const [moreBottom, setMoreBottom] = useState(0);
   const cols = useColumnPrefs('stockChain', COLS);
   const shown = cols.ordered(COLS.map(c => c.id)).filter(id => cols.isShown(id)).map(id => BY_ID.get(id)!);
   const sideW = shown.reduce((w, c) => w + c.w, 0);
 
   const spot = chain.spot;
   const atm = chain.rows.reduce((b, r, i) => (Math.abs(r.strike - spot) < Math.abs(chain.rows[b].strike - spot) ? i : b), 0);
-  const rows = all ? chain.rows : chain.rows.slice(Math.max(0, atm - NEAR_ROWS), atm + NEAR_ROWS + 1);
+  // Rows run from the lowest strike (top: calls in the money, puts out of it) to the highest (bottom).
+  const lo = count === 'all' ? 0 : Math.max(0, atm - count - moreTop);
+  const hi = count === 'all' ? chain.rows.length : Math.min(chain.rows.length, atm + count + 1 + moreBottom);
+  const rows = chain.rows.slice(lo, hi);
   const firstAbove = rows.findIndex(r => r.strike >= spot);
 
   // ---- mirrored sideways scroll: `offset` = how far both sides have moved away from the strike.
@@ -151,6 +159,24 @@ export default function ChainTable({ chain, onAdd, onOpenContract }: {
         <span className="text-[11px] text-gray-400">{onAdd ? 'Bid sells, ask buys; positions price at the mid.' : 'Click the chart icon for a contract’s price, volume and OI history.'}</span>
         <ColumnsMenu metas={COLS} {...cols.menu} />
       </div>
+      <div className="flex flex-wrap items-center gap-2 mb-1.5">
+        <span className="text-[11px] text-gray-500" title="Strikes shown above and below the money">Strikes</span>
+        <div className="flex gap-1 bg-gray-100 p-0.5 rounded-md" role="group" aria-label="Strikes each side of the money">
+          {([...COUNTS, 'all'] as const).map(n => (
+            <button key={n} onClick={() => { setCount(n); setMoreTop(0); setMoreBottom(0); }}
+              className={`px-2 py-0.5 rounded text-[11px] font-semibold ${count === n ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-800'}`}>
+              {n === 'all' ? 'All' : n}
+            </button>
+          ))}
+        </div>
+        <span className="text-[11px] text-gray-400">{rows.length} of {chain.rows.length} strikes</span>
+      </div>
+      {lo > 0 && (
+        <button onClick={() => setMoreTop(m => m + MORE_STEP)}
+          className="w-full mb-1 py-0.5 rounded border border-gray-200 bg-white text-[11px] font-medium text-blue-600 hover:bg-blue-50">
+          ▲ More lower strikes <span className="text-gray-400">(calls in the money, puts out of the money)</span>
+        </button>
+      )}
       <div className={`rounded border border-gray-200 text-xs ${cols.hideUntilReady}`}>
         {/* Header: same split and gutter as the body so columns line up; the side labels don't scroll. */}
         <div className="flex bg-gray-50 text-[11px] font-bold border-b border-gray-100 overflow-y-hidden [scrollbar-gutter:stable]">
@@ -191,6 +217,12 @@ export default function ChainTable({ chain, onAdd, onOpenContract }: {
           </div>
         </div>
       </div>
+      {hi < chain.rows.length && (
+        <button onClick={() => setMoreBottom(m => m + MORE_STEP)}
+          className="w-full mt-1 py-0.5 rounded border border-gray-200 bg-white text-[11px] font-medium text-blue-600 hover:bg-blue-50">
+          ▼ More higher strikes <span className="text-gray-400">(puts in the money, calls out of the money)</span>
+        </button>
+      )}
       {maxOffset > 0 && (
         <div className="flex items-center gap-2 mt-1.5 text-[11px] text-gray-400">
           <span className="whitespace-nowrap">More columns</span>
@@ -200,11 +232,6 @@ export default function ChainTable({ chain, onAdd, onOpenContract }: {
       )}
       <div className="flex flex-wrap items-center gap-3 mt-1.5 text-[11px] text-gray-400">
         <span>Shaded = <Term k="itm">in the money</Term>; blue line = spot {spot.toFixed(2)}.</span>
-        {chain.rows.length > rows.length || all ? (
-          <button onClick={() => setAll(v => !v)} className="text-blue-600 hover:underline">
-            {all ? `Show ${NEAR_ROWS * 2 + 1} strikes around the money` : `Show all ${chain.rows.length} strikes`}
-          </button>
-        ) : null}
       </div>
     </div>
   );

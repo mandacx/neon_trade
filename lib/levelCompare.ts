@@ -30,3 +30,16 @@ export function levelCompareMatches(f: Exclude<LevelCompare, ''>, pci: number, p
     default: return false;
   }
 }
+
+/**
+ * Text colour for the Put High and Call Low values where they are shown: red when Put/Call Int is
+ * above both, green when it is below both, none otherwise (or when a level has no data).
+ */
+export const ALT_LEVEL_RED = '#dc2626';
+export const ALT_LEVEL_GREEN = '#16a34a';
+
+export function altLevelColor(pci: number, putHigh: number, callLow: number): string | null {
+  if (levelCompareMatches('aboveBoth', pci, putHigh, callLow, 0)) return ALT_LEVEL_RED;
+  if (levelCompareMatches('belowBoth', pci, putHigh, callLow, 0)) return ALT_LEVEL_GREEN;
+  return null;
+}

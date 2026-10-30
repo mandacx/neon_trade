@@ -321,11 +321,11 @@ export default function OpenInterestTab({ symbol, selectedExpiry, expiryMode, on
               <table className="w-full text-xs whitespace-nowrap">
                 <thead className="[&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-white [&_th]:shadow-[inset_0_-1px_0_0_#e5e7eb] text-gray-500">
                   <tr>
-                    <th className="text-right py-1.5 px-1.5 font-medium"><Term k="oi">Put OI</Term></th>
-                    <th className="text-right py-1.5 px-1.5 font-medium w-1/3"><Term k="oiChg">Put ΔOI</Term></th>
+                    <th className="text-right py-1.5 px-1.5 font-medium"><Term k="oi">Call OI</Term></th>
+                    <th className="text-right py-1.5 px-1.5 font-medium w-1/3"><Term k="oiChg">Call ΔOI</Term></th>
                     <th className="text-center py-1.5 px-1.5 font-medium"><Term k="strike">Strike</Term></th>
-                    <th className="text-left py-1.5 px-1.5 font-medium w-1/3"><Term k="oiChg">Call ΔOI</Term></th>
-                    <th className="text-left py-1.5 px-1.5 font-medium"><Term k="oi">Call OI</Term></th>
+                    <th className="text-left py-1.5 px-1.5 font-medium w-1/3"><Term k="oiChg">Put ΔOI</Term></th>
+                    <th className="text-left py-1.5 px-1.5 font-medium"><Term k="oi">Put OI</Term></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -333,11 +333,11 @@ export default function OpenInterestTab({ symbol, selectedExpiry, expiryMode, on
                     const spotRow = close != null && r.strike >= close && (ladder[i + 1]?.strike ?? -Infinity) < close;
                     return (
                       <tr key={r.strike} className={`border-b border-gray-100 last:border-0 ${spotRow ? 'shadow-[inset_0_-2px_0_0_#3b82f6]' : ''}`}>
-                        <td className="text-right py-1 px-1.5 text-gray-600">{r.putOi != null ? r.putOi.toLocaleString() : '—'}</td>
+                        <td className="text-right py-1 px-1.5 text-gray-600">{r.callOi != null ? r.callOi.toLocaleString() : '—'}</td>
                         <td className="py-1 px-1.5">
                           <div className="flex items-center justify-end gap-1.5">
-                            <span className={r.putChg > 0 ? 'text-green-700' : r.putChg < 0 ? 'text-red-700' : 'text-gray-400'}>{r.putChg > 0 ? '+' : ''}{r.putChg.toLocaleString()}</span>
-                            <div className="h-2.5 rounded-sm" style={{ width: `${(Math.abs(r.putChg) / maxChg) * 100}%`, maxWidth: '60%', background: r.putChg >= 0 ? '#ef4444' : '#fca5a5' }} />
+                            <span className={r.callChg > 0 ? 'text-green-700' : r.callChg < 0 ? 'text-red-700' : 'text-gray-400'}>{r.callChg > 0 ? '+' : ''}{r.callChg.toLocaleString()}</span>
+                            <div className="h-2.5 rounded-sm" style={{ width: `${(Math.abs(r.callChg) / maxChg) * 100}%`, maxWidth: '60%', background: r.callChg >= 0 ? '#22c55e' : '#86efac' }} />
                           </div>
                         </td>
                         <td className="text-center py-1 px-1.5 font-mono">
@@ -345,11 +345,11 @@ export default function OpenInterestTab({ symbol, selectedExpiry, expiryMode, on
                         </td>
                         <td className="py-1 px-1.5">
                           <div className="flex items-center gap-1.5">
-                            <div className="h-2.5 rounded-sm" style={{ width: `${(Math.abs(r.callChg) / maxChg) * 100}%`, maxWidth: '60%', background: r.callChg >= 0 ? '#22c55e' : '#86efac' }} />
-                            <span className={r.callChg > 0 ? 'text-green-700' : r.callChg < 0 ? 'text-red-700' : 'text-gray-400'}>{r.callChg > 0 ? '+' : ''}{r.callChg.toLocaleString()}</span>
+                            <div className="h-2.5 rounded-sm" style={{ width: `${(Math.abs(r.putChg) / maxChg) * 100}%`, maxWidth: '60%', background: r.putChg >= 0 ? '#ef4444' : '#fca5a5' }} />
+                            <span className={r.putChg > 0 ? 'text-green-700' : r.putChg < 0 ? 'text-red-700' : 'text-gray-400'}>{r.putChg > 0 ? '+' : ''}{r.putChg.toLocaleString()}</span>
                           </div>
                         </td>
-                        <td className="text-left py-1 px-1.5 text-gray-600">{r.callOi != null ? r.callOi.toLocaleString() : '—'}</td>
+                        <td className="text-left py-1 px-1.5 text-gray-600">{r.putOi != null ? r.putOi.toLocaleString() : '—'}</td>
                       </tr>
                     );
                   })}

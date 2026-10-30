@@ -14,6 +14,7 @@ import {
 } from 'recharts';
 import { QuadrantStock } from '@/types/stock';
 import { getLevelColor, getLevelDisplayName, formatCurrency, formatPercentage } from '@/lib/utils';
+import { altLevelColor } from '@/lib/levelCompare';
 
 interface QuadrantChartProps {
   data: QuadrantStock[];
@@ -380,20 +381,25 @@ export default function QuadrantChart({ data, onStockClick, height = 600, title 
                 </div>
               </div>
             ))}
-            {d.altLevels?.length > 0 && (
+            {d.altLevels?.length > 0 && (() => {
+              // Put High / Call Low text: red when Put/Call Int is above both, green when below both.
+              const val = (n: string) => d.altLevels.find((l: any) => l.name === n)?.price ?? 0;
+              const tone = altLevelColor(d.levels.find((l: any) => l.name === 'put_call_int')?.price ?? 0, val('put_high'), val('call_low'));
+              return (
               <>
                 <p className="text-[10px] uppercase tracking-wide text-gray-400 pt-1 mt-1 border-t border-gray-100">Alt levels</p>
                 {d.altLevels.map((level: any) => (
                   <div key={level.name} className="flex justify-between gap-4">
-                    <span style={{ color: getLevelColor(level.name) }}>{getLevelDisplayName(level.name)}</span>
-                    <div className="flex gap-2 text-right">
+                    <span style={{ color: tone ?? getLevelColor(level.name) }}>{getLevelDisplayName(level.name)}</span>
+                    <div className="flex gap-2 text-right" style={tone ? { color: tone } : undefined}>
                       <span className="font-semibold">{formatCurrency(level.price)}</span>
-                      <span className="text-gray-500">{formatPercentage(level.value)}</span>
+                      <span className={tone ? '' : 'text-gray-500'}>{formatPercentage(level.value)}</span>
                     </div>
                   </div>
                 ))}
               </>
-            )}
+              );
+            })()}
           </div>
         </div>
       );

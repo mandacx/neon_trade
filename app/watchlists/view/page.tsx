@@ -13,7 +13,7 @@ import { useColumnPrefs } from '@/components/ui/useColumnPrefs';
 import type { ColumnMeta } from '@/lib/tableColumns';
 import {
   type WatchlistSummary, type QuoteRow, type LevelRow, type LevelKey, LEVEL_FILTER_OPTIONS,
-  rebaseToLtp, fmtExpiry, fmtPrice, ChangeCell, ChangePercentCell, ChangeDot, LevelCell,
+  readLastWatchlist, saveLastWatchlist, rebaseToLtp, fmtExpiry, fmtPrice, ChangeCell, ChangePercentCell, ChangeDot, LevelCell,
   type EarningsFilter, EARNINGS_FILTER_OPTIONS, EXPIRY_EARNINGS_FILTERS, EarningsRangeInputs, earningsMatches, nextEarningsSortValue, NextEarningsCell,
 } from '@/components/watchlists/watchlistShared';
 
@@ -146,10 +146,13 @@ export default function WatchlistViewPage() {
     if (!json.success) return;
     const fresh: WatchlistSummary[] = json.data.watchlists;
     setLists(fresh);
-    setSelectedId(prev => (keepSelection && fresh.some(l => l.id === prev) ? prev : fresh[0]?.id ?? ''));
+    // Back to the list viewed last (page refresh); the first one when that is gone.
+    const saved = readLastWatchlist();
+    setSelectedId(prev => (keepSelection && fresh.some(l => l.id === prev) ? prev : fresh.find(l => l.id === saved)?.id ?? fresh[0]?.id ?? ''));
   }, []);
 
   useEffect(() => { refreshLists(false); }, [refreshLists]);
+  useEffect(() => { if (selectedId) saveLastWatchlist(selectedId); }, [selectedId]);
 
   useEffect(() => {
     fetch('/api/watchlists/expiry-dates')

@@ -7,6 +7,20 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-29 — Alt level colours, remembered watchlist, OI ladder sides, chain strike count + more buttons
+
+**Alt level colours** (requested: Put High / Call Low text red when Put/Call Int is above both, green when below both)
+- `lib/levelCompare.ts`: `altLevelColor(pci, putHigh, callLow)` (red `#dc2626` / green `#16a34a` / none; any level at 0 = no data = no colour).
+- Applied to the Put High / Call Low text in the quadrant tooltip (`QuadrantChart.tsx`), the stock chart's crosshair tooltip "Extended Levels" rows (`TVChart.tsx`) and the Price Levels table cells (`PriceLevelsTab.tsx`; a closest-level highlight keeps its background, the text takes the colour).
+- **Alerts:** the scan-alert data has no Put High / Call Low (`lib/scanAlerts.ts` sets both to 0), so there is nothing to colour there.
+- Verified in the browser (signed in): Price Levels table, GLD (Put/Call Int 384.51 above Put High 368.47 and Call Low 380.53) both red, QQQ (703.51 below 710.48 and 724.52) both green; quadrant tooltip rows red for stocks above both and unchanged defaults for stocks in between. **Not verified:** the stock chart's hover tooltip (same helper, not hovered in a browser).
+
+**Remembered watchlist** (`components/watchlists/watchlistShared.tsx`, `app/watchlists/page.tsx`, `app/watchlists/view/page.tsx`): the selected watchlist id is saved in the browser (`localStorage` `nt.lastWatchlist`, guarded) and chosen again after a refresh, on both pages; falls back to the first list when it no longer exists. Per device, not per account. Verified: picked "S&P 500", reload kept it, and `/watchlists/view` opened on it.
+
+**Open Interest tab** (`OpenInterestTab.tsx`): the OI change by strike ladder now has Calls on the left and Puts on the right (Call OI, Call ΔOI, Strike, Put ΔOI, Put OI), bars mirrored. Verified on AAPL (headers and a row).
+
+**Option chain** (`ChainTable.tsx`): a Strikes selector (12, 24, 36, 48, All; strikes each side of the money, default 12 = the old view) replaces the "Show all strikes" link, plus a "More lower strikes" button above the table (calls in the money / puts out of the money) and a "More higher strikes" button below it, each adding 12; they disappear at the ends and under All, and extras reset when the count changes. Verified on AAPL (75 strikes): 25 / 44 / 68 / 75 rows for 12 / 24 / 48 / All (clamped at the ends of the list), +12 above and +7 below on the buttons, no page errors. I read "2,4" in the request as 24.
+
 ## 2026-10-29 — Earnings page: table scrolls inside a fixed-height box, header stays put
 
 Requested: a vertical scroll bar on the earnings table and a fixed table size so the page height stays roughly constant.

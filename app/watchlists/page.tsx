@@ -14,7 +14,7 @@ import type { ColumnMeta } from '@/lib/tableColumns';
 import { getLevelDisplayName } from '@/lib/utils';
 import {
   type WatchlistSummary, type QuoteRow, type LevelRow, type LevelKey, LEVEL_FILTER_OPTIONS,
-  rebaseToLtp, fmtExpiry, fmtPrice, fmtVolume, ChangeCell, ChangePercentCell, ChangeDot, LevelCell,
+  readLastWatchlist, saveLastWatchlist, rebaseToLtp, fmtExpiry, fmtPrice, fmtVolume, ChangeCell, ChangePercentCell, ChangeDot, LevelCell,
   type EarningsFilter, EARNINGS_FILTER_OPTIONS, EXPIRY_EARNINGS_FILTERS, EarningsRangeInputs, earningsMatches, nextEarningsSortValue, lastResultSortValue,
   NextEarningsCell, LastResultBadge,
 } from '@/components/watchlists/watchlistShared';
@@ -171,11 +171,14 @@ export default function WatchlistsPage() {
     const fresh: WatchlistSummary[] = json.data.watchlists;
     setLists(fresh);
     if (!keepSelection || !fresh.some(l => l.id === selectedId)) {
-      setSelectedId(fresh[0]?.id ?? '');
+      // Back to the list viewed last (page refresh); the first one when that is gone.
+      const saved = readLastWatchlist();
+      setSelectedId(fresh.find(l => l.id === saved)?.id ?? fresh[0]?.id ?? '');
     }
   }
 
   useEffect(() => { refreshLists(false); }, []);
+  useEffect(() => { if (selectedId) saveLastWatchlist(selectedId); }, [selectedId]);
 
   // Monthly expiries are global (independent of which watchlist is
   // selected), so this fetches once and defaults the toggle to the earliest

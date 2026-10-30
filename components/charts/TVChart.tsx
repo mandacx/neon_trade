@@ -15,6 +15,7 @@ const EARNINGS_OUTCOME_COLOR: Record<NonNullable<EarningsResult['epsOutcome']>, 
   inline: '#6b7280',
 };
 import { getLevelColor, getLevelDisplayName, formatCurrency, formatPercentage, escapeHtml, SCAN_CODE_TO_LEVEL } from '@/lib/utils';
+import { altLevelColor } from '@/lib/levelCompare';
 
 /** Widest candle spacing (px) when fitting the whole history; fewer bars than fill the width stay this narrow. */
 const MAX_BAR_SPACING = 12;
@@ -571,6 +572,13 @@ export default function TVChart({
       // Extended levels (put_high/call_low) — shown separately from the 5-level
       // proximity ladder above; never considered for isProximity/closest-level.
       const EXTENDED_LEVEL_ORDER = ['call_low', 'put_high'];
+      // Put High / Call Low text: red when Put/Call Int is above both, green when below both.
+      const priceOf = (name: string) => {
+        const l = [...dateLevels, ...dateExtendedLevels].find(x => x.name === name);
+        const v = l ? (typeof l.price === 'string' ? parseFloat(l.price) : l.price) : 0;
+        return Number.isFinite(v) ? v : 0;
+      };
+      const altTone = altLevelColor(priceOf('put_call_int'), priceOf('put_high'), priceOf('call_low'));
       const extendedLevelsWithDisplay = dateExtendedLevels
         .map(level => ({ ...level, displayName: getLevelDisplayName(level.name) }))
         .sort((a, b) => EXTENDED_LEVEL_ORDER.indexOf(a.name) - EXTENDED_LEVEL_ORDER.indexOf(b.name));
@@ -668,7 +676,7 @@ export default function TVChart({
             <div class="mt-2 pt-2 border-t border-gray-200">
               <div class="font-semibold mb-1 text-gray-500 text-[10px]">Extended Levels:</div>
               ${extendedLevelsWithDisplay.map(level => `
-                <div class="flex justify-between gap-4 text-gray-600">
+                <div class="flex justify-between gap-4 text-gray-600"${altTone ? ` style="color:${altTone}"` : ''}>
                   <span>${level.displayName}:</span>
                   <span>${formatCurrency(level.price)} (${formatPercentage(level.value)})</span>
                 </div>

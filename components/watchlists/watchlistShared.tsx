@@ -57,6 +57,16 @@ export function rebaseToLtp(level: LevelRow | undefined, livePrice: number | nul
 export type LevelKey = 'put_low' | 'put_int' | 'put_call_int' | 'call_int' | 'call_high';
 export const LEVEL_FILTER_OPTIONS: LevelKey[] = ['call_high', 'call_int', 'put_call_int', 'put_int', 'put_low'];
 
+// The watchlist last viewed, shared by /watchlists and /watchlists/view so a refresh (or the other page)
+// opens the same list. Browser storage only: a per-device convenience, so every access is guarded.
+const LAST_WATCHLIST_KEY = 'nt.lastWatchlist';
+export function readLastWatchlist(): string {
+  try { return localStorage.getItem(LAST_WATCHLIST_KEY) ?? ''; } catch { return ''; }
+}
+export function saveLastWatchlist(id: string): void {
+  try { localStorage.setItem(LAST_WATCHLIST_KEY, id); } catch { /* storage blocked: nothing to remember */ }
+}
+
 export function fmtExpiry(dateStr: string): string {
   try {
     return new Date(`${dateStr}T00:00:00Z`).toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric' });

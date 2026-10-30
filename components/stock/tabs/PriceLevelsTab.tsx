@@ -5,6 +5,7 @@ import ColRow from '@/components/ui/ColRow';
 import { useColumnPrefs } from '@/components/ui/useColumnPrefs';
 import type { ColumnMeta } from '@/lib/tableColumns';
 import { getLevelDisplayName, formatCurrency, formatPercentage } from '@/lib/utils';
+import { altLevelColor } from '@/lib/levelCompare';
 import { Spinner } from './shared';
 
 // Price Levels tab of the stock page: close price, all 7 raw DB levels, OI and the
@@ -123,6 +124,8 @@ export default function PriceLevelsTab({ rows, loading, selectedExpiry, preset, 
                   ? row.sevenLevels.reduce((c, l) => Math.abs(l.value) < Math.abs(c.value) ? l : c)
                   : null;
                 const levelsByName = new Map(row.sevenLevels.map(l => [l.name, l]));
+                // Put High / Call Low text: red when Put/Call Int is above both, green when below both.
+                const altTone = altLevelColor(levelsByName.get('put_call_int')?.price ?? 0, levelsByName.get('put_high')?.price ?? 0, levelsByName.get('call_low')?.price ?? 0);
                 return (
                   <ColRow layout={phCols.layout} key={row.date} className="border-b border-gray-100 last:border-0 hover:bg-gray-50">
                     <td data-col="date" className="py-1.5 pr-3 text-gray-600">{row.date}</td>
@@ -134,10 +137,11 @@ export default function PriceLevelsTab({ rows, loading, selectedExpiry, preset, 
                     {SEVEN_LEVEL_ORDER.filter(name => ph(name)).map((name) => {
                       const lvl = levelsByName.get(name);
                       const isClosest = !!closest && lvl && closest.name === lvl.name;
+                      const tone = (name === 'put_high' || name === 'call_low') && lvl ? altTone : null;
                       return (
-                        <td key={name} data-col={name} className={`text-right py-1.5 px-2 font-mono ${isClosest ? 'bg-blue-50 text-blue-700 font-bold rounded' : ''}`}>
+                        <td key={name} data-col={name} style={tone ? { color: tone } : undefined} className={`text-right py-1.5 px-2 font-mono ${isClosest ? `bg-blue-50 ${tone ? '' : 'text-blue-700'} font-bold rounded` : ''}`}>
                           {lvl ? formatCurrency(lvl.price) : '—'}
-                          {lvl && <span className={`ml-1 ${isClosest ? 'text-blue-500' : 'text-gray-400'}`}>({formatPercentage(lvl.value)})</span>}
+                          {lvl && <span className={`ml-1 ${tone ? '' : isClosest ? 'text-blue-500' : 'text-gray-400'}`}>({formatPercentage(lvl.value)})</span>}
                         </td>
                       );
                     })}
