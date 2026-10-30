@@ -46,6 +46,8 @@ type OptChainRow = {
   optType: 'put' | 'call'; strike: number; ltp: number; oi: number; oiChg: number; close: number; loadDate: string;
   /** Session behind the OI change (the day before the load date). */ tradeDate?: string;
   expiry?: string;
+  /** OCC root of the contract when it differs from the stock (SPXW, NDXP, adjusted); absent for loads before the OCC symbol was recorded. */
+  root?: string;
 };
 type OptChainSortKey = 'loadDate' | 'expiry' | 'close' | 'strike' | 'optType' | 'ltp' | 'oi' | 'oiChg' | 'absOiChg' | 'chgOpenIntPrice' | 'absChgOpenIntPrice';
 interface Loaded { rows: OptChainRow[]; from: string | null; to: string | null; truncated: boolean }
@@ -75,7 +77,7 @@ function OptChainSortLabel({ label, active, dir, onClick, align = 'right' }: {
   );
 }
 
-interface LadderRow { strike: number; callChg: number; putChg: number; callOi: number | null; putOi: number | null }
+interface LadderRow { callRoot?: string; putRoot?: string; strike: number; callChg: number; putChg: number; callOi: number | null; putOi: number | null }
 
 /** Loads the OI change report for one scope + window; `enabled` false leaves it idle (no request). */
 function useOptChain(symbol: string, expiry: string, expiryMode: 'current' | 'historical', selectedExpiry: string, preset: OptChainPreset, enabled: boolean) {
@@ -249,12 +251,23 @@ export default function OpenInterestTab({ symbol, selectedExpiry, expiryMode, on
     const by = new Map<number, LadderRow & { callAt: string; putAt: string }>();
     for (const r of ladderRows ?? []) {
       const row = by.get(r.strike) ?? { strike: r.strike, callChg: 0, putChg: 0, callOi: null, putOi: null, callAt: '', putAt: '' };
-      if (r.optType === 'call') { row.callChg += r.oiChg; if (r.loadDate >= row.callAt) { row.callAt = r.loadDate; row.callOi = r.oi; } }
-      else { row.putChg += r.oiChg; if (r.loadDate >= row.putAt) { row.putAt = r.loadDate; row.putOi = r.oi; } }
+      if (r.optType === 'call') { row.callChg += r.oiChg; row.callRoot ??= r.root; if (r.loadDate >= row.callAt) { row.callAt = r.loadDate; row.callOi = r.oi; } }
+      else { row.putChg += r.oiChg; row.putRoot ??= r.root; if (r.loadDate >= row.putAt) { row.putAt = r.loadDate; row.putOi = r.oi; } }
       by.set(r.strike, row);
     }
     return [...by.values()].sort((a, b) => a.strike - b.strike);
   }, [ladderRows]);
+  // Index weeklies trade under their own OCC root (SPXW for SPX), which the contract chart needs. Loads before
+  // the OCC symbol was recorded have none, so those fall back to a root seen for the same expiry.
+  const expiryRoot = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const r of [...(ladderRows ?? []), ...tableRows]) if (r.root) m.set(r.expiry ?? selectedExpiry, r.root);
+    return m;
+  }, [ladderRows, tableRows, selectedExpiry]);
+  const rootArg = (root: string | undefined, expiry: string) => {
+    const x = root ?? expiryRoot.get(expiry);
+    return x && x !== symbol.toUpperCase() ? x : undefined;
+  };
   const maxChg = Math.max(1, ...ladder.map(r => Math.max(Math.abs(r.callChg), Math.abs(r.putChg))));
   const close = ladderRows?.length ? ladderRows.reduce((a, b) => (a.loadDate >= b.loadDate ? a : b)).close : null;
   const range = one.data?.from ? `${one.data.from === one.data.to ? one.data.from : `${one.data.from} to ${one.data.to}`}` : null;
@@ -344,7 +357,7 @@ export default function OpenInterestTab({ symbol, selectedExpiry, expiryMode, on
                           </div>
                         </td>
                         <td className="text-center py-1 px-1.5 font-mono">
-                          <button className="hover:text-blue-700 hover:underline" title="Open the put / call chart" onClick={() => onOpenContract(r.strike, Math.abs(r.callChg) >= Math.abs(r.putChg) ? 'call' : 'put', selectedExpiry)}>{r.strike}</button>
+                          <button className="hover:text-blue-700 hover:underline" title="Open the put / call chart" onClick={() => { const t = Math.abs(r.callChg) >= Math.abs(r.putChg) ? 'call' : 'put'; onOpenContract(r.strike, t, selectedExpiry, rootArg(t === 'call' ? r.callRoot : r.putRoot, selectedExpiry)); }}>{r.strike}</button>
                         </td>
                         <td className={`py-1 px-1.5 ${putItm}`}>
                           <div className="flex items-center gap-1.5">
@@ -487,7 +500,7 @@ export default function OpenInterestTab({ symbol, selectedExpiry, expiryMode, on
                     <ColRow
                       layout={ocCols.layout}
                       key={`${r.loadDate}-${r.expiry}-${r.optType}-${r.strike}-${i}`}
-                      onClick={() => onOpenContract(r.strike, r.optType, r.expiry)}
+                      onClick={() => onOpenContract(r.strike, r.optType, r.expiry, rootArg(r.root, r.expiry))}
                       title="View option contract chart"
                       className="border-b border-gray-100 last:border-0 hover:bg-blue-50 cursor-pointer"
                     >

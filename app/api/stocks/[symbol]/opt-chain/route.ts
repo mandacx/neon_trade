@@ -4,6 +4,7 @@ import { catalogLastSeen, catalogTradeDatesUpTo } from '@/lib/marketCatalog';
 import { sessionsForLoads } from '@/lib/marketSession';
 import { getCurrentUserContext } from '@/lib/appUsers';
 import { expiryAllowed, filterByExpiry, WEEKLY_EXPIRY_ERROR } from '@/lib/expiryAccess';
+import { parseOcc } from '@/lib/occ';
 
 // The OI published on load date D results from session D-1, so each row also
 // carries `tradeDate` (the trading day before its load date; docs/oi-tracker.md).
@@ -99,6 +100,7 @@ export async function GET(
           oi,
           oi_chg,
           close,
+          symbol as occ,
           load_dt::text as load_dt
         FROM public.us_opt_chg_rpt
         WHERE symbol_und = ${upperSymbol}
@@ -118,6 +120,7 @@ export async function GET(
         close: Number(r.close),
         loadDate: r.load_dt,
         tradeDate: tradeDates.get(r.load_dt) ?? r.load_dt,
+        root: parseOcc(String(r.occ ?? ''))?.root,
       }));
       return NextResponse.json({
         success: true,
@@ -139,6 +142,7 @@ export async function GET(
           oi,
           oi_chg,
           close,
+          symbol as occ,
           load_dt::text as load_dt
         FROM public.us_opt_chg_rpt
         WHERE symbol_und = ${upperSymbol} AND expiry_dt = ${expiry}::date
@@ -158,6 +162,7 @@ export async function GET(
         expiry,
         loadDate: r.load_dt,
         tradeDate: tradeDates.get(r.load_dt) ?? r.load_dt,
+        root: parseOcc(String(r.occ ?? ''))?.root,
       }));
       return NextResponse.json({ success: true, data: { symbol: upperSymbol, expiryDate: expiry, from, to, rows: chain } });
     }

@@ -7,6 +7,14 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-30 — Contract chart from the Open Interest tab: use the contract's OCC root (SPXW)
+
+- **Files:** `app/api/stocks/[symbol]/opt-chain/route.ts`, `components/stock/tabs/OpenInterestTab.tsx`.
+- **Bug:** opening a contract chart from the OI ladder or the per-contract table never passed the OCC root, so SPX weeklies were requested as `SPX261102P07800000` instead of `SPXW261102P07800000`: no bars, only the underlying line.
+- **Fix:** the opt-chain route now returns `root` per row (parsed from the stored OCC `symbol`, null for loads before 2026-10-06); the tab passes it to the chart, falling back to a root seen for the same expiry when a row has none.
+- **Verified:** `option-bars` for SPX 2026-11-02 7800 put: 0 bars without root, 22 with `root=SPXW` (signed in). In the browser the SPX OI ladder and table now request `...&root=SPXW`. `npx tsc --noEmit` clean.
+- **Not verified:** rendered chart image after the fix; expiries that carry both SPX and SPXW contracts (monthlies) use the row's own root, the fallback only applies to rows without one.
+
 ## 2026-10-30 — Open Interest tab: strikes low to high, in-the-money shading
 
 - **Files:** `components/stock/tabs/OpenInterestTab.tsx`.
