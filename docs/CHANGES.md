@@ -7,6 +7,13 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-30 — Open Interest tab: strikes low to high, in-the-money shading
+
+- **Files:** `components/stock/tabs/OpenInterestTab.tsx`.
+- **What:** the "OI change by strike" ladder now runs ascending (lowest strike at the top), as in the option chain. Calls below the underlying close and puts above it are shaded (green / red, same tints as the chain). The blue spot line moved to the row just below the close (it was above it when the list ran descending).
+- **Verified:** `npx tsc --noEmit` clean; AAPL in a browser: strikes 290 to 375 ascending, calls shaded up to 347.5 (spot line under that row), puts shaded from 350 up.
+- **Not verified:** phone width.
+
 ## 2026-10-29 — Alt level colours, remembered watchlist, OI ladder sides, chain strike count + more buttons
 
 **Alt level colours** (requested: Put High / Call Low text red when Put/Call Int is above both, green when below both)

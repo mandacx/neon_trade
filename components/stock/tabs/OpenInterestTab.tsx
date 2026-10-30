@@ -253,7 +253,7 @@ export default function OpenInterestTab({ symbol, selectedExpiry, expiryMode, on
       else { row.putChg += r.oiChg; if (r.loadDate >= row.putAt) { row.putAt = r.loadDate; row.putOi = r.oi; } }
       by.set(r.strike, row);
     }
-    return [...by.values()].sort((a, b) => b.strike - a.strike);
+    return [...by.values()].sort((a, b) => a.strike - b.strike);
   }, [ladderRows]);
   const maxChg = Math.max(1, ...ladder.map(r => Math.max(Math.abs(r.callChg), Math.abs(r.putChg))));
   const close = ladderRows?.length ? ladderRows.reduce((a, b) => (a.loadDate >= b.loadDate ? a : b)).close : null;
@@ -330,11 +330,14 @@ export default function OpenInterestTab({ symbol, selectedExpiry, expiryMode, on
                 </thead>
                 <tbody>
                   {ladder.map((r, i) => {
-                    const spotRow = close != null && r.strike >= close && (ladder[i + 1]?.strike ?? -Infinity) < close;
+                    const spotRow = close != null && r.strike <= close && (ladder[i + 1]?.strike ?? Infinity) > close;
+                    // In the money, as in the option chain: calls below the close, puts above it.
+                    const callItm = close != null && r.strike < close ? 'bg-green-50/70' : '';
+                    const putItm = close != null && r.strike > close ? 'bg-red-50/70' : '';
                     return (
                       <tr key={r.strike} className={`border-b border-gray-100 last:border-0 ${spotRow ? 'shadow-[inset_0_-2px_0_0_#3b82f6]' : ''}`}>
-                        <td className="text-right py-1 px-1.5 text-gray-600">{r.callOi != null ? r.callOi.toLocaleString() : '—'}</td>
-                        <td className="py-1 px-1.5">
+                        <td className={`text-right py-1 px-1.5 text-gray-600 ${callItm}`}>{r.callOi != null ? r.callOi.toLocaleString() : '—'}</td>
+                        <td className={`py-1 px-1.5 ${callItm}`}>
                           <div className="flex items-center justify-end gap-1.5">
                             <span className={r.callChg > 0 ? 'text-green-700' : r.callChg < 0 ? 'text-red-700' : 'text-gray-400'}>{r.callChg > 0 ? '+' : ''}{r.callChg.toLocaleString()}</span>
                             <div className="h-2.5 rounded-sm" style={{ width: `${(Math.abs(r.callChg) / maxChg) * 100}%`, maxWidth: '60%', background: r.callChg >= 0 ? '#22c55e' : '#86efac' }} />
@@ -343,13 +346,13 @@ export default function OpenInterestTab({ symbol, selectedExpiry, expiryMode, on
                         <td className="text-center py-1 px-1.5 font-mono">
                           <button className="hover:text-blue-700 hover:underline" title="Open the put / call chart" onClick={() => onOpenContract(r.strike, Math.abs(r.callChg) >= Math.abs(r.putChg) ? 'call' : 'put', selectedExpiry)}>{r.strike}</button>
                         </td>
-                        <td className="py-1 px-1.5">
+                        <td className={`py-1 px-1.5 ${putItm}`}>
                           <div className="flex items-center gap-1.5">
                             <div className="h-2.5 rounded-sm" style={{ width: `${(Math.abs(r.putChg) / maxChg) * 100}%`, maxWidth: '60%', background: r.putChg >= 0 ? '#ef4444' : '#fca5a5' }} />
                             <span className={r.putChg > 0 ? 'text-green-700' : r.putChg < 0 ? 'text-red-700' : 'text-gray-400'}>{r.putChg > 0 ? '+' : ''}{r.putChg.toLocaleString()}</span>
                           </div>
                         </td>
-                        <td className="text-left py-1 px-1.5 text-gray-600">{r.putOi != null ? r.putOi.toLocaleString() : '—'}</td>
+                        <td className={`text-left py-1 px-1.5 text-gray-600 ${putItm}`}>{r.putOi != null ? r.putOi.toLocaleString() : '—'}</td>
                       </tr>
                     );
                   })}
@@ -357,7 +360,7 @@ export default function OpenInterestTab({ symbol, selectedExpiry, expiryMode, on
               </table>
               <p className="text-[11px] text-gray-400 mt-2">
                 Σ OI change per strike over the window (solid bar = opened, pale = closed); OI is the latest reported for that contract.
-                {close != null && ' Blue line: underlying close of the latest load.'}
+                {close != null && ' Strikes run low to high. Shaded = in the money (calls below, puts above the underlying close of the latest load); blue line = that close.'}
               </p>
             </div>
           )}
