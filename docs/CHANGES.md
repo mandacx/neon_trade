@@ -7,6 +7,14 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-30 — Contract chart: no negative price labels on the axes
+
+- **Files:** `components/charts/OptionContractChart.tsx`.
+- **Why:** the bottom 38% of both price scales is reserved for the OI-change and volume bands, so autoscaling extended the scales below the data's minimum. For a cheap option the right (option price) axis showed -2 to -8, which are not real prices.
+- **Fix:** the candle and underlying series use a custom `priceFormat` that leaves negative ticks blank. The bands and scale margins are unchanged.
+- **Verified:** SPX 2026-10-30 6730 put (reproduced the negative labels first, then screenshot after: right axis labels stop at 0, left axis unchanged). `npx tsc --noEmit` clean.
+- **Not verified:** the crosshair label while hovering inside the lower band (it will be blank there).
+
 ## 2026-10-30 — Contract chart from the Open Interest tab: use the contract's OCC root (SPXW)
 
 - **Files:** `app/api/stocks/[symbol]/opt-chain/route.ts`, `components/stock/tabs/OpenInterestTab.tsx`.

@@ -98,17 +98,22 @@ export default function OptionContractChart({
       timeScale: { borderColor: '#d1d4dc', timeVisible: isIntraday, secondsVisible: false },
     });
 
+    // The bottom 38% of both price scales is reserved for the OI-change and volume bands, so the scales
+    // run below the data's minimum and would label impossible negative prices; leave those ticks blank.
+    const priceOnly = { type: 'custom' as const, minMove: 0.01, formatter: (v: number) => (v < 0 ? '' : v.toFixed(2)) };
     const candleSeries = chart.addCandlestickSeries({
       upColor: '#22c55e', downColor: '#ef4444',
       borderUpColor: '#22c55e', borderDownColor: '#ef4444',
       wickUpColor: '#22c55e', wickDownColor: '#ef4444',
       priceScaleId: 'right',
+      priceFormat: priceOnly,
     });
 
     const underlyingSeries = chart.addLineSeries({
       color: '#3b82f6',
       lineWidth: 2,
       priceScaleId: 'left',
+      priceFormat: priceOnly,
       priceLineVisible: false,
       lastValueVisible: true,
     });
