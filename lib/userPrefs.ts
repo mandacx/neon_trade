@@ -6,11 +6,13 @@
  *
  * Keys: `cols.<tableId>` = the hidden column ids, order and widths of one table
  * (ColumnPrefs, lib/tableColumns.ts). `chart.settings` = the stock chart's toggles, interval,
- * expiry, period and height (ChartPrefs, lib/chartPrefs.ts). Add another kind of preference by extending validatorFor().
+ * expiry, period and height (ChartPrefs, lib/chartPrefs.ts). `strip.indices` / `strip.crypto` = hidden
+ * tickers of the header index strip and the crypto ticker strip (lib/stripPrefs.ts). Add another kind of preference by extending validatorFor().
  */
 import { sql } from '@/lib/db';
 import { CHART_PREF_KEY, normalizeChartPrefs } from '@/lib/chartPrefs';
 import { normalizeColumnPrefs, TABLE_IDS } from '@/lib/tableColumns';
+import { normalizeStripPrefs, STRIP_PREF_KEYS } from '@/lib/stripPrefs';
 
 type Validator = (v: unknown) => unknown | null;
 
@@ -19,6 +21,7 @@ const columnPrefs: Validator = v => normalizeColumnPrefs(v);
 
 function validatorFor(key: string): Validator | null {
   if (key === CHART_PREF_KEY) return normalizeChartPrefs;
+  if ((STRIP_PREF_KEYS as readonly string[]).includes(key)) return normalizeStripPrefs;
   const m = /^cols\.([A-Za-z0-9]+)$/.exec(key);
   if (m && (TABLE_IDS as readonly string[]).includes(m[1])) return columnPrefs;
   return null;

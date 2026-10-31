@@ -4,6 +4,8 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { getLevelColor, getLevelDisplayName } from '@/lib/utils';
+import StripPicker from '@/components/ui/StripPicker';
+import { useStripPrefs } from '@/components/ui/useStripPrefs';
 
 export interface CryptoTicker {
   coin: string;
@@ -178,35 +180,50 @@ export function useCryptoTickers(ms = 5000): Record<string, CryptoTicker> {
   return tickers;
 }
 
-/** One row of live coin quotes; each links to that coin's first instrument. */
+/** One row of live coin quotes; each links to that coin's first instrument. Chips are tinted green / red by the 24h move; the picker (saved per user) chooses which coins show. */
 export function CryptoTickerStrip({ tickers, coins, active }: {
   tickers: Record<string, CryptoTicker>;
   coins: Array<{ coin: string; slug: string }>;
   active?: string;
 }) {
+  const strip = useStripPrefs('strip.crypto');
+  const visible = coins.filter(c => !strip.hidden.includes(c.coin.toUpperCase()));
   return (
-    <div className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:thin]">
-      {coins.map(({ coin, slug }) => {
-        const t = tickers[coin];
-        const up = (t?.changePct24h ?? 0) >= 0;
-        const chg = change24h(t?.price, t?.changePct24h);
-        return (
-          <Link
-            key={coin}
-            href={`/crypto/${slug}`}
-            className={`shrink-0 rounded-lg border px-3 py-1.5 text-xs transition-colors ${
-              active === coin ? 'border-blue-500 bg-blue-50' : 'border-gray-200 bg-white hover:border-gray-300'
-            }`}
-          >
-            <span className="font-semibold text-gray-900">{coin}</span>{' '}
-            <span className="tabular-nums text-gray-700">{t ? fmtPrice(t.price) : '…'}</span>{' '}
-            {t && <span className={`tabular-nums ${up ? 'text-green-600' : 'text-red-600'}`}>
-              {chg != null && <>{up ? '▲' : '▼'} {up ? '+' : '−'}{fmtPrice(Math.abs(chg), pricePrecisionFor(t.price))} </>}
-              ({fmtPct(t.changePct24h)})
-            </span>}
-          </Link>
-        );
-      })}
+    <div className="flex items-start gap-2">
+      <div className="flex flex-1 min-w-0 gap-2 overflow-x-auto pb-1 [scrollbar-width:thin]">
+        {visible.map(({ coin, slug }) => {
+          const t = tickers[coin];
+          const pct = t?.changePct24h ?? null;
+          const up = (pct ?? 0) >= 0;
+          const chg = change24h(t?.price, pct);
+          const tone = pct == null ? 'border-gray-200 bg-white hover:border-gray-300' : up ? 'border-green-200 bg-green-50 hover:border-green-300' : 'border-red-200 bg-red-50 hover:border-red-300';
+          return (
+            <Link
+              key={coin}
+              href={`/crypto/${slug}`}
+              className={`shrink-0 rounded-lg border px-3 py-1.5 text-xs transition-colors ${tone} ${active === coin ? 'ring-2 ring-blue-500' : ''}`}
+            >
+              <span className="font-semibold text-gray-900">{coin}</span>{' '}
+              <span className="tabular-nums text-gray-700">{t ? fmtPrice(t.price) : '…'}</span>{' '}
+              {t && <span className={`tabular-nums ${up ? 'text-green-600' : 'text-red-600'}`}>
+                {chg != null && <>{up ? '▲' : '▼'} {up ? '+' : '−'}{fmtPrice(Math.abs(chg), pricePrecisionFor(t.price))} </>}
+                ({fmtPct(t.changePct24h)})
+              </span>}
+            </Link>
+          );
+        })}
+        {visible.length === 0 && <span className="py-1.5 text-xs text-gray-400">All coin tickers are hidden</span>}
+      </div>
+      <StripPicker
+        title="Coin tickers"
+        items={coins.map(c => ({ id: c.coin.toUpperCase(), label: c.coin }))}
+        hidden={strip.hidden}
+        onToggle={strip.toggle}
+        onShowAll={strip.showAll}
+        onHideAll={() => strip.setAll(coins.map(c => c.coin.toUpperCase()))}
+        saveState={strip.saveState}
+        stored={strip.stored}
+      />
     </div>
   );
 }

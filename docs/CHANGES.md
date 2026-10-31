@@ -2346,3 +2346,10 @@ per-user behavior panel and delete user.
   it is not a strict conversion rate.
 - Not built from the prompt: payments tab, admin alerts (SMS/Telegram), terms
   page, per-IP limits on public endpoints.
+
+## 2026-10-31 — Choose which index and crypto tickers show (saved per user)
+
+- **What:** a ⚙ picker (`components/ui/StripPicker.tsx`) at the end of the header index strip (`IndicesStrip`) and of the crypto ticker strip (`CryptoTickerStrip`): tick/untick tickers, Show all / Hide all. Crypto chips are now tinted green/red by the 24h move like the index chips already were.
+- **Saving:** `useStripPrefs` (`components/ui/useStripPrefs.ts`). Signed in: `nt_user_prefs` keys `strip.indices` / `strip.crypto` via `/api/prefs/[key]` (validated by `lib/stripPrefs.ts`, registered in `lib/userPrefs.ts`); signed out: localStorage `nt.strip.*`. The value is the list of *hidden* symbols, so tickers added later show by default. Saves are debounced 600 ms; module cache avoids refetching on every navigation.
+- **Verified:** `tsc --noEmit` and eslint on the touched files are clean.
+- **Not verified:** no browser run (picker UI, account save/restore, signed-out localStorage) yet.
