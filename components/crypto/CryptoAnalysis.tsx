@@ -19,6 +19,7 @@ import { FEATURE_CRYPTO_LEVELS, hasFeature } from '@/lib/features';
 import { findClosestLevel } from '@/lib/calculations';
 import { formatPercentage, getLevelColor, getLevelDisplayName } from '@/lib/utils';
 import { altLevelColor } from '@/lib/levelCompare';
+import { ChangePercentCell } from '@/components/watchlists/watchlistShared';
 import ColRow from '@/components/ui/ColRow';
 import ColumnsMenu from '@/components/ui/ColumnsMenu';
 import { useColumnPrefs } from '@/components/ui/useColumnPrefs';
@@ -26,7 +27,7 @@ import type { ColumnMeta } from '@/lib/tableColumns';
 import type { LevelCalculation } from '@/types/stock';
 import { CRYPTO_INTERVALS, CRYPTO_INTERVAL_ORDER, type CryptoInterval } from '@/lib/cryptoInstruments';
 import {
-  CORE_LEVELS, CryptoTickerStrip, EXPIRY_KIND_STYLE, LEVEL_ORDER, closestLevel, cryptoExpiryKind, fmtOi, fmtPct, fmtPrice,
+  CORE_LEVELS, CryptoChangeCell, CryptoTickerStrip, EXPIRY_KIND_STYLE, LEVEL_ORDER, closestLevel, cryptoExpiryKind, fmtOi, fmtPct, fmtPrice,
   pricePrecisionFor, useCryptoTickers, type CryptoLevelName, type CryptoLevels,
 } from '@/components/crypto/cryptoShared';
 
@@ -271,6 +272,14 @@ export default function CryptoAnalysis({ slug }: { slug: string }) {
     </div>
   ) : (
     <div className="rounded-xl border border-gray-200 bg-white p-3 w-full min-w-0">
+      {ticker && (
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mb-2 pb-2 border-b border-gray-100">
+          <span className="text-sm font-bold tabular-nums text-gray-900">{fmtPrice(ticker.price, prec)}</span>
+          <CryptoChangeCell change={dayChange} precision={prec} />
+          <ChangePercentCell changePercent={ticker.changePct24h} />
+          <span className="text-[10px] text-gray-400">24h</span>
+        </div>
+      )}
       <div className="flex items-center justify-between gap-2 mb-2">
         <div className="text-xs font-semibold text-gray-700">Expiry</div>
         <div className="flex rounded-lg border border-gray-200 overflow-hidden text-[11px] font-semibold">

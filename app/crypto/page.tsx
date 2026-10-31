@@ -52,6 +52,7 @@ const LEVEL_COLUMNS: ReadonlySet<string> = new Set(['level', 'expiry', 'putInt',
 const LEVEL_FILTER_OPTIONS: CryptoLevelName[] = ['call_high', 'call_int', 'put_call_int', 'put_int', 'put_low'];
 
 const RELOAD_MS = 5 * 60_000;
+const FILTERS_OPEN_KEY = 'nt.cryptoFiltersOpen';
 const labelClass = 'block text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1';
 const selectClass = 'px-3 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white';
 
@@ -69,8 +70,19 @@ export default function CryptoPage() {
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [viewMode, setViewMode] = useState<ViewMode>('thin');
+  const [filtersOpen, setFiltersOpen] = useState(true);
   const cols = useColumnPrefs('crypto', CRYPTO_COLUMNS);
   const live = useCryptoTickers();
+
+  // Whether the filter row is open is a per-device convenience: browser storage only, every access guarded.
+  useEffect(() => {
+    try { if (localStorage.getItem(FILTERS_OPEN_KEY) === '0') setFiltersOpen(false); } catch { /* storage blocked: stay open */ }
+  }, []);
+  function toggleFilters() {
+    const next = !filtersOpen;
+    setFiltersOpen(next);
+    try { localStorage.setItem(FILTERS_OPEN_KEY, next ? '1' : '0'); } catch { /* nothing to remember */ }
+  }
 
   // Instruments and levels change once a day; reload them every few minutes, quotes poll separately.
   useEffect(() => {
@@ -116,6 +128,15 @@ export default function CryptoPage() {
   const cellPad = thin ? 'px-3 py-1' : 'px-4 py-2.5';
   const colOn = (k: string) => cols.isShown(k) && (entitled || !LEVEL_COLUMNS.has(k));
   const menuColumns = CRYPTO_COLUMNS.filter(c => entitled || !LEVEL_COLUMNS.has(c.id));
+
+  // Filters that are on (level filters only count for viewers who can see them); shown on the collapsed toggle.
+  const activeFilters = [
+    search.trim() !== '', marketFilter !== 'all', directionFilter !== 'all',
+    entitled && levelFilter !== '', entitled && proximityEnabled,
+  ].filter(Boolean).length;
+  function clearFilters() {
+    setSearch(''); setMarketFilter('all'); setDirectionFilter('all'); setLevelFilter(''); setProximityEnabled(false);
+  }
 
   const visible = view.filter(v => {
     const q = search.trim().toUpperCase();
@@ -191,8 +212,41 @@ export default function CryptoPage() {
 
           {/* Toolbar: the same controls as the watchlists page, minus what has no crypto equivalent. */}
           <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 mb-4">
-            <div className="flex flex-wrap items-end justify-between gap-4">
-              <div className="flex flex-wrap items-end gap-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={toggleFilters}
+                  aria-expanded={filtersOpen}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-gray-200 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+                >
+                  <span className={`inline-block transition-transform text-[10px] text-gray-400 ${filtersOpen ? 'rotate-90' : ''}`}>▶</span>
+                  Filters
+                  {activeFilters > 0 && <span className="px-1.5 rounded-full bg-blue-600 text-white text-[10px] tabular-nums">{activeFilters}</span>}
+                </button>
+                {activeFilters > 0 && <button onClick={clearFilters} className="text-xs text-blue-600 hover:underline">Clear</button>}
+              </div>
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2">
+                  <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Row Height</label>
+                  <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
+                    {(['thin', 'broad'] as ViewMode[]).map(m => (
+                      <button
+                        key={m}
+                        onClick={() => setViewMode(m)}
+                        title={m === 'thin' ? 'One line per market — see more at once' : 'Full detail per market'}
+                        className={`px-2.5 py-1.5 rounded-md text-xs font-semibold transition-colors capitalize ${viewMode === m ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500'}`}
+                      >
+                        {m}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <ColumnsMenu metas={menuColumns} {...cols.menu} />
+              </div>
+            </div>
+
+            {filtersOpen && (
+              <div className="flex flex-wrap items-end gap-4 mt-4 pt-4 border-t border-gray-100">
                 <div>
                   <label className={labelClass}>Search</label>
                   <input
@@ -253,26 +307,7 @@ export default function CryptoPage() {
                   </div>
                 )}
               </div>
-
-              <div className="flex items-center gap-4">
-                <div>
-                  <label className={labelClass}>Row Height</label>
-                  <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
-                    {(['thin', 'broad'] as ViewMode[]).map(m => (
-                      <button
-                        key={m}
-                        onClick={() => setViewMode(m)}
-                        title={m === 'thin' ? 'One line per market — see more at once' : 'Full detail per market'}
-                        className={`px-2.5 py-1.5 rounded-md text-xs font-semibold transition-colors capitalize ${viewMode === m ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500'}`}
-                      >
-                        {m}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <ColumnsMenu metas={menuColumns} {...cols.menu} />
-              </div>
-            </div>
+            )}
           </div>
 
           {error && !rows ? (

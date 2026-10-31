@@ -189,6 +189,7 @@ export function CryptoTickerStrip({ tickers, coins, active }: {
       {coins.map(({ coin, slug }) => {
         const t = tickers[coin];
         const up = (t?.changePct24h ?? 0) >= 0;
+        const chg = change24h(t?.price, t?.changePct24h);
         return (
           <Link
             key={coin}
@@ -199,7 +200,10 @@ export function CryptoTickerStrip({ tickers, coins, active }: {
           >
             <span className="font-semibold text-gray-900">{coin}</span>{' '}
             <span className="tabular-nums text-gray-700">{t ? fmtPrice(t.price) : '…'}</span>{' '}
-            {t && <span className={`tabular-nums ${up ? 'text-green-600' : 'text-red-600'}`}>{fmtPct(t.changePct24h)}</span>}
+            {t && <span className={`tabular-nums ${up ? 'text-green-600' : 'text-red-600'}`}>
+              {chg != null && <>{up ? '▲' : '▼'} {up ? '+' : '−'}{fmtPrice(Math.abs(chg), pricePrecisionFor(t.price))} </>}
+              ({fmtPct(t.changePct24h)})
+            </span>}
           </Link>
         );
       })}
