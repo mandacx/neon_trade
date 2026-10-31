@@ -123,16 +123,21 @@ interface TVChartProps {
   resizable?: boolean;
   onLoadMore?: (direction: 'past' | 'future', firstVisibleTime: string, lastVisibleTime: string) => void;
   isLoadingMore?: boolean;
+  // Decimals for prices on the axis, level lines, header and tooltips (default 2; the crypto page
+  // passes more for sub-dollar coins). Read at mount.
+  pricePrecision?: number;
+  // Zone of the hover date/time label (default exchange time; the crypto page passes UTC).
+  timeZone?: string;
 }
 
-function formatBarTime(epochSeconds: number, intraday: boolean): string {
+function formatBarTime(epochSeconds: number, intraday: boolean, timeZone: string): string {
   const d = new Date(epochSeconds * 1000);
   if (intraday) {
     return d.toLocaleString('en-US', {
-      timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true,
+      timeZone, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true,
     });
   }
-  return d.toLocaleDateString('en-US', { timeZone: 'America/New_York', year: 'numeric', month: 'short', day: 'numeric' });
+  return d.toLocaleDateString('en-US', { timeZone, year: 'numeric', month: 'short', day: 'numeric' });
 }
 
 export default function TVChart({
@@ -171,7 +176,14 @@ export default function TVChart({
   resizable = false,
   onLoadMore,
   isLoadingMore = false,
+  pricePrecision = 2,
+  timeZone = 'America/New_York',
 }: TVChartProps) {
+  // The crosshair handler is bound once at chart creation, so it reads these through refs.
+  const precisionRef = useRef(pricePrecision);
+  const timeZoneRef = useRef(timeZone);
+  const fmtPx = (v: number) => formatCurrency(v, precisionRef.current);
+  const fmtPrice = (v: number) => formatCurrency(v, pricePrecision);
   const [intervalsOpen, setIntervalsOpen] = useState(settings?.intervalsOpen ?? true);
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
@@ -301,6 +313,7 @@ export default function TVChart({
 
     // Add candlestick series
     const candleSeries = chart.addCandlestickSeries({
+      priceFormat: { type: 'price', precision: precisionRef.current, minMove: 10 ** -precisionRef.current },
       upColor: '#22c55e',
       downColor: '#ef4444',
       borderUpColor: '#22c55e',
@@ -402,6 +415,7 @@ export default function TVChart({
         lineWidth: 1,
         lineType: 2, // curved; days without data are simply skipped, the line runs to the next point
         title: cfg.title,
+        priceFormat: { type: 'price', precision: precisionRef.current, minMove: 10 ** -precisionRef.current },
         // A rebuilt chart (e.g. after an interval switch) must start with "Alt" honoured.
         visible: !(hideExtendedRef.current && (cfg.name === 'call_low' || cfg.name === 'put_high')),
         priceScaleId: 'right',
@@ -488,7 +502,7 @@ export default function TVChart({
       const close = candleData.close;
       const barTime = param.time as number;
       const dayKey = dayKeyByTimeRef.current.get(barTime) ?? '';
-      const barLabel = formatBarTime(barTime, isIntraday);
+      const barLabel = formatBarTime(barTime, isIntraday, timeZoneRef.current);
 
       const volumeData = param.seriesData.get(volumeSeriesRef.current!);
       const volume = volumeData ? (volumeData as any).value : 0;
@@ -514,12 +528,12 @@ export default function TVChart({
 
         ohlcDisplayRef.current.innerHTML = `
           <div class="text-xs space-y-1">
-            <div class="font-semibold text-gray-700">${escapeHtml(symbol)} <span class="${priceColor} text-[11px]">${change >= 0 ? '+' : ''}${change.toFixed(2)} (${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}%)</span></div>
+            <div class="font-semibold text-gray-700">${escapeHtml(symbol)} <span class="${priceColor} text-[11px]">${change >= 0 ? '+' : ''}${change.toFixed(precisionRef.current)} (${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}%)</span></div>
             <div class="flex gap-3 text-[10px]">
-              <span class="text-gray-600">O <span class="font-semibold text-gray-900">${formatCurrency(open)}</span></span>
-              <span class="text-gray-600">H <span class="font-semibold text-green-600">${formatCurrency(high)}</span></span>
-              <span class="text-gray-600">L <span class="font-semibold text-red-600">${formatCurrency(low)}</span></span>
-              <span class="text-gray-600">C <span class="font-semibold ${priceColor}">${formatCurrency(close)}</span></span>
+              <span class="text-gray-600">O <span class="font-semibold text-gray-900">${fmtPx(open)}</span></span>
+              <span class="text-gray-600">H <span class="font-semibold text-green-600">${fmtPx(high)}</span></span>
+              <span class="text-gray-600">L <span class="font-semibold text-red-600">${fmtPx(low)}</span></span>
+              <span class="text-gray-600">C <span class="font-semibold ${priceColor}">${fmtPx(close)}</span></span>
             </div>
             <div class="text-[10px] text-gray-600">Vol <span class="font-semibold text-gray-900">${volume.toLocaleString()}</span></div>
             ${oiDisplayHtml}
@@ -639,19 +653,19 @@ export default function TVChart({
           <div class="grid grid-cols-2 gap-x-4 gap-y-1 mb-3 pb-2 border-b border-gray-300">
             <div class="flex justify-between">
               <span class="text-gray-600">Open:</span>
-              <span class="font-semibold">${formatCurrency(open)}</span>
+              <span class="font-semibold">${fmtPx(open)}</span>
             </div>
             <div class="flex justify-between">
               <span class="text-gray-600">High:</span>
-              <span class="font-semibold text-green-600">${formatCurrency(high)}</span>
+              <span class="font-semibold text-green-600">${fmtPx(high)}</span>
             </div>
             <div class="flex justify-between">
               <span class="text-gray-600">Low:</span>
-              <span class="font-semibold text-red-600">${formatCurrency(low)}</span>
+              <span class="font-semibold text-red-600">${fmtPx(low)}</span>
             </div>
             <div class="flex justify-between">
               <span class="text-gray-600">Close:</span>
-              <span class="font-semibold">${formatCurrency(close)}</span>
+              <span class="font-semibold">${fmtPx(close)}</span>
             </div>
           </div>
           ${alertsTooltipHtml}
@@ -663,7 +677,7 @@ export default function TVChart({
               ${levelsWithProximity.map(level => `
                 <div class="flex justify-between gap-4 ${level.isProximity ? 'font-bold text-blue-600' : ''}">
                   <span>${level.displayName}:</span>
-                  <span>${formatCurrency(level.price)} (${formatPercentage(level.value)})</span>
+                  <span>${fmtPx(level.price)} (${formatPercentage(level.value)})</span>
                 </div>
               `).join('')}
             </div>
@@ -678,7 +692,7 @@ export default function TVChart({
               ${extendedLevelsWithDisplay.map(level => `
                 <div class="flex justify-between gap-4 text-gray-600"${altTone ? ` style="color:${altTone}"` : ''}>
                   <span>${level.displayName}:</span>
-                  <span>${formatCurrency(level.price)} (${formatPercentage(level.value)})</span>
+                  <span>${fmtPx(level.price)} (${formatPercentage(level.value)})</span>
                 </div>
               `).join('')}
             </div>
@@ -1257,7 +1271,7 @@ export default function TVChart({
             <div className="flex items-baseline gap-2 flex-wrap">
               <h2 className="text-2xl font-bold">{symbol}</h2>
               {displayPrice !== undefined && (
-                <span className="text-lg text-gray-600">{formatCurrency(displayPrice)}</span>
+                <span className="text-lg text-gray-600">{fmtPrice(displayPrice)}</span>
               )}
               {headerQuote !== undefined && (marketSession === 'regular' ? (
                 <span className="inline-flex items-center gap-1 text-[10px] font-bold text-green-600 uppercase tracking-wide">
@@ -1279,7 +1293,7 @@ export default function TVChart({
               <div className="mt-0.5 flex items-baseline gap-3 flex-wrap text-xs">
                 {dayChange != null && (
                   <span className={`font-bold ${dayChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    {dayChange >= 0 ? '+' : '−'}{formatCurrency(Math.abs(dayChange))}
+                    {dayChange >= 0 ? '+' : '−'}{fmtPrice(Math.abs(dayChange))}
                     {dayChangePercent != null && (
                       <span className="ml-1">
                         ({dayChangePercent >= 0 ? '+' : '−'}{Math.abs(dayChangePercent).toFixed(2)}%)
@@ -1289,7 +1303,7 @@ export default function TVChart({
                 )}
                 {dayHigh != null && dayLow != null && (
                   <span className="text-gray-500">
-                    Day Range: {formatCurrency(dayLow)} – {formatCurrency(dayHigh)}
+                    Day Range: {fmtPrice(dayLow)} – {fmtPrice(dayHigh)}
                   </span>
                 )}
               </div>
@@ -1497,7 +1511,7 @@ export default function TVChart({
               >
                 <span>{getLevelDisplayName(name)}</span>
                 <span className={isFiltered ? 'text-gray-400' : 'opacity-80'}>
-                  {formatCurrency(typeof level.price === 'string' ? parseFloat(level.price) : level.price)}
+                  {fmtPrice(typeof level.price === 'string' ? parseFloat(level.price) : level.price)}
                 </span>
                 {Number.isFinite(level.value) && (
                   <span className={`font-mono text-[11px] ${isFiltered ? 'text-gray-400' : 'opacity-80'}`}>

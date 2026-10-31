@@ -11,6 +11,7 @@
  *  - fallback : symbol search, the live option chain (quotes, greeks, open interest) and its expiries,
  *               and daily/intraday bars and live quotes (getIndexSnapshots) for the indices the primary
  *               has none for (SPX, NDX; no volume)
+ *  - crypto   : live quotes and candles for the crypto levels page (getCryptoTickers, getCryptoBars)
  */
 export type { Bar, Snapshot, OptionSnapshot, OptionChainContract, CalendarRow, NewsArticle } from './types';
 export type { ChartInterval } from './intervals';
@@ -49,3 +50,6 @@ export {
   getOptionChainContracts,
   getOptionExpirations,
 } from './provider/fallback';
+
+export { getCryptoTickers, getCryptoBars } from './provider/crypto';
+export type { CryptoTicker } from './provider/crypto';
