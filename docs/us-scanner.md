@@ -62,13 +62,14 @@ the daily-bar feed rules in `lib/marketdata/provider/primary.ts`. History of dec
 | "≈ Russell 1000" | Top 1000 active non-ADR common stocks by market cap | No reachable public file (iShares serves HTML to scripts). Known gap: foreign issuers whose listing name doesn't say "Depositary" (e.g. TSM) count. The UI labels it an approximation. |
 | Liquidity | 20 settled consolidated sessions | Liquid = last close ≥ $5 and average dollar volume ≥ **$50M/day** (`lib/usUniverseRules.ts`). $10M let in ~3,500 names. |
 | Sector, industry, cap | yfinance via the Railway worker | Yahoo sectors mapped to the 11 GICS names. `public.securities` seeds the option-levels symbols once; it is never written. |
+| Fundamentals | yfinance via the same worker (same `Ticker.info` call, no extra request) | `pe_trailing`, `pe_forward`, `eps_ttm`, `total_debt`, `total_cash`, `debt_to_equity` (**percent**, Yahoo's unit: 78.4 = 0.784×), `profit_margin` (fraction), `fund_at`. Stocks only, weekly. Replaced outright on each fetch (null clears: Yahoo omits P/E for loss-makers). Rows without `fund_at` are due for the worker even when `meta_at` is fresh. Also shown on the stock page (`getFundamentals`, details route `fundamentals`). |
 
 Every step keeps the previous data when its source fails or looks implausible. No membership history is
 kept (decided): bars for scanner symbols are stored daily, so liquidity on past dates can be recomputed.
 
 ## Scans
 
-Groups: Streaks, 52-week, Volume, Gaps, Open patterns, Momentum, Volatility, Relative strength, Earnings.
+Groups: Streaks, 52-week, Volume, Gaps, Open patterns, Momentum, Volatility, Relative strength, Earnings, Fundamentals.
 The catalogue (labels, help text, which fields each scan uses) is `SCANS` in `lib/scanner/config.ts`.
 
 Rules that are easy to get wrong:
@@ -87,6 +88,15 @@ Rules that are easy to get wrong:
   year for 52-week scans). Split *detection* is separate (below).
 - **Filters** apply before the scan. Sector, industry and market cap describe companies, so they never
   match ETFs. Every query parameter goes through `normalizeParams` (clamped; unknown values → defaults).
+- **Fundamentals filters** (`maxPe`, `profitable`, `debt` = any / low / netcash / none, `minMargin`) are checked by
+  `passesFundamentals` (`lib/scanner/scans.ts`, fixtures in `scripts/test-us-scanner.mjs`). Any of them active drops ETFs
+  and stocks without fundamentals; unknown values never pass. *Low debt* = debt/equity under 50% **or** cash ≥ debt.
+  Caveat: for banks and brokers Yahoo's debt and cash are not comparable to an industrial's (Morgan Stanley shows
+  "net cash" with D/E 5.17), so they can pass *low* through the cash branch.
+- **Valuation & debt** scan (`fundamentals`): stocks with a positive trailing P/E, lowest first. The
+  **Quality** preset = this scan + profitable, P/E ≤ 30, low debt, margin ≥ 10%.
+- Fundamentals columns: P/E, Debt, Cash, D/E shown; Fwd P/E, EPS, Margin % hidden by default
+  (`Column.defaultOff`, which only applies to users without saved column preferences).
 
 ## Splits
 

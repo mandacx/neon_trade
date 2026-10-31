@@ -14,10 +14,11 @@ export const SCAN_KEYS = [
   'atr_pct', 'inside_day', 'range_breakout',
   'rs_spy',
   'earnings_upcoming', 'earnings_reacted',
+  'fundamentals',
 ] as const;
 export type ScanKey = (typeof SCAN_KEYS)[number];
 
-export const SCAN_GROUPS = ['Streaks', '52-week', 'Volume', 'Gaps', 'Open patterns', 'Momentum', 'Volatility', 'Relative strength', 'Earnings'] as const;
+export const SCAN_GROUPS = ['Streaks', '52-week', 'Volume', 'Gaps', 'Open patterns', 'Momentum', 'Volatility', 'Relative strength', 'Earnings', 'Fundamentals'] as const;
 export type ScanGroup = (typeof SCAN_GROUPS)[number];
 
 export const PV_COMBOS = ['up_surge', 'down_surge', 'up_dry', 'down_dry'] as const;
@@ -55,6 +56,15 @@ export const CAP_TIER_RANGES: Record<Exclude<CapTier, 'any'>, [number, number]> 
 export const CAP_TIER_LABELS: Record<CapTier, string> = {
   any: 'Any', micro: 'Micro ($50M–$300M)', small: 'Small ($300M–$2B)', mid: 'Mid ($2B–$10B)', large: 'Large ($10B–$200B)', mega: 'Mega ($200B+)',
 };
+
+/** Debt filter. low = debt/equity under 50% or more cash than debt; netcash = cash ≥ debt; none = no debt at all. */
+export const DEBT_FILTERS = ['any', 'low', 'netcash', 'none'] as const;
+export type DebtFilter = (typeof DEBT_FILTERS)[number];
+export const DEBT_FILTER_LABELS: Record<DebtFilter, string> = {
+  any: 'Any', low: 'Low debt or net cash', netcash: 'Net cash (cash ≥ debt)', none: 'No debt',
+};
+/** Debt/equity (in %) below which "low debt" holds. */
+export const LOW_DEBT_TO_EQUITY_PCT = 50;
 
 export const PERIODS = ['1M', '3M', '6M'] as const;
 export type Period = (typeof PERIODS)[number];
@@ -98,6 +108,14 @@ export interface ScanParams {
   maxChgPct: number | null;
   /** Price within this % below the 52-week high (null = off). */
   nearHighPct: number | null;
+  // Fundamentals filters (stocks only; any of them active drops ETFs and stocks without fundamentals)
+  /** Trailing P/E above 0 and at most this (null = off). */
+  maxPe: number | null;
+  /** Trailing EPS above 0. */
+  profitable: boolean;
+  debt: DebtFilter;
+  /** Net profit margin at least this % (null = off). */
+  minMarginPct: number | null;
   limit: number;
 }
 
@@ -138,6 +156,7 @@ export const ALLOWED_N: Record<ScanKey, number[]> = {
   rs_spy: [1],
   earnings_upcoming: [1, 3, 5, 7, 14],
   earnings_reacted: [1],
+  fundamentals: [1],
 };
 
 export const SCANS: ScanInfo[] = [
@@ -181,6 +200,8 @@ export const SCANS: ScanInfo[] = [
     help: 'Scheduled to report earnings within the next N days (dates marked ~ are estimates).' },
   { key: 'earnings_reacted', group: 'Earnings', label: 'Earnings reaction', nLabel: null, dirLabels: null, usesGap: true, metricLabel: 'Gap %', changeLabel: 'Day chg %',
     help: 'Reported yesterday after the close or today before the open, and gapped at least the minimum % either way.' },
+  { key: 'fundamentals', group: 'Fundamentals', label: 'Valuation & debt', nLabel: null, dirLabels: null, metricLabel: 'P/E',
+    help: 'Profitable stocks (positive trailing P/E) ranked by P/E, lowest first. Combine with the P/E, debt and margin filters. Fundamentals are refreshed weekly.' },
 ];
 
 export const SCAN_INFO: Record<ScanKey, ScanInfo> = Object.fromEntries(SCANS.map(s => [s.key, s])) as Record<ScanKey, ScanInfo>;
@@ -188,7 +209,7 @@ export const SCAN_INFO: Record<ScanKey, ScanInfo> = Object.fromEntries(SCANS.map
 /** Scans where a smaller metric ranks first ("smaller is stronger"). Direction-dependent scans are resolved by `rankAscending`. */
 export function rankAscending(p: Pick<ScanParams, 'scan' | 'dir'>): boolean {
   switch (p.scan) {
-    case 'high52': case 'low52': case 'open_high': case 'ma_cross': case 'inside_day': case 'earnings_upcoming':
+    case 'high52': case 'low52': case 'open_high': case 'ma_cross': case 'inside_day': case 'earnings_upcoming': case 'fundamentals':
       return true;
     case 'roc': case 'sma_position': case 'rs_spy':
       return p.dir === 'down';
@@ -202,7 +223,9 @@ export const DEFAULT_PARAMS: ScanParams = {
   volX: 1.5, minGapPct: 2, tolPct: 0.1, atrMin: 3, atrMax: null,
   universe: 'ALL', exchanges: [], type: 'stock', excludeAdr: false, sector: null, industry: null,
   minPrice: 5, maxPrice: null, minDollarVolM: 10, minAvgVol: 0, minMktCapB: 0, capTier: 'any',
-  minChgPct: null, maxChgPct: null, nearHighPct: null, limit: 100,
+  minChgPct: null, maxChgPct: null, nearHighPct: null,
+  maxPe: null, profitable: false, debt: 'any', minMarginPct: null,
+  limit: 100,
 };
 
 export interface Preset { key: string; label: string; params: Partial<ScanParams> }
@@ -213,7 +236,12 @@ export const PRESETS: Preset[] = [
   { key: 'breakout', label: 'Breakout on volume', params: { scan: 'range_breakout', n: 55, dir: 'up', minDollarVolM: 20 } },
   { key: 'gapgo', label: 'Gap & go', params: { scan: 'gap_up', minGapPct: 3, minDollarVolM: 20 } },
   { key: 'accumulation', label: 'Quiet accumulation', params: { scan: 'price_volume', combo: 'up_dry', n: 10, minDollarVolM: 25 } },
+  { key: 'quality', label: 'Quality: profitable, low debt, P/E ≤ 30', params: { scan: 'fundamentals', profitable: true, maxPe: 30, debt: 'low', minMarginPct: 10 } },
 ];
+
+/** Any fundamentals filter set (they only match stocks with stored fundamentals). */
+export const fundamentalsFilterActive = (p: Pick<ScanParams, 'maxPe' | 'profitable' | 'debt' | 'minMarginPct'>): boolean =>
+  p.maxPe !== null || p.profitable || p.debt !== 'any' || p.minMarginPct !== null;
 
 // ---------------------------------------------------------------------------
 // Validation: every value from the query string is checked and clamped here.
@@ -289,6 +317,10 @@ export function normalizeParams(raw: Raw): ScanParams {
     minChgPct: minChg,
     maxChgPct: maxChg !== null && minChg !== null && maxChg < minChg ? minChg : maxChg,
     nearHighPct: numOrNull(raw.nearHigh, 0, 100, d.nearHighPct),
+    maxPe: numOrNull(raw.maxPe, 0, 10_000, d.maxPe),
+    profitable: str(raw.profitable) === '1' || str(raw.profitable) === 'true',
+    debt: oneOf(raw.debt, DEBT_FILTERS, d.debt),
+    minMarginPct: numOrNull(raw.minMargin, -1000, 100, d.minMarginPct),
     limit: oneOf(raw.limit, LIMITS, d.limit as (typeof LIMITS)[number]),
   };
 }
@@ -323,6 +355,10 @@ export function toQuery(p: ScanParams): string {
   if (p.minChgPct !== null) q.set('minChg', String(p.minChgPct));
   if (p.maxChgPct !== null) q.set('maxChg', String(p.maxChgPct));
   if (p.nearHighPct !== null) q.set('nearHigh', String(p.nearHighPct));
+  if (p.maxPe !== null) q.set('maxPe', String(p.maxPe));
+  if (p.profitable) q.set('profitable', '1');
+  if (p.debt !== d.debt) q.set('debt', p.debt);
+  if (p.minMarginPct !== null) q.set('minMargin', String(p.minMarginPct));
   if (p.limit !== d.limit) q.set('limit', String(p.limit));
   return q.toString();
 }

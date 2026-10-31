@@ -3,7 +3,7 @@
  * Dependency-free (tested by scripts/test-us-scanner.mjs). Market-wide pieces (SPY's return for
  * relative strength, earnings dates, pre-market quotes) arrive in the context.
  */
-import { PERIOD_SESSIONS, PV_COMBO_LABELS, type ScanKey, type ScanParams } from './config.ts';
+import { LOW_DEBT_TO_EQUITY_PCT, PERIOD_SESSIONS, PV_COMBO_LABELS, type ScanKey, type ScanParams } from './config.ts';
 import { atrPct, crossWithin, findJump, insideDay, mean, pct, rangeBreakout, roc, sma, streak, volumeRatio, type DayBar } from './indicators.ts';
 
 export interface Ext52 { sessions: number; high: number; highDate: string; low: number; lowDate: string }
@@ -21,6 +21,19 @@ export interface SymbolSeries {
   hasLive: boolean;
 }
 
+/** Stored company fundamentals (same shape as lib/usUniverse.ts Fundamentals, minus the date). */
+export interface FundamentalsLite {
+  peTrailing: number | null;
+  peForward: number | null;
+  epsTtm: number | null;
+  totalDebt: number | null;
+  totalCash: number | null;
+  /** Percent. */
+  debtToEquity: number | null;
+  /** Fraction. */
+  profitMargin: number | null;
+}
+
 export interface ScanContext {
   symbol: string;
   s: SymbolSeries;
@@ -35,6 +48,7 @@ export interface ScanContext {
     /** A report that makes today the first session after it (reported yesterday after the close, or today before the open). */
     reactionToday?: boolean;
   } | null;
+  fundamentals?: FundamentalsLite | null;
 }
 
 export interface Match {
@@ -52,6 +66,40 @@ const fmt = (x: number, d = 2) => x.toLocaleString('en-US', { minimumFractionDig
 const signed = (x: number, d = 2) => `${x > 0 ? '+' : ''}${fmt(x, d)}%`;
 const money = (x: number) => `$${fmt(x)}`;
 const last = <T,>(xs: T[]) => xs[xs.length - 1];
+const billions = (x: number) => `$${fmt(Math.abs(x) / 1e9, Math.abs(x) >= 100e9 ? 0 : 1)}B`;
+
+/**
+ * The fundamentals filters (P/E, profitable, debt, margin) for one stock. Missing data never passes an
+ * active filter: no fundamentals at all fails, and so does e.g. an unknown debt under a debt filter.
+ */
+export function passesFundamentals(f: FundamentalsLite | null | undefined, p: Pick<ScanParams, 'maxPe' | 'profitable' | 'debt' | 'minMarginPct'>): boolean {
+  if (!f) return false;
+  if (p.profitable && !(f.epsTtm != null && f.epsTtm > 0)) return false;
+  if (p.maxPe !== null && !(f.peTrailing != null && f.peTrailing > 0 && f.peTrailing <= p.maxPe)) return false;
+  if (p.minMarginPct !== null && !(f.profitMargin != null && f.profitMargin * 100 >= p.minMarginPct)) return false;
+  if (p.debt !== 'any') {
+    const debt = f.totalDebt, cash = f.totalCash;
+    const netCash = debt != null && cash != null && cash >= debt;
+    if (p.debt === 'none' && debt !== 0) return false;
+    if (p.debt === 'netcash' && !netCash) return false;
+    if (p.debt === 'low' && !(netCash || (f.debtToEquity != null && f.debtToEquity >= 0 && f.debtToEquity < LOW_DEBT_TO_EQUITY_PCT))) return false;
+  }
+  return true;
+}
+
+/** One-line summary: "P/E 14.6 (fwd 18.5) · net cash $123B · D/E 0.21 · margin 50.0%". */
+export function fundamentalsDetail(f: FundamentalsLite): string {
+  const parts: string[] = [];
+  if (f.peTrailing != null && f.peTrailing > 0) parts.push(`P/E ${fmt(f.peTrailing, 1)}${f.peForward != null && f.peForward > 0 ? ` (fwd ${fmt(f.peForward, 1)})` : ''}`);
+  else if (f.epsTtm != null && f.epsTtm <= 0) parts.push('loss-making');
+  if (f.totalDebt != null && f.totalCash != null) {
+    const net = f.totalDebt - f.totalCash;
+    parts.push(f.totalDebt === 0 ? 'no debt' : net <= 0 ? `net cash ${billions(net)}` : `net debt ${billions(net)}`);
+  } else if (f.totalDebt != null) parts.push(`debt ${billions(f.totalDebt)}`);
+  if (f.debtToEquity != null) parts.push(`D/E ${fmt(f.debtToEquity / 100)}`);
+  if (f.profitMargin != null) parts.push(`margin ${fmt(f.profitMargin * 100, 1)}%`);
+  return parts.join(' · ');
+}
 
 function streakScan(c: ScanContext, dir: 1 | -1): Match | null {
   const { len, from } = streak(c.s.bars, dir);
@@ -213,6 +261,13 @@ export const SCANNERS: Record<ScanKey, (c: ScanContext) => Match | null> = {
     const gap = pct(today.o, prev.c);
     if (Math.abs(gap) < c.p.minGapPct) return null;
     return { metric: Math.abs(gap), detail: `Earnings reaction: gap ${signed(gap)}, now ${signed(pct(today.c, prev.c))} on the day`, windowChg: pct(today.c, prev.c), lookback: 2 };
+  },
+
+  // Ranked by trailing P/E; the filters (applied by the runner) decide which stocks qualify.
+  fundamentals: c => {
+    const f = c.fundamentals;
+    if (!f || f.peTrailing == null || !(f.peTrailing > 0)) return null;
+    return { metric: f.peTrailing, detail: fundamentalsDetail(f) };
   },
 };
 

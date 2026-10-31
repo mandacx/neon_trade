@@ -26,6 +26,8 @@ export interface Column<T> {
   sortable?: boolean;
   filterable?: boolean;
   className?: string;
+  /** Hidden until the user turns it on in the Columns menu (only with `tableId`). */
+  defaultOff?: boolean;
 }
 
 type Filter = { text?: string; min?: string; max?: string; from?: string; to?: string };
@@ -121,7 +123,7 @@ export default function DataTable<T>({
   /** Keep the first column (e.g. the symbol) visible while the table scrolls sideways. */
   stickyFirst?: boolean;
 }) {
-  const metas = allColumns.filter(c => c.label).map(c => ({ id: c.key, label: c.label, hint: c.title }));
+  const metas = allColumns.filter(c => c.label).map(c => ({ id: c.key, label: c.label, hint: c.title, defaultOff: c.defaultOff }));
   const prefs = useColumnPrefs(tableId ?? null, metas);
   const columns = useMemo(() => {
     if (!tableId) return allColumns;

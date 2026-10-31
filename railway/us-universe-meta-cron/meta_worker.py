@@ -1,4 +1,4 @@
-"""Weekly sector / industry / market-cap refresh for the US scanner universe.
+"""Weekly sector / industry / market-cap / fundamentals refresh for the US scanner universe.
 
 Deployed as the us-universe-meta-cron service (Railway, neon-trade-crons). It has no database
 credentials: it asks the app which stocks need metadata, looks them up on Yahoo Finance (yfinance)
@@ -8,6 +8,7 @@ Env: CRON_SECRET (required), APP_URL (default https://us.niftytrendz.com), MAX_M
 Run locally against a dev server:  APP_URL=http://localhost:3000 python -I meta_worker.py
 """
 import json
+import math
 import os
 import sys
 import time
@@ -33,6 +34,15 @@ def call(method, path, body=None):
         return json.load(res)
 
 
+def finite(v):
+    # NaN / Infinity (or the string "Infinity") would not survive JSON: send None instead.
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return None
+    return x if math.isfinite(x) else None
+
+
 def fetch(symbol):
     # Yahoo spells share classes with a dash (BRK-B); our symbols use a dot.
     ysym = symbol.replace(".", "-")
@@ -47,6 +57,16 @@ def fetch(symbol):
                 "sector": info.get("sector"),
                 "industry": info.get("industry"),
                 "marketCap": info.get("marketCap"),
+                # Fundamentals (missing = None; the P/E is absent for loss-makers). debtToEquity is in percent.
+                "fundamentals": {
+                    "peTrailing": finite(info.get("trailingPE")),
+                    "peForward": finite(info.get("forwardPE")),
+                    "epsTtm": finite(info.get("trailingEps")),
+                    "totalDebt": finite(info.get("totalDebt")),
+                    "totalCash": finite(info.get("totalCash")),
+                    "debtToEquity": finite(info.get("debtToEquity")),
+                    "profitMargin": finite(info.get("profitMargins")),
+                },
             }
         except Exception as e:  # noqa: BLE001 - any failure is retried, then reported
             err = str(e)[:200]

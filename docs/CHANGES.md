@@ -17,6 +17,33 @@ anything not tested as *unverified*.
 - **Not verified:** a real signed-in entitled session (no Pro login available; the gated UI was tested with mocked levels responses only); production build and Vercel (the app reads only `DATABASE_URL`, and the FDW and local tables live in the shared database, so production needs no new env var); the 10-minute sync picking up the next 08:08 UTC snapshot; the source column mapping is inferred from names and ordering, not a definition.
 - **Follow-ups:** grant `crypto_levels` to plans (`/admin/plans` or the script; not done); no rate limiter on crypto routes; crypto chart settings not saved per user; `deribit_option_raw` not linked.
 
+## 2026-10-30 — Fundamentals: P/E, debt and cash (scanner columns/filters/preset, stock page)
+
+- **Why:** P/E and debt (how much, and cash on hand) per company, and a "good companies" screen. **Alpaca has no fundamentals** (its API reference lists stock/options/crypto data, fixed income, logos, screener, news and corporate actions only; Alpaca forum staff say the same). The weekly yfinance worker already loads `Ticker.info` for every scanner stock and kept only name/sector/industry/market cap; the same response carries the fundamentals, so no new vendor, cron or request.
+- **Files:**
+  - `railway/us-universe-meta-cron/meta_worker.py`: also sends a `fundamentals` block (`trailingPE`, `forwardPE`, `trailingEps`, `totalDebt`, `totalCash`, `debtToEquity`, `profitMargins`; NaN/Infinity → null so the JSON stays valid).
+  - `lib/usUniverse.ts`: new columns on `nt_us_universe` (`pe_trailing`, `pe_forward`, `eps_ttm`, `total_debt`, `total_cash`, `debt_to_equity` in **percent**, `profit_margin` as a fraction, `fund_at`), added by `ensureUniverseTables` (now also called by the readers, so the scanner can't hit a missing column); `applyMeta` replaces them outright when the block is present (a null clears an old P/E); `pendingMetaSymbols` also picks rows with `fund_at` null (and no lookup error) so they fill without waiting for the 7-day refresh; `UniverseRow.fundamentals`; `getFundamentals(symbol)`.
+  - Scanner: `lib/scanner/config.ts` (params `maxPe`, `profitable`, `debt` any/low/netcash/none, `minMargin`; scan `fundamentals` "Valuation & debt" in a new Fundamentals group, P/E lowest first; preset **Quality** = profitable, P/E ≤ 30, low debt, margin ≥ 10%), `lib/scanner/scans.ts` (`passesFundamentals`, `fundamentalsDetail`, the scan), `lib/scanner/run.ts` (filter in `passesMeta`, row fields `pe`, `fwdPe`, `eps`, `debtB`, `cashB`, `netDebtB`, `debtToEquity` as a ratio, `marginPct`, `fundAsOf`), `app/scanner/page.tsx` (columns, filters, chips), `components/oi/DataTable.tsx` (`Column.defaultOff`).
+  - Stock page: `app/api/stocks/[symbol]/route.ts` returns `fundamentals` (ungated, like the rest of the security metadata); `components/stock/StockAnalysis.tsx` shows one line under the quote (P/E, Fwd P/E, EPS, Debt, Cash, Net debt/Net cash, D/E, Margin, "as of"), not in `embedded` mode. Placed under the quote rather than beside the Analysis box (as planned) to keep the right column short.
+  - Docs: `docs/us-scanner.md`, `CLAUDE.md`.
+- **Rules:** *low debt* = D/E < 50% or cash ≥ debt; *net cash* = cash ≥ debt; *no debt* = debt exactly 0. An active fundamentals filter drops ETFs and stocks without fundamentals; unknown values never pass.
+- **Verified:**
+  - Live yfinance values for AAPL/MSFT/NVDA/GOOGL fetched, then stored through the dev route; the DB rows match exactly (e.g. AAPL P/E 39.52, debt $84.34B, cash $62.40B, D/E 78.4).
+  - One worker batch (50 symbols, 0 errors) against the dev server, which writes to the shared Neon DB: 54 stocks now have fundamentals, 8 of them without a P/E.
+  - `runScan` with the Quality preset: 12 matches out of the 54, all satisfying the rules.
+  - `/api/stocks/AAPL` returns `fundamentals`; `/api/stocks/SPY` returns null.
+  - Screenshot of `/stock/AAPL` shows the line.
+  - `node scripts/test-us-scanner.mjs` (26 passed, 3 new), `tsc --noEmit` and `npm run build` clean.
+  - Vendor grep (incl. Yahoo/yfinance) of `.next/static` empty.
+- **Not verified:** the scanner page in a browser (needs a Pro login: columns, filters, chips, URL round-trip are type-checked only); the redeployed Railway worker (not deployed yet); null rates across the full universe (only 54 stocks fetched).
+- **Caveats:**
+  - yfinance is unofficial (rate limits, field changes, Yahoo's terms).
+  - The data is weekly: P/E uses Yahoo's price at fetch time, not live.
+  - For banks and brokers, debt and cash aren't comparable with other companies' (MS: "net cash" with D/E 5.17), so they can pass *low debt* through the cash branch.
+- **Follow-ups:**
+  - Redeploy `us-universe-meta-cron` (`railway up ./us-universe-meta-cron --path-as-root --service us-universe-meta-cron`, PowerShell) and run a backfill.
+  - Decide whether *low debt* should require D/E < 50% when D/E is known (would drop MS-style financials).
+
 ## 2026-10-30 — SPX / NDX quotes on the other pages (watchlists, quadrant, OI tracker, option chain)
 
 - **Files:** new `lib/snapshots.ts` (`getSnapshotsWithIndices(symbols, fetchStocks?)`: primary-feed snapshots for stocks, `getIndexSnapshots` for SPX/NDX, merged; the market state is read only when an index is in the list). Used by `app/api/watchlists/[id]/quotes/route.ts`, `lib/quadrantPrices.ts` (current prices, with the chunked reader), `lib/oiTracked.ts` (`underlyingOn` for today, `withPerformance`), `app/api/oi-tracker/stock/[symbol]/route.ts` (quote), `app/api/stocks/[symbol]/chain/route.ts` (`spotOf`, whose fallback quote stays for other symbols), and the `/quote` and `/indices` routes from the entry below (now one-liners).

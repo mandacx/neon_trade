@@ -78,6 +78,18 @@ export async function ensureUniverseTables(): Promise<void> {
       updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
     )
   `;
+  // Fundamentals (same weekly worker as sector / market cap). debt_to_equity is in percent (78.4 = 0.784×).
+  await sql`
+    ALTER TABLE public.nt_us_universe
+      ADD COLUMN IF NOT EXISTS pe_trailing    REAL,
+      ADD COLUMN IF NOT EXISTS pe_forward     REAL,
+      ADD COLUMN IF NOT EXISTS eps_ttm        REAL,
+      ADD COLUMN IF NOT EXISTS total_debt     BIGINT,
+      ADD COLUMN IF NOT EXISTS total_cash     BIGINT,
+      ADD COLUMN IF NOT EXISTS debt_to_equity REAL,
+      ADD COLUMN IF NOT EXISTS profit_margin  REAL,
+      ADD COLUMN IF NOT EXISTS fund_at        TIMESTAMPTZ
+  `;
   await sql`CREATE INDEX IF NOT EXISTS nt_us_universe_scan_idx ON public.nt_us_universe (is_active, is_liquid)`;
   await sql`
     CREATE TABLE IF NOT EXISTS public.nt_us_universe_jobs (
@@ -259,18 +271,50 @@ export async function refreshTop1000(): Promise<number> {
 // Metadata (sector / industry / market cap) from the Railway worker
 // ---------------------------------------------------------------------------
 
-/** Scanner stocks whose metadata is missing or older than a week, most liquid first. */
+/**
+ * Scanner stocks whose metadata is missing or older than a week, most liquid first. Rows that have
+ * metadata but no fundamentals yet (fund_at null, and no lookup error) are due too, so they fill
+ * without waiting a week.
+ */
 export async function pendingMetaSymbols(limit: number): Promise<string[]> {
   await ensureUniverseTables();
   const rows = await sql(`
     SELECT symbol FROM public.nt_us_universe
-    WHERE ${IN_SCANNER_SQL} AND kind = 'stock' AND (meta_at IS NULL OR meta_at < now() - interval '${META_STALE_DAYS} days')
-    ORDER BY meta_at NULLS FIRST, avg_dollar_vol_20 DESC NULLS LAST LIMIT $1
+    WHERE ${IN_SCANNER_SQL} AND kind = 'stock'
+      AND (meta_at IS NULL OR meta_at < now() - interval '${META_STALE_DAYS} days' OR (fund_at IS NULL AND meta_error IS NULL))
+    ORDER BY meta_at NULLS FIRST, fund_at NULLS FIRST, avg_dollar_vol_20 DESC NULLS LAST LIMIT $1
   `, [Math.max(1, Math.min(limit, 500))]);
   return (rows as Array<{ symbol: string }>).map(r => r.symbol);
 }
 
-export interface MetaInput { name?: string | null; sector?: string | null; industry?: string | null; marketCap?: number | null; error?: string | null }
+export interface FundamentalsInput {
+  peTrailing?: number | null;
+  peForward?: number | null;
+  epsTtm?: number | null;
+  totalDebt?: number | null;
+  totalCash?: number | null;
+  /** Percent (78.4 = 0.784×). */
+  debtToEquity?: number | null;
+  /** Fraction (0.27 = 27%). */
+  profitMargin?: number | null;
+}
+
+export interface MetaInput {
+  name?: string | null; sector?: string | null; industry?: string | null; marketCap?: number | null;
+  /** Absent from older worker builds: the stored fundamentals are then left alone. */
+  fundamentals?: FundamentalsInput | null;
+  error?: string | null;
+}
+
+const finiteOrNull = (v: unknown): number | null => {
+  if (v == null || v === '') return null;
+  const x = Number(v);
+  return Number.isFinite(x) ? x : null;
+};
+const wholeOrNull = (v: unknown): number | null => {
+  const x = finiteOrNull(v);
+  return x === null ? null : Math.round(x);
+};
 
 export async function applyMeta(results: Record<string, MetaInput>): Promise<{ updated: number; errors: number }> {
   await ensureUniverseTables();
@@ -287,6 +331,22 @@ export async function applyMeta(results: Record<string, MetaInput>): Promise<{ u
       [ok.map(([s]) => s), ok.map(([, m]) => m.name ?? null), ok.map(([, m]) => toGicsSector(m.sector)), ok.map(([, m]) => m.industry ?? null),
         ok.map(([, m]) => (Number.isFinite(Number(m.marketCap)) && Number(m.marketCap) > 0 ? Math.round(Number(m.marketCap)) : null))],
     );
+    // Fundamentals replace the stored values outright (a null clears them: a company that turned
+    // loss-making must lose its old P/E). Only for results that carry the block.
+    const withFund = ok.filter(([, m]) => m.fundamentals && typeof m.fundamentals === 'object');
+    if (withFund.length > 0) {
+      const f = withFund.map(([, m]) => m.fundamentals!);
+      await sql(
+        `UPDATE public.nt_us_universe u SET
+           pe_trailing = t.pe, pe_forward = t.fpe, eps_ttm = t.eps, total_debt = t.debt, total_cash = t.cash,
+           debt_to_equity = t.de, profit_margin = t.pm, fund_at = now()
+         FROM unnest($1::text[], $2::real[], $3::real[], $4::real[], $5::bigint[], $6::bigint[], $7::real[], $8::real[])
+           AS t(s, pe, fpe, eps, debt, cash, de, pm)
+         WHERE u.symbol = t.s`,
+        [withFund.map(([s]) => s), f.map(x => finiteOrNull(x.peTrailing)), f.map(x => finiteOrNull(x.peForward)), f.map(x => finiteOrNull(x.epsTtm)),
+          f.map(x => wholeOrNull(x.totalDebt)), f.map(x => wholeOrNull(x.totalCash)), f.map(x => finiteOrNull(x.debtToEquity)), f.map(x => finiteOrNull(x.profitMargin))],
+      );
+    }
   }
   if (bad.length > 0) {
     // Unknown to the metadata source: don't ask again for a week.
@@ -317,20 +377,68 @@ export interface UniverseRow {
   inDow30: boolean;
   inTop1000: boolean;
   isLiquid: boolean;
+  /** Null until the metadata worker has fetched them (stocks only). */
+  fundamentals: Fundamentals | null;
+}
+
+/** Company fundamentals as stored (weekly). Any field can be null; P/E is null for loss-makers. */
+export interface Fundamentals {
+  peTrailing: number | null;
+  peForward: number | null;
+  epsTtm: number | null;
+  totalDebt: number | null;
+  totalCash: number | null;
+  /** Percent (78.4 = 0.784×). */
+  debtToEquity: number | null;
+  /** Fraction (0.27 = 27%). */
+  profitMargin: number | null;
+  /** When they were fetched (ISO). */
+  asOf: string;
+}
+
+const FUND_COLUMNS_SQL = `pe_trailing::float8 AS pe_trailing, pe_forward::float8 AS pe_forward, eps_ttm::float8 AS eps_ttm,
+  total_debt::float8 AS total_debt, total_cash::float8 AS total_cash, debt_to_equity::float8 AS debt_to_equity,
+  profit_margin::float8 AS profit_margin, fund_at`;
+
+function fundamentalsFrom(r: any): Fundamentals | null {
+  if (!r.fund_at) return null;
+  const n = (v: unknown) => (v == null ? null : Number(v));
+  // REAL columns come back with float noise (8.720000267): 4 decimals is more than any display uses.
+  const r4 = (v: unknown) => (v == null ? null : Math.round(Number(v) * 1e4) / 1e4);
+  return {
+    peTrailing: r4(r.pe_trailing), peForward: r4(r.pe_forward), epsTtm: r4(r.eps_ttm),
+    totalDebt: n(r.total_debt), totalCash: n(r.total_cash), debtToEquity: r4(r.debt_to_equity), profitMargin: r4(r.profit_margin),
+    asOf: new Date(r.fund_at).toISOString(),
+  };
 }
 
 /** Every symbol in the scanner, with its metadata. Throws if the table is missing (caller reports it). */
 export async function getScannerUniverse(): Promise<UniverseRow[]> {
+  await ensureUniverseTables(); // adds the fundamentals columns on first use (once per instance)
   const rows = await sql(`
     SELECT symbol, name, exchange, kind, is_adr, sector, industry, market_cap::float8 AS market_cap,
-           in_sp500, in_ndx100, in_dow30, in_top1000, is_liquid
+           in_sp500, in_ndx100, in_dow30, in_top1000, is_liquid, ${FUND_COLUMNS_SQL}
     FROM public.nt_us_universe WHERE ${IN_SCANNER_SQL} ORDER BY symbol
   `);
   return (rows as any[]).map(r => ({
     symbol: r.symbol, name: r.name, exchange: r.exchange, kind: r.kind === 'etf' ? 'etf' : 'stock', isAdr: !!r.is_adr,
     sector: r.sector, industry: r.industry, marketCap: r.market_cap != null ? Number(r.market_cap) : null,
     inSp500: !!r.in_sp500, inNdx100: !!r.in_ndx100, inDow30: !!r.in_dow30, inTop1000: !!r.in_top1000, isLiquid: !!r.is_liquid,
+    fundamentals: r.kind === 'etf' ? null : fundamentalsFrom(r),
   }));
+}
+
+/** One stock's fundamentals for the stock page; null when unknown (ETFs, indices, not in the universe, table missing). */
+export async function getFundamentals(symbol: string): Promise<Fundamentals | null> {
+  try {
+    await ensureUniverseTables();
+    const rows = await sql(`SELECT kind, ${FUND_COLUMNS_SQL} FROM public.nt_us_universe WHERE symbol = $1`, [symbol.toUpperCase()]);
+    const r = rows[0] as any;
+    return r && r.kind !== 'etf' ? fundamentalsFrom(r) : null;
+  } catch (error) {
+    console.error('[fundamentals] read failed:', error instanceof Error ? error.message : error);
+    return null;
+  }
 }
 
 /** Scanner symbols only; [] when the table does not exist yet (so callers such as the bar warm-up degrade). */

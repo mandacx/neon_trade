@@ -109,6 +109,56 @@ interface SecurityMeta {
   exchange: string | null;
 }
 
+// Weekly company fundamentals (details route, `fundamentals`); null for ETFs / indices / unknown.
+interface Fundamentals {
+  peTrailing: number | null;
+  peForward: number | null;
+  epsTtm: number | null;
+  totalDebt: number | null;
+  totalCash: number | null;
+  /** Percent (78.4 = 0.784×). */
+  debtToEquity: number | null;
+  /** Fraction. */
+  profitMargin: number | null;
+  asOf: string;
+}
+
+// $84.3B / −$12.0B for the fundamentals line.
+function formatBillions(value: number): string {
+  const abs = Math.abs(value);
+  return `${value < 0 ? '−' : ''}${abs === 0 ? '$0' : formatMarketCap(abs) ?? `$${abs.toLocaleString()}`}`;
+}
+
+/** One line under the quote: P/E, EPS, debt, cash, net debt, D/E, margin. */
+function FundamentalsLine({ f }: { f: Fundamentals }) {
+  const items: Array<{ label: string; value: string; title?: string; cls?: string }> = [];
+  const loss = f.epsTtm != null && f.epsTtm <= 0;
+  if (f.peTrailing != null && f.peTrailing > 0) items.push({ label: 'P/E', value: f.peTrailing.toFixed(1), title: 'Trailing 12-month P/E' });
+  else if (loss) items.push({ label: 'P/E', value: 'n/a, loss-making', cls: 'text-red-700' });
+  if (f.peForward != null && f.peForward > 0) items.push({ label: 'Fwd P/E', value: f.peForward.toFixed(1), title: "On next year's estimated EPS" });
+  if (f.epsTtm != null) items.push({ label: 'EPS', value: `${f.epsTtm < 0 ? '−' : ''}$${Math.abs(f.epsTtm).toFixed(2)}`, title: 'Trailing 12 months', cls: loss ? 'text-red-700' : undefined });
+  if (f.totalDebt != null) items.push({ label: 'Debt', value: f.totalDebt === 0 ? 'none' : formatBillions(f.totalDebt), cls: f.totalDebt === 0 ? 'text-green-700' : undefined });
+  if (f.totalCash != null) items.push({ label: 'Cash', value: formatBillions(f.totalCash), title: 'Cash and short-term investments' });
+  if (f.totalDebt != null && f.totalCash != null && f.totalDebt > 0) {
+    const net = f.totalDebt - f.totalCash;
+    items.push(net <= 0
+      ? { label: 'Net cash', value: formatBillions(-net), cls: 'text-green-700', title: 'More cash than debt' }
+      : { label: 'Net debt', value: formatBillions(net), title: 'Debt minus cash' });
+  }
+  if (f.debtToEquity != null) items.push({ label: 'D/E', value: (f.debtToEquity / 100).toFixed(2), title: 'Debt to equity' });
+  if (f.profitMargin != null) items.push({ label: 'Margin', value: `${(f.profitMargin * 100).toFixed(1)}%`, title: 'Net profit margin', cls: f.profitMargin < 0 ? 'text-red-700' : undefined });
+  if (items.length === 0) return null;
+  const asOf = new Date(f.asOf).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  return (
+    <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-gray-600">
+      {items.map(it => (
+        <span key={it.label} title={it.title}>{it.label}: <strong className={it.cls ?? 'text-gray-800'}>{it.value}</strong></span>
+      ))}
+      <span className="text-gray-400" title="Company fundamentals are refreshed weekly">as of {asOf}</span>
+    </div>
+  );
+}
+
 // Compact market cap for the header chip: $31.2B rather than $31,200,000,000.
 function formatMarketCap(value: number | null): string | null {
   if (!value || value <= 0) return null;
@@ -295,6 +345,7 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
   // displayLevels below).
   const [quote, setQuote] = useState<LiveQuote | null>(null);
   const [security, setSecurity] = useState<SecurityMeta | null>(null);
+  const [fundamentals, setFundamentals] = useState<Fundamentals | null>(null);
   // Earnings (Pro feature `earnings`): summary comes with the details call;
   // `earningsLocked` stays null until that call answers, so the history
   // fetch below only fires for entitled viewers.
@@ -513,6 +564,7 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
         // Sits outside `data` so it's present in broker-only mode too.
         if (details.success) {
           setSecurity(details.security ?? null);
+          setFundamentals(details.fundamentals ?? null);
           setEarnings(details.earnings ?? null);
           setEarningsLocked(!!details.earningsLocked);
         }
@@ -1261,6 +1313,7 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
           {stockData?.tradeDate && <span>Trade date: <strong className="text-gray-800">{stockData.tradeDate}</strong></span>}
         </div>
       )}
+      {!embedded && fundamentals && <FundamentalsLine f={fundamentals} />}
       <EarningsHeaderLines earnings={earnings} locked={earningsLocked} />
     </div>
   );

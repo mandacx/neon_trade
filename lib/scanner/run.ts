@@ -9,10 +9,10 @@ import { getMarketState, type MarketSession, type MarketState } from '@/lib/mark
 import { getTrackedSymbols, todayET } from '@/lib/earnings';
 import { getScannerUniverse, type UniverseRow } from '@/lib/usUniverse';
 import { getOrSet } from '@/lib/ttlCache';
-import { CAP_TIER_RANGES, PERIOD_SESSIONS, rankAscending, type ScanParams } from './config.ts';
+import { CAP_TIER_RANGES, PERIOD_SESSIONS, fundamentalsFilterActive, rankAscending, type ScanParams } from './config.ts';
 import { pct, percentileRank, roc, type DayBar } from './indicators.ts';
 import { liveBarFrom, premarketFrom, todayNeedsRefresh } from './liveBar.ts';
-import { SCANNERS, avgDollarVolM, avgVolume, jumpFlag, type Ext52, type Match, type ScanContext, type SymbolSeries } from './scans.ts';
+import { SCANNERS, avgDollarVolM, avgVolume, jumpFlag, passesFundamentals, type Ext52, type Match, type ScanContext, type SymbolSeries } from './scans.ts';
 import { readTodayBars, refreshTodayBars, type TodayBars } from './today.ts';
 
 const HISTORY_TTL_MS = 5 * 60_000;
@@ -40,6 +40,19 @@ export interface ScanRow {
   volume: number;
   avgDollarVolM: number;
   marketCapB: number | null;
+  // Fundamentals (stocks only, weekly; null when unknown)
+  pe: number | null;
+  fwdPe: number | null;
+  eps: number | null;
+  debtB: number | null;
+  cashB: number | null;
+  /** Debt minus cash; negative = net cash. */
+  netDebtB: number | null;
+  /** Debt/equity as a ratio (0.78 = 78%). */
+  debtToEquity: number | null;
+  marginPct: number | null;
+  /** When the fundamentals were fetched (ISO). */
+  fundAsOf: string | null;
   session: MarketSession;
   hasLevels: boolean;
   metric: number;
@@ -175,7 +188,27 @@ function passesMeta(u: UniverseRow, p: ScanParams): boolean {
       if (capB === null || capB < lo || capB >= hi) return false;
     }
   }
+  // Fundamentals describe companies too, but unlike sector they can be missing: an active filter drops ETFs and unknowns.
+  if (fundamentalsFilterActive(p) && (u.kind !== 'stock' || !passesFundamentals(u.fundamentals, p))) return false;
   return true;
+}
+
+const round = (x: number | null, d = 2) => (x == null ? null : Math.round(x * 10 ** d) / 10 ** d);
+
+function fundamentalsCols(u: UniverseRow): Pick<ScanRow, 'pe' | 'fwdPe' | 'eps' | 'debtB' | 'cashB' | 'netDebtB' | 'debtToEquity' | 'marginPct' | 'fundAsOf'> {
+  const f = u.kind === 'stock' ? u.fundamentals : null;
+  const debt = f?.totalDebt ?? null, cash = f?.totalCash ?? null;
+  return {
+    pe: round(f?.peTrailing != null && f.peTrailing > 0 ? f.peTrailing : null, 1),
+    fwdPe: round(f?.peForward != null && f.peForward > 0 ? f.peForward : null, 1),
+    eps: round(f?.epsTtm ?? null),
+    debtB: round(debt == null ? null : debt / 1e9),
+    cashB: round(cash == null ? null : cash / 1e9),
+    netDebtB: round(debt == null || cash == null ? null : (debt - cash) / 1e9),
+    debtToEquity: round(f?.debtToEquity == null ? null : f.debtToEquity / 100),
+    marginPct: round(f?.profitMargin == null ? null : f.profitMargin * 100, 1),
+    fundAsOf: f?.asOf ?? null,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -275,6 +308,7 @@ export async function runScan(p: ScanParams, opts: { onTodayRefresh?: (task: () 
       symbol: u.symbol, s: scanSeries, p, spyRoc,
       premarket: p.scan === 'premarket_gap' ? premarketFrom(quotes[u.symbol], state, price, Date.now()) : null,
       earnings: earnings?.get(u.symbol) ?? null,
+      fundamentals: u.kind === 'stock' ? u.fundamentals : null,
     };
     const m = scanFn(ctx);
     if (!m) continue;
@@ -288,6 +322,7 @@ export async function runScan(p: ScanParams, opts: { onTodayRefresh?: (task: () 
         open: lastB.o, high: lastB.h, low: lastB.l, high52: hi52, low52: lo52, volume: lastB.v,
         avgDollarVolM: Math.round(dv * 10) / 10,
         marketCapB: u.kind === 'stock' && u.marketCap != null ? Math.round((u.marketCap / 1e9) * 100) / 100 : null,
+        ...fundamentalsCols(u),
         session: state.session, hasLevels: levelSet.has(u.symbol),
       },
     });

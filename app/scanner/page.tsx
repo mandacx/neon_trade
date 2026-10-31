@@ -7,7 +7,7 @@ import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import DataTable, { type Column } from '@/components/oi/DataTable';
 import { Spinner, inputClass, labelClass } from '@/components/oi/oiShared';
 import {
-  ALLOWED_N, CAP_TIERS, CAP_TIER_LABELS, DEFAULT_PARAMS, EXCHANGES, LIMITS, PERIODS, PRESETS, PV_COMBOS, PV_COMBO_LABELS,
+  ALLOWED_N, CAP_TIERS, CAP_TIER_LABELS, DEBT_FILTERS, DEBT_FILTER_LABELS, DEFAULT_PARAMS, EXCHANGES, LIMITS, PERIODS, PRESETS, PV_COMBOS, PV_COMBO_LABELS,
   SCANS, SCAN_GROUPS, SCAN_INFO, SMA_LENGTHS, TYPES, TYPE_LABELS, UNIVERSES, UNIVERSE_LABELS,
   normalizeParams, toQuery, type ScanParams,
 } from '@/lib/scanner/config';
@@ -17,6 +17,8 @@ interface Row {
   rank: number; symbol: string; name: string | null; exchange: string | null; sector: string | null; industry: string | null;
   kind: 'stock' | 'etf'; price: number; change: number | null; changePct: number | null; open: number; high: number; low: number;
   high52: number | null; low52: number | null; volume: number; avgDollarVolM: number; marketCapB: number | null;
+  pe: number | null; fwdPe: number | null; eps: number | null; debtB: number | null; cashB: number | null; netDebtB: number | null;
+  debtToEquity: number | null; marginPct: number | null; fundAsOf: string | null;
   session: 'pre' | 'regular' | 'post' | 'closed'; hasLevels: boolean; metric: number; detail: string; windowChg: number | null; flag: string | null;
 }
 interface Meta {
@@ -40,12 +42,17 @@ const signedMoney = (v: unknown) => { const n = num(v); return n == null ? '—'
 const signedPct = (v: unknown) => { const n = num(v); return n == null ? '—' : `${n > 0 ? '+' : n < 0 ? '−' : ''}${Math.abs(n).toFixed(2)}%`; };
 const compact = (v: unknown) => { const n = num(v); return n == null ? '—' : new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(n); };
 const capText = (b: number | null) => (b == null ? '—' : b >= 1000 ? `$${(b / 1000).toFixed(2)}T` : b >= 1 ? `$${b.toFixed(b >= 100 ? 0 : 1)}B` : `$${Math.round(b * 1000)}M`);
+/** $B amount that may be negative (net debt): −$12.3B. Zero shows as $0. */
+const billionsText = (b: number | null) => (b == null ? '—' : b === 0 ? '$0' : `${b < 0 ? '−' : ''}${capText(Math.abs(b))}`);
+const fixed = (v: number | null, d: number) => (v == null ? '—' : v.toFixed(d));
+const FUND_HINT = 'Company fundamentals, refreshed weekly (stocks only)';
 const tone = (v: number | null) => (v == null || v === 0 ? 'text-gray-700' : v > 0 ? 'text-green-700' : 'text-red-700');
 const arrow = (v: number | null) => (v == null || v === 0 ? '' : v > 0 ? '▲ ' : '▼ ');
 
 function metricText(p: ScanParams, m: number): string {
   switch (p.scan) {
     case 'streak_up': case 'streak_down': case 'ma_cross': case 'earnings_upcoming': return String(Math.round(m));
+    case 'fundamentals': return m.toFixed(1);
     case 'volume': case 'price_volume': return `${m.toFixed(1)}×`;
     case 'inside_day': return `${Math.round(m * 100)}%`;
     case 'open_high': case 'open_low': case 'roc': case 'sma_position': case 'rs_spy': return signedPct(m);
@@ -175,6 +182,16 @@ export default function UsScannerPage() {
     { key: 'volume', label: 'Volume', type: 'number', value: r => r.volume, render: r => compact(r.volume), title: 'Latest session volume (partial while the market is open)' },
     { key: 'avgDollarVolM', label: 'Avg $ vol', type: 'number', value: r => r.avgDollarVolM, render: r => `$${compact(r.avgDollarVolM * 1e6)}`, title: 'Average daily dollar volume, last 20 settled sessions' },
     { key: 'marketCapB', label: 'Mkt Cap', type: 'number', value: r => r.marketCapB, render: r => capText(r.marketCapB) },
+    { key: 'pe', label: 'P/E', type: 'number', value: r => r.pe, render: r => fixed(r.pe, 1), title: `Trailing P/E; blank for loss-makers. ${FUND_HINT}` },
+    { key: 'fwdPe', label: 'Fwd P/E', type: 'number', value: r => r.fwdPe, render: r => fixed(r.fwdPe, 1), title: `Forward P/E (next year's estimated EPS). ${FUND_HINT}`, defaultOff: true },
+    { key: 'eps', label: 'EPS', type: 'number', value: r => r.eps, render: r => (r.eps == null ? '—' : <span className={r.eps < 0 ? 'text-red-700' : ''}>{signedMoney(r.eps)}</span>), title: `Trailing 12-month EPS. ${FUND_HINT}`, defaultOff: true },
+    { key: 'debtB', label: 'Debt', type: 'number', value: r => r.debtB, render: r => billionsText(r.debtB), title: `Total debt. ${FUND_HINT}` },
+    { key: 'cashB', label: 'Cash', type: 'number', value: r => r.cashB, render: r => billionsText(r.cashB), title: `Total cash and short-term investments. ${FUND_HINT}` },
+    { key: 'netDebtB', label: 'Net debt', type: 'number', value: r => r.netDebtB, title: `Debt minus cash; negative (green) = more cash than debt. ${FUND_HINT}`,
+      render: r => <span className={r.netDebtB != null && r.netDebtB <= 0 ? 'text-green-700' : ''}>{billionsText(r.netDebtB)}</span> },
+    { key: 'debtToEquity', label: 'D/E', type: 'number', value: r => r.debtToEquity, render: r => fixed(r.debtToEquity, 2), title: `Debt to equity (0.50 = debt is half of equity). ${FUND_HINT}` },
+    { key: 'marginPct', label: 'Margin %', type: 'number', value: r => r.marginPct, title: `Net profit margin. ${FUND_HINT}`, defaultOff: true,
+      render: r => (r.marginPct == null ? '—' : <span className={tone(r.marginPct)}>{r.marginPct.toFixed(1)}%</span>) },
     { key: 'sector', label: 'Sector', type: 'text', value: r => r.sector },
   ], [info.metricLabel, info.changeLabel, params]);
 
@@ -216,6 +233,10 @@ export default function UsScannerPage() {
     if (params.minChgPct !== null) add('minChg', `Chg ≥ ${params.minChgPct}%`, { minChgPct: null });
     if (params.maxChgPct !== null) add('maxChg', `Chg ≤ ${params.maxChgPct}%`, { maxChgPct: null });
     if (params.nearHighPct !== null) add('near', `Within ${params.nearHighPct}% of 52W high`, { nearHighPct: null });
+    if (params.maxPe !== null) add('maxPe', `P/E ≤ ${params.maxPe}`, { maxPe: null });
+    if (params.profitable) add('profitable', 'Profitable', { profitable: false });
+    if (params.debt !== 'any') add('debt', DEBT_FILTER_LABELS[params.debt], { debt: 'any' });
+    if (params.minMarginPct !== null) add('margin', `Margin ≥ ${params.minMarginPct}%`, { minMarginPct: null });
     if (params.exchanges.length) add('ex', params.exchanges.join(', '), { exchanges: [] });
     if (params.excludeAdr) add('adr', 'No ADRs', { excludeAdr: false });
     if (params.limit !== d.limit) add('limit', `Top ${params.limit}`, { limit: d.limit });
@@ -472,6 +493,18 @@ export default function UsScannerPage() {
                     <input id="f-near" type="range" min={0} max={30} step={1} value={params.nearHighPct ?? 30} className="w-full accent-blue-600 h-[34px]"
                       onChange={e => set('nearHighPct', Number(e.target.value) >= 30 ? null : Number(e.target.value))} aria-valuetext={params.nearHighPct === null ? 'off' : `${params.nearHighPct}%`} />
                   </Field>
+                  <Field id="f-maxpe" label="Max P/E (trailing)" wide>
+                    <NumberInput id="f-maxpe" value={params.maxPe} step={1} min={0} onChange={v => set('maxPe', v)} placeholder="any" />
+                  </Field>
+                  <Field id="f-debt" label="Debt" wide>
+                    <select id="f-debt" className={`${selectCls} w-full`} value={params.debt} onChange={e => set('debt', e.target.value as ScanParams['debt'])}
+                      title="Low debt = debt/equity under 0.5, or more cash than debt">
+                      {DEBT_FILTERS.map(d => <option key={d} value={d}>{DEBT_FILTER_LABELS[d]}</option>)}
+                    </select>
+                  </Field>
+                  <Field id="f-margin" label="Min profit margin (%)" wide>
+                    <NumberInput id="f-margin" value={params.minMarginPct} step={1} onChange={v => set('minMarginPct', v)} placeholder="any" />
+                  </Field>
                   <Field id="f-limit" label="Result limit" wide>
                     <select id="f-limit" className={`${selectCls} w-full`} value={params.limit} onChange={e => set('limit', Number(e.target.value))}>
                       {LIMITS.map(l => <option key={l} value={l}>{l}</option>)}
@@ -490,9 +523,13 @@ export default function UsScannerPage() {
                       <input type="checkbox" className="accent-blue-600" checked={params.excludeAdr} onChange={e => set('excludeAdr', e.target.checked)} />
                       Exclude ADRs
                     </label>
+                    <label className="flex items-center gap-1 text-xs text-gray-700 min-h-[36px] sm:min-h-0 sm:ml-3" title="Positive trailing 12-month earnings per share">
+                      <input type="checkbox" className="accent-blue-600" checked={params.profitable} onChange={e => set('profitable', e.target.checked)} />
+                      Profitable only
+                    </label>
                   </fieldset>
                 </div>
-                <p className="text-[11px] text-gray-400 mt-2">Sector, industry and market cap apply to stocks; warrants, units and preferreds are never included.</p>
+                <p className="text-[11px] text-gray-400 mt-2">Sector, industry, market cap and fundamentals apply to stocks; a P/E, debt, margin or profitable filter leaves out ETFs and stocks whose fundamentals are unknown. Fundamentals are refreshed weekly. Warrants, units and preferreds are never included.</p>
                 <div className="sm:hidden flex gap-2 mt-3">
                   <button onClick={copyLink} className="flex-1 min-h-[40px] rounded-lg border border-gray-200 text-sm font-semibold text-gray-700">{copied ? 'Link copied ✓' : 'Copy link'}</button>
                   <button onClick={resetFilters} className="flex-1 min-h-[40px] rounded-lg border border-gray-200 text-sm font-semibold text-gray-700">Reset filters</button>

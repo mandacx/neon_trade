@@ -10,6 +10,7 @@ import { applyTieredLimit } from '@/lib/rateLimitConfig';
 import { FEATURE_EARNINGS, hasFeature } from '@/lib/features';
 import { getEarningsSummary } from '@/lib/earnings';
 import { standardExpiryOnly } from '@/lib/expiryAccess';
+import { getFundamentals } from '@/lib/usUniverse';
 
 export async function GET(
   request: NextRequest,
@@ -55,12 +56,14 @@ export async function GET(
     // viewers get the summary, everyone else an `earningsLocked` flag so the
     // header can show an upgrade link instead.
     const earningsEnabled = hasFeature(ctx.features, FEATURE_EARNINGS);
-    const [stockData, secRows, earningsMap] = await Promise.all([
+    // Fundamentals (P/E, debt, cash) come from the scanner universe table, refreshed weekly; null for ETFs/indices.
+    const [stockData, secRows, earningsMap, fundamentals] = await Promise.all([
       gate.meta.levelsWithheldAfter
         ? getStockDataAsOf(symbol, gate.meta.levelsWithheldAfter, null, standardExpiryOnly(ctx.features))
         : getLatestStockData(symbol, standardExpiryOnly(ctx.features)),
       getSecuritiesMeta([symbol.toUpperCase()]),
       earningsEnabled ? getEarningsSummary([symbol]) : Promise.resolve(null),
+      getFundamentals(symbol),
     ]);
     const earnings = earningsMap?.get(symbol.toUpperCase()) ?? null;
     const earningsFields = { earnings, earningsLocked: !earningsEnabled };
@@ -85,6 +88,7 @@ export async function GET(
         success: true,
         data: null,
         security,
+        fundamentals,
         ...earningsFields,
         levelAccess: gate.meta.levelAccess,
         message: 'Stock not found in database, using broker data only'
@@ -120,6 +124,7 @@ export async function GET(
         ...gate.meta,
       },
       security,
+      fundamentals,
       ...earningsFields,
     });
   } catch (error) {
