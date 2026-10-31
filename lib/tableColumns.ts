@@ -45,6 +45,8 @@ export const TABLE_IDS = [
   'oiStockExpiries',
   'oiStockLive',
   'usScanner',
+  'crypto',
+  'cryptoLevelsHistory',
 ] as const;
 
 export type TableId = (typeof TABLE_IDS)[number];

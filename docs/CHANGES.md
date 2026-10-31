@@ -7,6 +7,15 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-10-31 — Crypto tables in the watchlists / stock page format
+
+- **Files:** `app/crypto/page.tsx`, `components/crypto/{cryptoShared,CryptoAnalysis}.tsx`, `lib/tableColumns.ts` (`crypto`, `cryptoLevelsHistory` added to `TABLE_IDS`), `docs/crypto.md`.
+- **Markets table (`/crypto`)** now follows `app/watchlists/page.tsx`. It has the same toolbar card, with Search, Settlement (instead of the watchlist picker), Level, Direction (▲ Gainers / ▼ Losers), Near a level %, Row height thin/broad, and the ⚙ Columns menu (saved per user, reorder/resize via `ColRow`). It also has the same sortable headers, a Symbol cell with the change dot and the market in grey, the green/red Change and Change % pills (`ChangePercentCell`, `ChangeDot` reused; `CryptoChangeCell` uses the coin's price precision), and the Nearest Level badge tinted in the level colour with price · distance % (`CryptoLevelCell`, same markup as `LevelCell`). Level columns, the Level filter and Near a level only show with `crypto_levels`.
+- **Columns:** Symbol, Last Price, Change, Change %, 24h Low, 24h High, 24h Volume, Nearest Level, Expiry, Put Int, Call Int, Call OI, Put OI. The feed gives only a 24h change %, so **Change is derived**: `price − price / (1 + pct/100)` (`change24h`). There is no Open column, because the feed has no 24h open.
+- **Levels history (detail page)** now follows the stock page's Price Levels History (`PriceLevelsTab.tsx`). It has the same title, Columns menu, sticky headers, the level order put_low…call_high then call_low / put_high, `(distance %)` after each level, the closest level highlighted in blue, Put High / Call Low coloured by `altLevelColor`, and an OI Diff column. It is now full width with OI by strike below it; side by side, the 12 columns had to scroll.
+- **Verified:** `tsc --noEmit` and eslint clean. Playwright on a dev server (port 3005) at 1400 px (with and without the feature) and 390 px; no horizontal page overflow and no console errors. The entitled views used a temporary preview route, with the gated responses served from a real DB dump (latest snapshot + BTC 2026-11-06 history); the route has since been deleted.
+- **Not verified:** with a real entitled login, or in a production build.
+
 ## 2026-10-31 — Crypto levels page (`/crypto`, feature `crypto_levels`) over a postgres_fdw link
 
 - **Files:** new `scripts/bootstrap-crypto-fdw.mjs`, `scripts/add-crypto-levels-feature.mjs`, `lib/crypto.ts`, `lib/cryptoInstruments.ts`, `lib/marketdata/provider/crypto.ts`, `app/api/crypto/{instruments,tickers}/route.ts`, `app/api/crypto/[slug]/{ohlc,levels,oi}/route.ts`, `app/crypto/page.tsx`, `app/crypto/[slug]/page.tsx`, `components/crypto/{CryptoAnalysis,cryptoShared}.tsx`, `docs/crypto.md`. Changed: `lib/features.ts` (`FEATURE_CRYPTO_LEVELS`), `lib/marketdata/index.ts` (facade exports), `components/charts/TVChart.tsx` (optional `pricePrecision`, `timeZone` props), `components/layout/Header.tsx` (nav), `CLAUDE.md`.

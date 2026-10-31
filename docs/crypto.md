@@ -75,13 +75,15 @@ instruments. Intervals: 5m, 15m, 30m, 1H, 1D.
 
 ## Pages
 
-- `app/crypto/page.tsx`: ticker strip and a table of every market (price, 24h change / range / volume;
-  with the feature: nearest expiry, closest of the five core levels to the live price, Put / Call Int, OI).
+- `app/crypto/page.tsx`: ticker strip and a markets table in the watchlists' format (toolbar filters,
+  sortable columns, Columns menu `crypto`, thin/broad rows, change pills): price, 24h change (derived
+  from the 24h %), 24h low / high / volume; with the feature: nearest level badge (from the live price),
+  expiry, Put / Call Int, call / put OI.
 - `app/crypto/[slug]/page.tsx` → `components/crypto/CryptoAnalysis.tsx`: reuses `TVChart`
   (with `pricePrecision`, chosen from the price, e.g. TRX 5 decimals, and `timeZone="UTC"`), the
   coin-settled / USDC switch, expiry pills by kind (daily, weekly = Friday, monthly = last Friday,
-  quarterly = last Friday of Mar/Jun/Sep/Dec), Current / Historical toggle, levels-by-date table and
-  OI-by-strike ladder. `onLoadMore` must keep one identity (refs), or `TVChart` rebuilds and loops.
+  quarterly = last Friday of Mar/Jun/Sep/Dec), Current / Historical toggle, Price Levels History table
+  (same format as the stock page's, Columns menu `cryptoLevelsHistory`) and OI-by-strike ladder. `onLoadMore` must keep one identity (refs), or `TVChart` rebuilds and loops.
 - Nav: Header → Trackers → "₿ Crypto Levels" (PRO badge without the feature), and the mobile menu.
 
 ## Enabling

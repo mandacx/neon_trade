@@ -3,6 +3,7 @@
 /** Shared client pieces for the crypto pages (docs/crypto.md): formatting, expiry kinds, closest level, ticker strip. */
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { getLevelColor, getLevelDisplayName } from '@/lib/utils';
 
 export interface CryptoTicker {
   coin: string;
@@ -87,6 +88,71 @@ export const EXPIRY_KIND_STYLE: Record<CryptoExpiryKind, string> = {
   monthly: 'bg-sky-50 text-sky-800 border-sky-300',
   quarterly: 'bg-violet-50 text-violet-800 border-violet-300',
 };
+
+/** 24h change in price terms, from the 24h change % (the feed has no absolute change or 24h open). */
+export function change24h(price: number | null | undefined, pct: number | null | undefined): number | null {
+  if (price == null || pct == null || !Number.isFinite(price) || !Number.isFinite(pct) || pct <= -100) return null;
+  return price - price / (1 + pct / 100);
+}
+
+// Table cells in the watchlists' style (components/watchlists/watchlistShared.tsx), with crypto price precision.
+
+export function SortHeader({ label, active, dir, align = 'left', onClick }: { label: string; active: boolean; dir: 'asc' | 'desc'; align?: 'left' | 'right'; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`flex items-center gap-1 hover:text-gray-700 transition-colors ${align === 'right' ? 'justify-end w-full' : ''}`}
+    >
+      {label}
+      <span className={active ? 'text-blue-600' : 'text-gray-300'}>{active ? (dir === 'asc' ? '↑' : '↓') : '↕'}</span>
+    </button>
+  );
+}
+
+/** ▲ +$1,234.50 / ▼ −$0.00123 pill, like the watchlists' ChangeCell. */
+export function CryptoChangeCell({ change, precision }: { change: number | null; precision: number }) {
+  if (change == null) return <span className="text-xs text-gray-300">—</span>;
+  const positive = change > 0;
+  const negative = change < 0;
+  const tone = positive ? 'bg-green-50 text-green-700' : negative ? 'bg-red-50 text-red-700' : 'bg-gray-100 text-gray-500';
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-semibold tabular-nums whitespace-nowrap ${tone}`}>
+      {positive && '▲'}{negative && '▼'} {positive ? '+' : negative ? '−' : ''}{fmtPrice(Math.abs(change), precision)}
+    </span>
+  );
+}
+
+/** Closest level badge (level colour, tinted) + price · distance %, like the watchlists' LevelCell. */
+export function CryptoLevelCell({ close, precision, expiry, tradeDate, compact = false }: {
+  close: { name: CryptoLevelName; price: number; pct: number } | null;
+  precision: number;
+  expiry?: string;
+  tradeDate?: string;
+  compact?: boolean;
+}) {
+  if (!close) return <span className="text-xs text-gray-300">—</span>;
+  const color = getLevelColor(close.name);
+  const badge = (
+    <span className={`inline-block font-bold px-1.5 py-0.5 rounded ${compact ? 'text-[11px]' : 'text-xs'}`} style={{ backgroundColor: `${color}1A`, color }}>
+      {getLevelDisplayName(close.name)}
+    </span>
+  );
+  if (compact) {
+    return (
+      <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
+        {badge}
+        <span className="text-[11px] text-gray-500 tabular-nums">{fmtPrice(close.price, precision)} · {(close.pct * 100).toFixed(2)}%</span>
+      </div>
+    );
+  }
+  return (
+    <div className="text-right">
+      {badge}
+      <div className="text-[11px] text-gray-500 tabular-nums mt-0.5">{fmtPrice(close.price, precision)} · {(close.pct * 100).toFixed(2)}%</div>
+      {expiry && <div className="text-[10px] text-gray-400 mt-0.5">Exp {expiry}{tradeDate && ` · Report ${tradeDate}`}</div>}
+    </div>
+  );
+}
 
 /** Polls /api/crypto/tickers every `ms` while the tab is visible. */
 export function useCryptoTickers(ms = 5000): Record<string, CryptoTicker> {

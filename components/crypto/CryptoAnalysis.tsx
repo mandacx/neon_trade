@@ -17,12 +17,17 @@ import ErrorDisplay from '@/components/ui/ErrorDisplay';
 import { useAuthContext } from '@/components/providers/AuthContextProvider';
 import { FEATURE_CRYPTO_LEVELS, hasFeature } from '@/lib/features';
 import { findClosestLevel } from '@/lib/calculations';
-import { getLevelColor, getLevelDisplayName } from '@/lib/utils';
+import { formatPercentage, getLevelColor, getLevelDisplayName } from '@/lib/utils';
+import { altLevelColor } from '@/lib/levelCompare';
+import ColRow from '@/components/ui/ColRow';
+import ColumnsMenu from '@/components/ui/ColumnsMenu';
+import { useColumnPrefs } from '@/components/ui/useColumnPrefs';
+import type { ColumnMeta } from '@/lib/tableColumns';
 import type { LevelCalculation } from '@/types/stock';
 import { CRYPTO_INTERVALS, CRYPTO_INTERVAL_ORDER, type CryptoInterval } from '@/lib/cryptoInstruments';
 import {
   CORE_LEVELS, CryptoTickerStrip, EXPIRY_KIND_STYLE, LEVEL_ORDER, closestLevel, cryptoExpiryKind, fmtOi, fmtPct, fmtPrice,
-  pricePrecisionFor, useCryptoTickers, type CryptoLevels,
+  pricePrecisionFor, useCryptoTickers, type CryptoLevelName, type CryptoLevels,
 } from '@/components/crypto/cryptoShared';
 
 const DAY_MS = 86_400_000;
@@ -365,7 +370,7 @@ export default function CryptoAnalysis({ slug }: { slug: string }) {
         )}
 
         {entitled && levelsError !== 'upgrade' && history.length > 0 && (
-          <div className="grid gap-4 xl:grid-cols-2">
+          <div className="grid gap-4">
             <LevelsHistoryTable history={history} precision={prec} expiry={selectedExpiry} />
             <OiByStrike oi={oi} precision={prec} price={refPrice} expiry={levels?.expiry ?? null} />
           </div>
@@ -375,40 +380,72 @@ export default function CryptoAnalysis({ slug }: { slug: string }) {
   );
 }
 
+// Same column order as the stock page's Price Levels History (components/stock/tabs/PriceLevelsTab.tsx):
+// the five core levels, then the two alternates.
+const HISTORY_LEVEL_ORDER: CryptoLevelName[] = ['put_low', 'put_int', 'put_call_int', 'call_int', 'call_high', 'call_low', 'put_high'];
+const HISTORY_COLUMNS: ColumnMeta[] = [
+  { id: 'date', label: 'Trade date', required: true },
+  { id: 'price', label: 'Price', hint: 'Underlying price at the snapshot; level distances are measured against it' },
+  ...HISTORY_LEVEL_ORDER.map(name => ({ id: name, label: getLevelDisplayName(name) })),
+  { id: 'callOi', label: 'Call OI' },
+  { id: 'putOi', label: 'Put OI' },
+  { id: 'oiDiff', label: 'OI Diff', hint: 'Put OI minus call OI' },
+];
+
 function LevelsHistoryTable({ history, precision, expiry }: { history: LevelRow[]; precision: number; expiry: string | null }) {
+  const cols = useColumnPrefs('cryptoLevelsHistory', HISTORY_COLUMNS);
+  const on = (id: string) => cols.isShown(id);
+  const shownLevels = HISTORY_LEVEL_ORDER.filter(on);
   const rows = [...history].reverse();
   return (
-    <section className="bg-white rounded-xl border border-gray-200 shadow-sm min-w-0">
-      <h2 className="px-4 pt-3 pb-2 text-sm font-semibold text-gray-800">Levels by trade date <span className="font-normal text-gray-500">· expiry {expiry}</span></h2>
-      <div className="overflow-x-auto">
-        <table className="w-full text-xs">
-          <thead className="bg-gray-50 text-[10px] uppercase tracking-wide text-gray-500">
-            <tr>
-              <th className="px-2 py-1.5 text-left">Trade date</th>
-              <th className="px-2 py-1.5 text-right">Price</th>
-              {LEVEL_ORDER.map(n => <th key={n} className="px-2 py-1.5 text-right whitespace-nowrap" style={{ color: getLevelColor(n) }}>{getLevelDisplayName(n)}</th>)}
-              <th className="px-2 py-1.5 text-right">Call OI</th>
-              <th className="px-2 py-1.5 text-right">Put OI</th>
-            </tr>
+    <section className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 min-w-0">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
+        <h2 className="text-base font-bold">Price Levels History <span className="text-sm font-normal text-gray-500">· expiry {expiry}</span></h2>
+        <ColumnsMenu metas={HISTORY_COLUMNS} {...cols.menu} />
+      </div>
+      <div className={`overflow-auto max-h-[65vh] ${cols.hideUntilReady}`}>
+        <table className="w-full text-xs whitespace-nowrap">
+          {/* bg-white on the th, and the divider as an inset shadow: collapsed borders don't travel with a sticky cell. */}
+          <thead className="[&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-white [&_th]:shadow-[inset_0_-1px_0_0_#e5e7eb]">
+            <ColRow layout={cols.layout} header className="text-gray-500">
+              <th data-col="date" className="text-left py-1.5 pr-3 font-medium">Trade date</th>
+              {on('price') && <th data-col="price" className="text-right py-1.5 px-2 font-medium" title="Underlying price at the snapshot">Price</th>}
+              {shownLevels.map(n => <th key={n} data-col={n} className="text-right py-1.5 px-2 font-medium">{getLevelDisplayName(n)}</th>)}
+              {on('callOi') && <th data-col="callOi" className="text-right py-1.5 px-2 font-medium">Call OI</th>}
+              {on('putOi') && <th data-col="putOi" className="text-right py-1.5 px-2 font-medium">Put OI</th>}
+              {on('oiDiff') && <th data-col="oiDiff" className="text-right py-1.5 pl-2 font-medium" title="Put OI minus call OI">OI Diff</th>}
+            </ColRow>
           </thead>
-          <tbody className="divide-y divide-gray-100 tabular-nums">
+          <tbody>
             {rows.map(r => {
               const close = closestLevel(r.levels, r.cmp);
+              // Put High / Call Low text: red when Put/Call Int is above both, green when below both (as on the stock page).
+              const altTone = r.levels ? altLevelColor(r.levels.put_call_int ?? 0, r.levels.put_high ?? 0, r.levels.call_low ?? 0) : null;
               return (
-                <tr key={r.tradeDate}>
-                  <td className="px-2 py-1.5 whitespace-nowrap">{r.tradeDate}</td>
-                  <td className="px-2 py-1.5 text-right">{fmtPrice(r.cmp, precision)}</td>
-                  {r.levels ? LEVEL_ORDER.map(n => (
-                    <td key={n} className={`px-2 py-1.5 text-right ${close?.name === n ? 'font-bold text-blue-700' : ''}`}>{fmtPrice(r.levels![n], precision)}</td>
-                  )) : <td colSpan={LEVEL_ORDER.length} className="px-2 py-1.5 text-center text-gray-400">no open interest in this snapshot</td>}
-                  <td className="px-2 py-1.5 text-right">{fmtOi(r.callOi)}</td>
-                  <td className="px-2 py-1.5 text-right">{fmtOi(r.putOi)}</td>
-                </tr>
+                <ColRow layout={cols.layout} key={r.tradeDate} className="border-b border-gray-100 last:border-0 hover:bg-gray-50">
+                  <td data-col="date" className="py-1.5 pr-3 text-gray-600">{r.tradeDate}</td>
+                  {on('price') && <td data-col="price" className="text-right py-1.5 px-2 font-semibold tabular-nums">{fmtPrice(r.cmp, precision)}</td>}
+                  {shownLevels.map(n => {
+                    const lv = r.levels?.[n] ?? null;
+                    const isClosest = close?.name === n;
+                    const tone = (n === 'put_high' || n === 'call_low') && lv ? altTone : null;
+                    return (
+                      <td key={n} data-col={n} style={tone ? { color: tone } : undefined} className={`text-right py-1.5 px-2 font-mono ${isClosest ? `bg-blue-50 ${tone ? '' : 'text-blue-700'} font-bold rounded` : ''}`}>
+                        {lv ? fmtPrice(lv, precision) : <span className="text-gray-300">—</span>}
+                        {lv && r.cmp ? <span className={`ml-1 ${tone ? '' : isClosest ? 'text-blue-500' : 'text-gray-400'}`}>({formatPercentage((r.cmp - lv) / r.cmp)})</span> : null}
+                      </td>
+                    );
+                  })}
+                  {on('callOi') && <td data-col="callOi" className="text-right py-1.5 px-2 text-gray-600 tabular-nums">{fmtOi(r.callOi)}</td>}
+                  {on('putOi') && <td data-col="putOi" className="text-right py-1.5 px-2 text-gray-600 tabular-nums">{fmtOi(r.putOi)}</td>}
+                  {on('oiDiff') && <td data-col="oiDiff" className="text-right py-1.5 pl-2 text-gray-600 tabular-nums">{r.levels ? fmtOi(r.putOi - r.callOi) : '—'}</td>}
+                </ColRow>
               );
             })}
           </tbody>
         </table>
       </div>
+      {rows.some(r => !r.levels) && <p className="pt-2 text-[10px] text-gray-400">— = no open interest in that snapshot.</p>}
     </section>
   );
 }
