@@ -10,10 +10,11 @@ import ColumnsMenu from '@/components/ui/ColumnsMenu';
 import { useColumnPrefs } from '@/components/ui/useColumnPrefs';
 import type { ColumnMeta } from '@/lib/tableColumns';
 import { getLevelDisplayName } from '@/lib/utils';
+import { cryptoCoinName } from '@/lib/cryptoInstruments';
 import { ChangeDot, ChangePercentCell } from '@/components/watchlists/watchlistShared';
 import {
   CryptoChangeCell, CryptoLevelCell, CryptoTickerStrip, SortHeader, change24h, closestLevel, fmtCompact, fmtOi, fmtPrice,
-  pricePrecisionFor, useCryptoTickers, type CryptoLevelName, type CryptoLevels, type CryptoTicker,
+  EXPIRY_KIND_STYLE, cryptoExpiryKind, pricePrecisionFor, useCryptoTickers, type CryptoLevelName, type CryptoLevels, type CryptoTicker,
 } from '@/components/crypto/cryptoShared';
 
 interface InstrumentRow {
@@ -23,13 +24,17 @@ interface InstrumentRow {
   label: string;
   latestTradeDate: string;
   ticker: CryptoTicker | null;
-  nearest: { expiry: string; tradeDate: string; cmp: number | null; levels: CryptoLevels; callOi: number; putOi: number } | null;
+  nearest: LevelSnap | null;
+  /** Every current expiry with data, nearest first (empty without the crypto_levels feature). */
+  expiries: LevelSnap[];
 }
+
+interface LevelSnap { expiry: string; tradeDate: string; cmp: number | null; levels: CryptoLevels; callOi: number; putOi: number }
 
 type DirectionFilter = 'all' | 'up' | 'down';
 type MarketFilter = 'all' | 'coin' | 'usdc';
 type ViewMode = 'thin' | 'broad';
-type SortKey = 'symbol' | 'lastPrice' | 'change' | 'changePercent' | 'dayLow' | 'dayHigh' | 'volume' | 'level' | 'expiry' | 'putInt' | 'callInt' | 'callOi' | 'putOi';
+type SortKey = 'symbol' | 'lastPrice' | 'change' | 'changePercent' | 'dayLow' | 'dayHigh' | 'volume' | 'level' | 'expiry' | 'putLow' | 'putInt' | 'combInt' | 'callInt' | 'callHigh' | 'callOi' | 'putOi';
 
 /** Columns of the markets table, in display order, laid out like the watchlists table. Saved per user (the Columns menu). */
 const CRYPTO_COLUMNS: ColumnMeta[] = [
@@ -40,15 +45,18 @@ const CRYPTO_COLUMNS: ColumnMeta[] = [
   { id: 'dayLow', label: '24h Low' },
   { id: 'dayHigh', label: '24h High' },
   { id: 'volume', label: '24h Volume', hint: 'In US dollars' },
-  { id: 'level', label: 'Nearest Level', hint: 'Of the nearest expiry, measured from the live price' },
-  { id: 'expiry', label: 'Expiry', hint: 'Nearest expiry with open interest' },
+  { id: 'level', label: 'Nearest Level', hint: 'Of the selected expiry, measured from the live price' },
+  { id: 'expiry', label: 'Expiry', hint: 'The expiry picked above (nearest by default)' },
+  { id: 'putLow', label: 'Put Low' },
   { id: 'putInt', label: 'Put Int' },
+  { id: 'combInt', label: 'Put/Call Int', hint: 'Combined put + call intersection' },
   { id: 'callInt', label: 'Call Int' },
+  { id: 'callHigh', label: 'Call High' },
   { id: 'callOi', label: 'Call OI', hint: 'Open interest at the last snapshot, in contracts' },
   { id: 'putOi', label: 'Put OI', hint: 'Open interest at the last snapshot, in contracts' },
 ];
 // Shown only to viewers with the crypto_levels feature.
-const LEVEL_COLUMNS: ReadonlySet<string> = new Set(['level', 'expiry', 'putInt', 'callInt', 'callOi', 'putOi']);
+const LEVEL_COLUMNS: ReadonlySet<string> = new Set(['level', 'expiry', 'putLow', 'putInt', 'combInt', 'callInt', 'callHigh', 'callOi', 'putOi']);
 const LEVEL_FILTER_OPTIONS: CryptoLevelName[] = ['call_high', 'call_int', 'put_call_int', 'put_int', 'put_low'];
 
 const RELOAD_MS = 5 * 60_000;
@@ -71,6 +79,7 @@ export default function CryptoPage() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [viewMode, setViewMode] = useState<ViewMode>('thin');
   const [filtersOpen, setFiltersOpen] = useState(true);
+  const [expiry, setExpiry] = useState('');
   const cols = useColumnPrefs('crypto', CRYPTO_COLUMNS);
   const live = useCryptoTickers();
 
@@ -111,15 +120,25 @@ export default function CryptoPage() {
     return [...seen].map(([coin, slug]) => ({ coin, slug }));
   }, [rows]);
 
+  // Expiries any market has in the latest snapshot, with how many markets list each. '' = each market's nearest.
+  const expiryOptions = useMemo(() => {
+    const count = new Map<string, number>();
+    rows?.forEach(r => r.expiries.forEach(e => count.set(e.expiry, (count.get(e.expiry) ?? 0) + 1)));
+    return [...count].sort(([a], [b]) => a.localeCompare(b)).map(([date, markets]) => ({ date, markets }));
+  }, [rows]);
+  // A picked expiry that has since rolled off the snapshot falls back to the nearest.
+  const activeExpiry = expiryOptions.some(o => o.date === expiry) ? expiry : '';
+
   // One row per market with the live quote merged in and the closest level measured from the live price.
   const view = (rows ?? []).map(r => {
     const t = live[r.coin] ?? r.ticker;
     const price = t?.price ?? r.nearest?.cmp ?? null;
+    const snap = activeExpiry ? r.expiries.find(e => e.expiry === activeExpiry) ?? null : r.nearest;
     return {
-      r, t, price,
+      r, t, price, snap,
       prec: pricePrecisionFor(price),
       change: change24h(price, t?.changePct24h),
-      close: closestLevel(r.nearest?.levels, price),
+      close: closestLevel(snap?.levels, price),
     };
   });
   type ViewRow = (typeof view)[number];
@@ -140,7 +159,7 @@ export default function CryptoPage() {
 
   const visible = view.filter(v => {
     const q = search.trim().toUpperCase();
-    if (q && !v.r.coin.includes(q) && !v.r.label.toUpperCase().includes(q)) return false;
+    if (q && !v.r.coin.includes(q) && !v.r.label.toUpperCase().includes(q) && !(cryptoCoinName(v.r.coin) ?? '').toUpperCase().includes(q)) return false;
     if (marketFilter === 'coin' && v.r.coin !== v.r.settlement) return false;
     if (marketFilter === 'usdc' && v.r.coin === v.r.settlement) return false;
     if (directionFilter === 'up' && !((v.change ?? 0) > 0)) return false;
@@ -160,11 +179,14 @@ export default function CryptoPage() {
       case 'dayHigh': return v.t?.high24h ?? null;
       case 'volume': return v.t?.volumeUsd24h ?? null;
       case 'level': return v.close ? Math.abs(v.close.pct) : null;
-      case 'expiry': return v.r.nearest?.expiry ?? null;
-      case 'putInt': return v.r.nearest?.levels.put_int ?? null;
-      case 'callInt': return v.r.nearest?.levels.call_int ?? null;
-      case 'callOi': return v.r.nearest?.callOi ?? null;
-      case 'putOi': return v.r.nearest?.putOi ?? null;
+      case 'expiry': return v.snap?.expiry ?? null;
+      case 'putLow': return v.snap?.levels.put_low ?? null;
+      case 'putInt': return v.snap?.levels.put_int ?? null;
+      case 'combInt': return v.snap?.levels.put_call_int ?? null;
+      case 'callInt': return v.snap?.levels.call_int ?? null;
+      case 'callHigh': return v.snap?.levels.call_high ?? null;
+      case 'callOi': return v.snap?.callOi ?? null;
+      case 'putOi': return v.snap?.putOi ?? null;
     }
   }
 
@@ -252,7 +274,7 @@ export default function CryptoPage() {
                   <input
                     value={search}
                     onChange={e => setSearch(e.target.value)}
-                    placeholder="Coin…"
+                    placeholder="Coin or name…"
                     className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white w-36"
                   />
                 </div>
@@ -310,6 +332,45 @@ export default function CryptoPage() {
             )}
           </div>
 
+          {entitled && expiryOptions.length > 0 && (
+            <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 mb-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                <span className="text-xs font-semibold text-gray-700">
+                  Expiry <span className="font-normal text-gray-400">
+                    {activeExpiry ? `levels of ${activeExpiry} for every market that lists it` : "each market's nearest expiry"}
+                  </span>
+                </span>
+                <span className="flex flex-wrap gap-2 text-[10px] text-gray-500">
+                  {(['daily', 'weekly', 'monthly', 'quarterly'] as const).map(k => (
+                    <span key={k} className="inline-flex items-center gap-1"><span className={`inline-block h-2.5 w-2.5 rounded border ${EXPIRY_KIND_STYLE[k]}`} />{k}</span>
+                  ))}
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-1 max-h-28 overflow-y-auto">
+                <button
+                  onClick={() => setExpiry('')}
+                  className={`px-2 py-0.5 rounded border text-[11px] font-semibold ${activeExpiry === '' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}
+                >
+                  Nearest
+                </button>
+                {expiryOptions.map(o => {
+                  const kind = cryptoExpiryKind(o.date);
+                  const sel = o.date === activeExpiry;
+                  return (
+                    <button
+                      key={o.date}
+                      onClick={() => setExpiry(o.date)}
+                      title={`${o.date} · ${kind} · listed by ${o.markets} of ${rows?.length ?? 0} markets`}
+                      className={`px-1.5 py-0.5 rounded border text-[11px] tabular-nums ${sel ? 'bg-blue-600 text-white border-blue-600' : EXPIRY_KIND_STYLE[kind]}`}
+                    >
+                      {o.date.slice(5)}{o.date.slice(0, 4) !== new Date().getUTCFullYear().toString() ? ` '${o.date.slice(2, 4)}` : ''}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {error && !rows ? (
             <ErrorDisplay error={error} onRetry={() => setReloadKey(k => k + 1)} />
           ) : !rows ? (
@@ -336,24 +397,29 @@ export default function CryptoPage() {
                         {head('volume', '24h Volume')}
                         {head('level', 'Nearest Level')}
                         {head('expiry', 'Expiry')}
+                        {head('putLow', 'Put Low')}
                         {head('putInt', 'Put Int')}
+                        {head('combInt', 'Put/Call Int')}
                         {head('callInt', 'Call Int')}
+                        {head('callHigh', 'Call High')}
                         {head('callOi', 'Call OI')}
                         {head('putOi', 'Put OI')}
                       </ColRow>
                     </thead>
                     <tbody>
-                      {sorted.map(({ r, t, price, prec, change, close }) => {
+                      {sorted.map(({ r, t, price, prec, change, close, snap }) => {
                         const href = `/crypto/${r.slug}`;
                         const market = r.coin === r.settlement ? 'coin-settled' : `${r.settlement}-settled`;
-                        const n = r.nearest;
+                        const n = snap;
+                        const name = cryptoCoinName(r.coin);
                         return (
                           <ColRow layout={cols.layout} key={r.slug} className="border-b border-gray-50 transition-colors hover:bg-blue-50/40">
                             <td data-col="symbol" className={cellPad}>
                               <Link href={href} className={`flex items-center gap-1.5 hover:underline ${thin ? 'whitespace-nowrap' : ''}`}>
                                 <ChangeDot change={change} />
                                 <span className="font-semibold text-gray-900">{r.coin}</span>
-                                {thin && <span className="text-[11px] text-gray-400">{market}</span>}
+                                {name && <span className="text-[11px] text-gray-500">{name}</span>}
+                                {thin && <span className="text-[11px] text-gray-400">· {market}</span>}
                               </Link>
                               {!thin && <div className="text-[11px] text-gray-400 pl-3">{market}</div>}
                             </td>
@@ -367,8 +433,11 @@ export default function CryptoPage() {
                             {colOn('volume') && <td data-col="volume" className={`${cellPad} text-right text-gray-600 tabular-nums`}>{t?.volumeUsd24h != null ? `$${fmtCompact(t.volumeUsd24h)}` : '—'}</td>}
                             {colOn('level') && <td data-col="level" className={cellPad}><CryptoLevelCell close={close} precision={prec} expiry={n?.expiry} tradeDate={n?.tradeDate} compact={thin} /></td>}
                             {colOn('expiry') && <td data-col="expiry" className={`${cellPad} text-right text-gray-600 tabular-nums whitespace-nowrap`}>{n?.expiry ?? '—'}</td>}
+                            {colOn('putLow') && <td data-col="putLow" className={`${cellPad} text-right text-gray-600 tabular-nums`}>{fmtPrice(n?.levels.put_low, prec)}</td>}
                             {colOn('putInt') && <td data-col="putInt" className={`${cellPad} text-right text-gray-600 tabular-nums`}>{fmtPrice(n?.levels.put_int, prec)}</td>}
+                            {colOn('combInt') && <td data-col="combInt" className={`${cellPad} text-right text-gray-600 tabular-nums`}>{fmtPrice(n?.levels.put_call_int, prec)}</td>}
                             {colOn('callInt') && <td data-col="callInt" className={`${cellPad} text-right text-gray-600 tabular-nums`}>{fmtPrice(n?.levels.call_int, prec)}</td>}
+                            {colOn('callHigh') && <td data-col="callHigh" className={`${cellPad} text-right text-gray-600 tabular-nums`}>{fmtPrice(n?.levels.call_high, prec)}</td>}
                             {colOn('callOi') && <td data-col="callOi" className={`${cellPad} text-right text-gray-600 tabular-nums`}>{n ? fmtOi(n.callOi) : '—'}</td>}
                             {colOn('putOi') && <td data-col="putOi" className={`${cellPad} text-right text-gray-600 tabular-nums`}>{n ? fmtOi(n.putOi) : '—'}</td>}
                           </ColRow>

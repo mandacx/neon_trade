@@ -4,6 +4,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { getLevelColor, getLevelDisplayName } from '@/lib/utils';
+import { cryptoCoinName } from '@/lib/cryptoInstruments';
 import StripPicker from '@/components/ui/StripPicker';
 import { useStripPrefs } from '@/components/ui/useStripPrefs';
 
@@ -201,6 +202,7 @@ export function CryptoTickerStrip({ tickers, coins, active }: {
             <Link
               key={coin}
               href={`/crypto/${slug}`}
+              title={cryptoCoinName(coin) ?? coin}
               className={`shrink-0 rounded-lg border px-3 py-1.5 text-xs transition-colors ${tone} ${active === coin ? 'ring-2 ring-blue-500' : ''}`}
             >
               <span className="font-semibold text-gray-900">{coin}</span>{' '}
@@ -216,7 +218,7 @@ export function CryptoTickerStrip({ tickers, coins, active }: {
       </div>
       <StripPicker
         title="Coin tickers"
-        items={coins.map(c => ({ id: c.coin.toUpperCase(), label: c.coin }))}
+        items={coins.map(c => ({ id: c.coin.toUpperCase(), label: cryptoCoinName(c.coin) ?? c.coin }))}
         hidden={strip.hidden}
         onToggle={strip.toggle}
         onShowAll={strip.showAll}

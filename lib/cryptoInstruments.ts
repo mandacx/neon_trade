@@ -27,6 +27,15 @@ export function parseInstrumentSlug(slug: string): { coin: string; settlement: s
   return { coin, settlement: (m[2] ?? m[1]).toUpperCase() };
 }
 
+/** Full names for the coins we list ("BTC" -> "Bitcoin"), like a company name next to a stock symbol. Unknown coins have none. */
+const CRYPTO_NAMES: Record<string, string> = {
+  BTC: 'Bitcoin', ETH: 'Ethereum', SOL: 'Solana', XRP: 'XRP', AVAX: 'Avalanche', TRX: 'TRON', HYPE: 'Hyperliquid',
+  BNB: 'BNB', DOGE: 'Dogecoin', ADA: 'Cardano', LINK: 'Chainlink', LTC: 'Litecoin', DOT: 'Polkadot', SUI: 'Sui',
+};
+export function cryptoCoinName(coin: string): string | null {
+  return CRYPTO_NAMES[coin.toUpperCase()] ?? null;
+}
+
 export function instrumentLabel(coin: string, settlement: string): string {
   return coin === settlement ? `${coin} · coin-settled` : `${coin} · ${settlement}`;
 }

@@ -1,12 +1,13 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, ReactNode } from 'react';
-import { createChart, IChartApi, ISeriesApi, IPriceLine, CandlestickData, HistogramData, MouseEventParams, SeriesMarker, Time, type AutoscaleInfo } from 'lightweight-charts';
+import { createChart, type TickMarkType, IChartApi, ISeriesApi, IPriceLine, CandlestickData, HistogramData, MouseEventParams, SeriesMarker, Time, type AutoscaleInfo } from 'lightweight-charts';
 import { LevelCalculation, ScanAlert } from '@/types/stock';
 import type { EarningsResult } from '@/types/earnings';
 import type { ExtendedQuote } from '@/lib/quote';
 import type { MarketSession } from '@/lib/marketSession';
 import ExtendedMove from '@/components/ui/ExtendedMove';
+import { axisCrosshairLabel, axisTickLabel } from '@/lib/chartTime';
 import { clampChartHeight, DEFAULT_CHART_PREFS, type ChartPrefs } from '@/lib/chartPrefs';
 
 const EARNINGS_OUTCOME_COLOR: Record<NonNullable<EarningsResult['epsOutcome']>, string> = {
@@ -128,6 +129,9 @@ interface TVChartProps {
   pricePrecision?: number;
   // Zone of the hover date/time label (default exchange time; the crypto page passes UTC).
   timeZone?: string;
+  // When set, the time axis labels and the crosshair's time label are drawn in this zone. Without it
+  // lightweight-charts labels the axis in UTC (the stock page keeps that; only the crypto page sets it).
+  axisTimeZone?: string;
 }
 
 function formatBarTime(epochSeconds: number, intraday: boolean, timeZone: string): string {
@@ -178,6 +182,7 @@ export default function TVChart({
   isLoadingMore = false,
   pricePrecision = 2,
   timeZone = 'America/New_York',
+  axisTimeZone,
 }: TVChartProps) {
   // The crosshair handler is bound once at chart creation, so it reads these through refs.
   const precisionRef = useRef(pricePrecision);
@@ -305,7 +310,9 @@ export default function TVChart({
         borderColor: '#d1d4dc',
         timeVisible: true,
         secondsVisible: false,
+        ...(axisTimeZone ? { tickMarkFormatter: (t: Time, type: TickMarkType) => axisTickLabel(Number(t), type, isIntraday, axisTimeZone) } : {}),
       },
+      ...(axisTimeZone ? { localization: { timeFormatter: (t: Time) => axisCrosshairLabel(Number(t), isIntraday, axisTimeZone) } } : {}),
     });
 
     chartRef.current = chart;
@@ -810,7 +817,7 @@ export default function TVChart({
       priceLineRefs.current = [];
       chart.remove();
     };
-  }, [height, onLoadMore, isIntraday, symbol]);
+  }, [height, onLoadMore, isIntraday, symbol, axisTimeZone]);
 
   // Update candle + volume data
   useEffect(() => {

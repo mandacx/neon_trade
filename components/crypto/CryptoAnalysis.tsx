@@ -25,7 +25,8 @@ import ColumnsMenu from '@/components/ui/ColumnsMenu';
 import { useColumnPrefs } from '@/components/ui/useColumnPrefs';
 import type { ColumnMeta } from '@/lib/tableColumns';
 import type { LevelCalculation } from '@/types/stock';
-import { CRYPTO_INTERVALS, CRYPTO_INTERVAL_ORDER, type CryptoInterval } from '@/lib/cryptoInstruments';
+import { CRYPTO_INTERVALS, CRYPTO_INTERVAL_ORDER, cryptoCoinName, type CryptoInterval } from '@/lib/cryptoInstruments';
+import { CT_TZ } from '@/lib/time';
 import {
   CORE_LEVELS, CryptoChangeCell, CryptoTickerStrip, EXPIRY_KIND_STYLE, LEVEL_ORDER, closestLevel, cryptoExpiryKind, fmtOi, fmtPct, fmtPrice,
   pricePrecisionFor, useCryptoTickers, type CryptoLevelName, type CryptoLevels,
@@ -347,8 +348,8 @@ export default function CryptoAnalysis({ slug }: { slug: string }) {
             <TVChart
               key={`${slug}:${precision}`}
               symbol={inst.coin}
-              companyName={inst.settlement === inst.coin ? `${inst.coin} options, coin-settled` : `${inst.coin} options, ${inst.settlement}-settled`}
-              chips={['24/7', 'Times in UTC']}
+              companyName={`${cryptoCoinName(inst.coin) ?? inst.coin} options, ${inst.settlement === inst.coin ? 'coin-settled' : `${inst.settlement}-settled`}`}
+              chips={['24/7', 'Times in CT']}
               candleData={candleData}
               volumeData={volumeData}
               oiData={oiData}
@@ -373,7 +374,8 @@ export default function CryptoAnalysis({ slug }: { slug: string }) {
               onLoadMore={onLoadMore}
               isLoadingMore={loadingMore}
               pricePrecision={precision}
-              timeZone="UTC"
+              timeZone={CT_TZ}
+              axisTimeZone={CT_TZ}
             />
           </div>
         )}

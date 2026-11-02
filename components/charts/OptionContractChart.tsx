@@ -9,6 +9,7 @@ import {
   LineData,
   SeriesMarker,
   Time,
+  type TickMarkType,
   MouseEventParams,
   CustomData,
   CustomSeriesOptions,
@@ -17,6 +18,8 @@ import {
   PaneRendererCustomData,
   customSeriesDefaultOptions,
 } from 'lightweight-charts';
+import { axisCrosshairLabel, axisTickLabel } from '@/lib/chartTime';
+import { CT_TZ } from '@/lib/time';
 
 // Volume (grey) and OI change (green up / red down) for one session, drawn side by side on one scale.
 // lightweight-charts v4 histograms cannot be offset within a bar slot, hence a custom series.
@@ -101,8 +104,9 @@ interface OptionContractChartProps {
 function formatBarTime(epochSeconds: number, intraday: boolean): string {
   const d = new Date(epochSeconds * 1000);
   if (intraday) {
+    // Intraday times are shown in Central Time (the axis too); daily bars keep the exchange date.
     return d.toLocaleString('en-US', {
-      timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true,
+      timeZone: CT_TZ, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true, timeZoneName: 'short',
     });
   }
   return d.toLocaleDateString('en-US', { timeZone: 'America/New_York', year: 'numeric', month: 'short', day: 'numeric' });
@@ -137,7 +141,11 @@ export default function OptionContractChart({
       crosshair: { mode: 1 },
       rightPriceScale: { borderColor: '#d1d4dc' },
       leftPriceScale: { visible: true, borderColor: '#d1d4dc' },
-      timeScale: { borderColor: '#d1d4dc', timeVisible: isIntraday, secondsVisible: false },
+      timeScale: {
+        borderColor: '#d1d4dc', timeVisible: isIntraday, secondsVisible: false,
+        ...(isIntraday ? { tickMarkFormatter: (t: Time, type: TickMarkType) => axisTickLabel(Number(t), type, true, CT_TZ) } : {}),
+      },
+      ...(isIntraday ? { localization: { timeFormatter: (t: Time) => axisCrosshairLabel(Number(t), true, CT_TZ) } } : {}),
     });
 
     // The bottom 34% of both price scales is reserved for the volume / OI-change band, so the scales

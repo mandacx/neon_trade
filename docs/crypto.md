@@ -78,7 +78,9 @@ instruments. Intervals: 5m, 15m, 30m, 1H, 1D.
 - `app/crypto/page.tsx`: ticker strip and a markets table in the watchlists' format (toolbar filters,
   sortable columns, Columns menu `crypto`, thin/broad rows, change pills): price, 24h change (derived
   from the 24h %), 24h low / high / volume; with the feature: nearest level badge (from the live price),
-  expiry, Put / Call Int, call / put OI.
+  expiry, Put Low / Put Int / Put-Call Int / Call Int / Call High, call / put OI. An **Expiry** card above the table
+  (pills by kind, "Nearest" default) re-reads every row at the chosen expiry (`expiries` in `/api/crypto/instruments`).
+  Coins carry a full name (`cryptoCoinName`: BTC → Bitcoin) in the table, ticker tooltips and the chart header.
 - `app/crypto/[slug]/page.tsx` → `components/crypto/CryptoAnalysis.tsx`: reuses `TVChart`
   (with `pricePrecision`, chosen from the price, e.g. TRX 5 decimals, and `timeZone="UTC"`), the
   coin-settled / USDC switch, expiry pills by kind (daily, weekly = Friday, monthly = last Friday,

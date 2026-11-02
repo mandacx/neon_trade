@@ -8,7 +8,8 @@ export const dynamic = 'force-dynamic';
 
 /**
  * The crypto overview: every instrument with stored levels and its live quote (free), plus, for viewers
- * with the crypto_levels feature, the nearest expiry's levels from the latest snapshot. The page loads
+ * with the crypto_levels feature, every current expiry's levels from the latest snapshot (`expiries`, nearest
+ * first; `nearest` is the first one), so the page can show any expiry for all markets. The page loads
  * this once and polls /api/crypto/tickers for prices; the closest level is worked out in the browser.
  */
 export async function GET() {
@@ -23,13 +24,12 @@ export async function GET() {
     ]);
 
     const data = instruments.map(inst => {
-      // Nearest expiry in the latest snapshot that has data.
-      const row = entitled ? latest.find(r => r.coin === inst.coin && r.settlement === inst.settlement && r.levels) : undefined;
-      return {
-        ...inst,
-        ticker: tickers[inst.coin] ?? null,
-        nearest: row ? { expiry: row.expiry, tradeDate: row.tradeDate, cmp: row.cmp, levels: row.levels, callOi: row.callOi, putOi: row.putOi } : null,
-      };
+      // Expiries of the latest snapshot that have data, nearest first (rows come ordered by expiry).
+      const expiries = entitled
+        ? latest.filter(r => r.coin === inst.coin && r.settlement === inst.settlement && r.levels)
+            .map(r => ({ expiry: r.expiry, tradeDate: r.tradeDate, cmp: r.cmp, levels: r.levels, callOi: r.callOi, putOi: r.putOi }))
+        : [];
+      return { ...inst, ticker: tickers[inst.coin] ?? null, nearest: expiries[0] ?? null, expiries };
     });
 
     return NextResponse.json({ success: true, data: { instruments: data, entitled } });
