@@ -53,6 +53,18 @@ export function rowQuote(q: Quote) {
 
 const pct = (diff: number, base: number | null) => (base ? (diff / base) * 100 : null);
 
+/**
+ * An extended-hours print as a move from the regular close. 04:00-09:30 ET on the next session's date
+ * is "Pre-market"; everything else after the close, overnight (20:00-04:00) included, is "After hours".
+ */
+export function extendedQuote(price: number, at: string, regularClose: number, state: MarketState): ExtendedQuote {
+  const ms = Date.parse(at);
+  const day = etDateOf(ms);
+  const preMarket = day > state.lastSessionDate && ms >= etInstantMs(day, '04:00') && ms < etInstantMs(day, '09:30');
+  const diff = price - regularClose;
+  return { label: preMarket ? 'Pre-market' : 'After hours', price, change: diff, changePercent: pct(diff, regularClose), at };
+}
+
 export function buildQuote(snap: Snapshot | undefined, state: MarketState): Quote {
   if (!snap) return EMPTY;
   const daily = snap.dailyBar;
@@ -88,10 +100,7 @@ export function buildQuote(snap: Snapshot | undefined, state: MarketState): Quot
 
   let ext: ExtendedQuote | null = null;
   if (trade && regularClose !== null && Date.parse(trade.t) >= Date.parse(state.lastCloseAt)) {
-    const tradeMs = Date.parse(trade.t);
-    const preMarket = etDateOf(tradeMs) > state.lastSessionDate && tradeMs < etInstantMs(etDateOf(tradeMs), '09:30');
-    const diff = trade.p - regularClose;
-    ext = { label: preMarket ? 'Pre-market' : 'After hours', price: trade.p, change: diff, changePercent: pct(diff, regularClose), at: trade.t };
+    ext = extendedQuote(trade.p, trade.t, regularClose, state);
   }
 
   return {

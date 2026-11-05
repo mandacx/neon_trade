@@ -7,6 +7,20 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-11-05 — Extended-hours quote from the all-session feed (stock quote route)
+
+Requested: switch `ALPACA_DATA_FEED` to sip as a config change; use Tradier's all-session feed (which includes overnight bars, 00:00-04:00 ET) to show the quote as an after-hours quote; Tradier stays the source for option intraday.
+
+- **Found, not changed:** there is **no `ALPACA_DATA_FEED` env var**; feeds are hard-coded in `lib/marketdata/provider/primary.ts` (daily/weekly/monthly already `sip`; snapshots, latest quote/trade and intraday bars `iex`). So it is not a config change. Live test 2026-11-05: `/v2/stocks/snapshots?feed=sip` -> **403 "subscription does not permit querying recent SIP data"**; `feed=sip` 1-minute bars work only for data older than ~15 min (the `sipEnd` rule). Snapshots therefore cannot move to SIP on this plan, and SIP intraday bars would drop the latest 16 minutes of the live chart. Left on IEX.
+- **Verified (Tradier):** `/markets/timesales?session_filter=all` (1min) returns bars 00:00-19:59 ET with real volume: AAPL/TSLA/SPY had 115-218 printed bars between 00:00 and 04:00 ET; PGR (no IEX extended print) had pre-market prints (last 238.00 at 10:05 ET). `/markets/quotes` `last` stays at the regular close (AAPL trade_date 16:00 ET, change 0), so it can't supply the extended price.
+- **Changed:** `lib/marketdata/provider/fallback.ts` (`getExtendedHoursLast`: last all-session 1-min bar since the regular close, 15 s per-symbol cache, null on failure), exported from `lib/marketdata/index.ts`; `lib/quote.ts` (`extendedQuote` helper, used by `buildQuote` too); `app/api/stocks/[symbol]/quote/route.ts` (outside the regular session, non-index symbols: `ext` comes from the Tradier print, falling back to the snapshot's).
+- **Labels:** 04:00-09:30 ET on the next session's date = "Pre-market"; every other time after the close, overnight 20:00-04:00 included, = "After hours" (before this, the snapshot path labelled 00:00-04:00 "Pre-market"). Interpretation of "show as after hours": not confirmed.
+- **Verified:** `tsc --noEmit` clean. Dev server at 14:27 UTC (pre-market): AAPL, TSLA, PGR, SPY return `ext` with label Pre-market and a print stamped within the minute; SPX returns `ext: null` (index path untouched).
+- **Not verified:** after-hours / overnight labels live (only pre-market was observable today); the browser header; behaviour under Tradier rate limits at scale.
+- **Not covered (follow-up):** routes quoting many symbols (watchlists, earnings, home, indices strip) still use the snapshot's IEX `ext`: timesales is one request per symbol with no batch form. Option intraday: already Tradier for today's bars (`app/api/stocks/[symbol]/option-bars/route.ts`), unchanged.
+
+---
+
 ## 2026-10-31 — Crypto tables in the watchlists / stock page format
 
 - **Files:** `app/crypto/page.tsx`, `components/crypto/{cryptoShared,CryptoAnalysis}.tsx`, `lib/tableColumns.ts` (`crypto`, `cryptoLevelsHistory` added to `TABLE_IDS`), `docs/crypto.md`.

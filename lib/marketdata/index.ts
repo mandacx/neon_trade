@@ -49,6 +49,7 @@ export {
   searchSymbols,
   getOptionChainContracts,
   getOptionExpirations,
+  getExtendedHoursLast,
 } from './provider/fallback';
 
 export { getCryptoTickers, getCryptoBars } from './provider/crypto';

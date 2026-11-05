@@ -386,3 +386,46 @@ export async function getOptionExpirations(symbol: string): Promise<string[]> {
   const d = res.data?.expirations?.date;
   return (!d ? [] : Array.isArray(d) ? d : [d]).filter((x: unknown): x is string => typeof x === 'string').sort();
 }
+
+/** 'YYYY-MM-DD HH:mm' in US/Eastern, the clock Tradier's timesales start/end use. */
+function etStamp(ms: number): string {
+  const p = Object.fromEntries(
+    new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+      .formatToParts(new Date(ms)).map(x => [x.type, x.value])
+  );
+  return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}`;
+}
+
+export interface ExtendedLast { price: number; t: string }
+const extCache = new Map<string, { at: number; v: ExtendedLast | null }>();
+const EXT_TTL_MS = 15_000;
+
+/**
+ * The latest print of the all-session feed (after-hours 16:00-20:00, overnight 20:00-04:00 and
+ * pre-market 04:00-09:30 ET) at or after `sinceMs`, from the last 1-minute bar of
+ * /markets/timesales?session_filter=all (verified 2026-11-05: AAPL/TSLA/SPY have bars all night,
+ * PGR only where it printed). Null when nothing printed since, or on any failure (the caller keeps
+ * its other source). One request per symbol, so use it for single-symbol routes only; cached 15 s.
+ */
+export async function getExtendedHoursLast(symbol: string, sinceMs: number, nowMs = Date.now()): Promise<ExtendedLast | null> {
+  const sym = symbol.toUpperCase();
+  const key = `${sym}|${sinceMs}`;
+  const hit = extCache.get(key);
+  if (hit && nowMs - hit.at < EXT_TTL_MS) return hit.v;
+  try {
+    const res = await tradierClient.get('/markets/timesales', {
+      params: { symbol: sym, interval: '1min', start: etStamp(sinceMs), end: etStamp(nowMs + 60_000), session_filter: 'all' },
+      timeout: 5_000,
+    });
+    const data = res.data?.series?.data;
+    const rows: any[] = !data ? [] : Array.isArray(data) ? data : [data];
+    const last = rows.filter(r => Number.isFinite(Number(r.close)) && Number(r.timestamp) * 1000 >= sinceMs).at(-1);
+    const v = last ? { price: Number(last.close), t: new Date(Number(last.timestamp) * 1000).toISOString() } : null;
+    extCache.set(key, { at: nowMs, v });
+    if (extCache.size > 500) extCache.delete(extCache.keys().next().value as string);
+    return v;
+  } catch (error) {
+    console.error('Error fetching extended-hours print:', error instanceof Error ? error.message : error);
+    return null;
+  }
+}

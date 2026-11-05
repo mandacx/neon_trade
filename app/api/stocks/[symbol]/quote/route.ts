@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSnapshotsWithIndices } from '@/lib/snapshots';
 import { getMarketState } from '@/lib/marketSession';
-import { buildQuote } from '@/lib/quote';
+import { buildQuote, extendedQuote } from '@/lib/quote';
+import { getExtendedHoursLast, INDEX_QUOTE_SYMBOLS } from '@/lib/marketdata';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,6 +33,14 @@ export async function GET(
     const q = buildQuote(snapshot, market);
     if (!snapshot || q.price === null) {
       return NextResponse.json({ success: true, data: null });
+    }
+
+    // Outside the regular session the all-session feed (after hours, overnight, pre-market) is the
+    // better source for `ext`: the snapshot only sees the single-venue prints. Indices have no
+    // extended session; on a miss or failure the snapshot's `ext` stays.
+    if (market.session !== 'regular' && !INDEX_QUOTE_SYMBOLS.has(upper)) {
+      const print = await getExtendedHoursLast(upper, Date.parse(market.lastCloseAt));
+      if (print) q.ext = extendedQuote(print.price, print.t, q.price, market);
     }
 
     return NextResponse.json({
