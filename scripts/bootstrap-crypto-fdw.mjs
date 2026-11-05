@@ -14,6 +14,7 @@
 //   2. main DB: server crypto_src, a user mapping for the current role, schema `crypto` with the two
 //      tables imported as foreign tables (re-imported each run, so source column changes come through).
 //   3. main DB: the local copies the app reads (lib/crypto.ts), then one full sync from the foreign tables.
+//   4. main DB: nt_scanner_sync + first copy of us_scanner into intra_us_scanner_eod (scan alerts).
 
 import { neon } from '@neondatabase/serverless';
 
@@ -31,7 +32,8 @@ const RO_PASS = decodeURIComponent(ro.password);
 const RO_DB = ro.pathname.slice(1) || 'neondb';
 // postgres_fdw keeps its own connection, so use the direct host, not the pooler.
 const RO_HOST = ro.hostname.replace('-pooler', '');
-const TABLES = ['deribit_levels', 'deribit_option_chain'];
+// deribit_* feed the crypto levels; us_scanner feeds the US scan alerts (lib/scannerSync.ts).
+const TABLES = ['deribit_levels', 'deribit_option_chain', 'us_scanner'];
 
 const lit = s => `'${String(s).replace(/'/g, "''")}'`;
 const ident = s => `"${String(s).replace(/"/g, '""')}"`;
@@ -144,3 +146,37 @@ await main`
     levels_rows = EXCLUDED.levels_rows, chain_rows = EXCLUDED.chain_rows
 `;
 console.log(`local copies: ${lv.n} level rows, ${ch.n} chain rows synced in ${Date.now() - t0} ms`);
+
+// 4. US scan alerts: state table + first copy of crypto.us_scanner into intra_us_scanner_eod
+//    (same statement as lib/scannerSync.ts syncScannerAlerts, kept in step).
+await main`
+  CREATE TABLE IF NOT EXISTS public.nt_scanner_sync (
+    id         INT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+    synced_at  TIMESTAMPTZ NOT NULL,
+    last_quote TIMESTAMPTZ,
+    new_rows   INT NOT NULL DEFAULT 0
+  )
+`;
+await main`INSERT INTO public.nt_scanner_sync (id, synced_at) VALUES (1, now()) ON CONFLICT (id) DO NOTHING`;
+const [{ since }] = await main`
+  SELECT COALESCE((SELECT last_quote - interval '1 day' FROM public.nt_scanner_sync WHERE id = 1),
+                  timestamptz '2000-01-01')::text AS since
+`;
+const [{ mx }] = await main`SELECT max(quote_time)::text AS mx FROM crypto.us_scanner WHERE quote_time >= ${since}::timestamptz`;
+const [sc] = await main`
+  WITH up AS (
+    INSERT INTO public.intra_us_scanner_eod
+      (symbol, open, high, low, last_price, prvs_close, chg, expiry_dt, trade_date,
+       unused_pc, unused_pc_rev, put_int, call_int, cmb_int, call_high, put_low, load_dt_tm, scan_code)
+    SELECT symbol, open, high, low, last_price, prvs_close, change, expiry_dt, trade_date,
+           unused_pc, unused_pc_rev, put_int, call_int, cmb_int, call_high, put_low,
+           quote_time AT TIME ZONE 'America/Chicago',
+           btrim(scan_code, chr(13) || chr(10) || chr(32) || chr(9))
+    FROM crypto.us_scanner
+    WHERE quote_time >= ${since}::timestamptz
+    ON CONFLICT (symbol, expiry_dt, trade_date, scan_code) DO NOTHING
+    RETURNING 1
+  ) SELECT count(*)::int AS n FROM up
+`;
+await main`UPDATE public.nt_scanner_sync SET last_quote = COALESCE(${mx}::timestamptz, last_quote), new_rows = ${sc.n}, synced_at = now() WHERE id = 1`;
+console.log(`scan alerts: ${sc.n} new rows copied into intra_us_scanner_eod (source max quote_time ${mx})`);

@@ -21,6 +21,8 @@ BTC and ETH coin-settled and USDC-settled; AVAX, HYPE, SOL, TRX, XRP USDC-settle
 
 Re-run the script after rotating the read-only password or if the source columns change.
 
+**Also linked:** `us_scanner` (US scan alerts) is imported into the same `crypto` schema and copied into `intra_us_scanner_eod` by `lib/scannerSync.ts` (see `docs/CHANGES.md`, 2026-11-04).
+
 **Why local copies:** the source is another compute that can scale to zero. The app reads only the
 local tables; `syncCryptoTables()` (`lib/crypto.ts`) upserts from the foreign tables (trade dates from the
 last stored one minus a day) at most every 10 minutes, claimed by one conditional `UPDATE` on
