@@ -6,28 +6,11 @@ open interest by strike. Prices and candles are free; levels, expiries and OI ne
 
 ## Data
 
-**Source:** a separate Neon database (the sister app's) holds `public.deribit_levels` (one row per
-currency + settlement currency + expiry + trade date) and `public.deribit_option_chain` (per strike).
-One snapshot a day at ~08:08 UTC, just after the 08:00 UTC option expiry. Instruments as of 2026-10-30:
-BTC and ETH coin-settled and USDC-settled; AVAX, HYPE, SOL, TRX, XRP USDC-settled. History starts 2026-10-23.
+**Source:** the sister app's database produces `deribit_levels` (one row per currency + settlement currency + expiry + trade date) and `deribit_option_chain` (per strike), one snapshot a day at ~08:08 UTC, just after the 08:00 UTC option expiry. Instruments as of 2026-10-30: BTC and ETH coin-settled and USDC-settled; AVAX, HYPE, SOL, TRX, XRP USDC-settled. History starts 2026-10-23.
 
-**Link (postgres_fdw):** `scripts/bootstrap-crypto-fdw.mjs` (idempotent) does all of it:
-1. In the crypto DB: role `nt_crypto_ro` (LOGIN, `default_transaction_read_only = on`), `SELECT` on the two
-   tables only. Its password is generated once into `.env.local` as `CRYPTO_RO_DATABASE_URL`.
-   `CRYPTO_DATABASE_URL` (admin) is only used by this script, never by the app.
-2. In the main DB: server `crypto_src` (direct host, not the pooler), a user mapping for the current role,
-   schema `crypto` with both tables imported as foreign tables.
-3. Local copies `nt_crypto_levels`, `nt_crypto_option_chain` and the one-row `nt_crypto_sync`, then a full sync.
+**Delivery (changed 2026-11-05):** the source **pushes rows directly** into `nt_crypto_levels` and `nt_crypto_option_chain` with the role `nt_us_stocks_rw` (INSERT/UPDATE; upsert on each table's primary key, columns as in the DDL in `scripts/create-crypto-tables.mjs`). The app only reads these tables. The earlier `syncCryptoTables()` / `ensureCryptoFresh()` / `nt_crypto_sync` were removed.
 
-Re-run the script after rotating the read-only password or if the source columns change.
-
-**Also linked:** `us_scanner` (US scan alerts) is imported into the same `crypto` schema and copied into `intra_us_scanner_eod` by `lib/scannerSync.ts` (see `docs/CHANGES.md`, 2026-11-04).
-
-**Why local copies:** the source is another compute that can scale to zero. The app reads only the
-local tables; `syncCryptoTables()` (`lib/crypto.ts`) upserts from the foreign tables (trade dates from the
-last stored one minus a day) at most every 10 minutes, claimed by one conditional `UPDATE` on
-`nt_crypto_sync` so concurrent requests don't all sync. The levels and instruments routes call
-`ensureCryptoFresh()` first. A failed sync is logged and stored rows keep being served. No cron needed.
+**No FDW any more:** the postgres_fdw link to the crypto database (server `crypto_src`, schema `crypto`, `us_scanner`) and the scan-alert sync (`lib/scannerSync.ts`, `/api/cron/scanner-sync`, Railway `scanner-sync-cron`, `nt_scanner_sync`) were removed 2026-11-05; scan alerts are pushed into `intra_us_scanner_eod` the same way. The table DDL is in `scripts/create-crypto-tables.mjs`.
 
 **Column mapping** (inferred from the names and their order, e.g. BTC 2026-10-30
 `pe_low < pe_int < pe_high < comb < ce_low < ce_int < ce_high`, the same order as the stock table;

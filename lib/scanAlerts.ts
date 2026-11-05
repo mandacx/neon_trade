@@ -1,5 +1,4 @@
 import { sql } from '@/lib/db';
-import { ensureScannerFresh } from '@/lib/scannerSync';
 import { calculateLevels } from '@/lib/calculations';
 import { SCAN_CODE_TO_LEVEL } from '@/lib/utils';
 import { StockData, ScanAlert } from '@/types/stock';
@@ -74,7 +73,6 @@ export interface ScanAlertQueryFilters {
  */
 /** All scan alerts for one symbol (optionally date-bounded), oldest first — for chart markers. */
 export async function getScanAlertsForSymbol(symbol: string, fromDate?: string, toDate?: string): Promise<ScanAlert[]> {
-  await ensureScannerFresh();
   const conditions: string[] = ['symbol = $1'];
   const params: any[] = [symbol.toUpperCase()];
 
@@ -105,7 +103,6 @@ export async function getScanAlertsForSymbol(symbol: string, fromDate?: string, 
 }
 
 export async function getScanAlerts(filters: ScanAlertQueryFilters): Promise<ScanAlert[]> {
-  await ensureScannerFresh();
   const conditions: string[] = [];
   const params: any[] = [];
 
@@ -166,7 +163,6 @@ export async function getScanAlerts(filters: ScanAlertQueryFilters): Promise<Sca
 const RECENT_ALERT_LOOKBACK_DAYS = 4;
 
 export async function getRecentScanAlerts(limit: number = 20): Promise<ScanAlert[]> {
-  await ensureScannerFresh();
   try {
     const since = new Date(Date.now() - RECENT_ALERT_LOOKBACK_DAYS * 86_400_000)
       .toISOString()
@@ -360,7 +356,6 @@ export interface AlertsByExpiryOptions {
 /** Alerts for a set of symbols, bounded to one exact expiry or the N most recent distinct expiry_dt values across that symbol set. */
 export async function getAlertsForSymbolsByExpiry(symbols: string[], opts: AlertsByExpiryOptions = {}): Promise<TickerAlert[]> {
   if (symbols.length === 0) return [];
-  await ensureScannerFresh();
   const upperSymbols = symbols.map(s => s.toUpperCase());
 
   try {
@@ -412,7 +407,6 @@ export async function getAlertsForSymbolsByExpiry(symbols: string[], opts: Alert
  * ticker) to avoid an accidental overload collision.
  */
 export async function getScanAlertsSince(since: string, limit: number = 500): Promise<TickerAlert[]> {
-  await ensureScannerFresh();
   try {
     const rows = await sql`
       SELECT

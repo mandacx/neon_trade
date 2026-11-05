@@ -1,11 +1,8 @@
 /**
- * Crypto levels: readers over the local copies and the sync that fills them (docs/crypto.md).
+ * Crypto levels: readers over nt_crypto_levels / nt_crypto_option_chain (docs/crypto.md).
  *
- * Source: the crypto database's levels and option chain tables, linked into this database as foreign
- * tables in schema `crypto` (postgres_fdw, read-only role; scripts/bootstrap-crypto-fdw.mjs). The app
- * never reads the foreign tables per request: a separate compute can be cold, so readers use
- * nt_crypto_levels / nt_crypto_option_chain, and syncCryptoTables() tops them up from the foreign
- * tables at most every SYNC_EVERY_MIN minutes (one snapshot a day lands at ~08:08 UTC).
+ * The tables are filled by the source pushing rows directly (role nt_us_stocks_rw); the app only reads
+ * them. There is no sync from the crypto database any more (removed 2026-11-05).
  *
  * Levels are named as on the stock side; the source columns map as
  *   pe_oi_diff_tgt_low -> put_low,  pe_oi_intersection -> put_int,  pe_oi_diff_tgt_high -> put_high,
@@ -16,74 +13,6 @@
 import { sql } from '@/lib/db';
 import { getOrSet } from '@/lib/ttlCache';
 import { parseInstrumentSlug, toInstrument, type CryptoInstrument } from '@/lib/cryptoInstruments';
-
-const SYNC_EVERY_MIN = 10;
-
-/**
- * Upserts source rows from the last two stored trade dates on. Claims the slot with one conditional
- * UPDATE, so concurrent callers don't all sync; a failure (source compute down) is logged and the
- * readers keep serving what is stored. Returns whether a sync ran.
- */
-export async function syncCryptoTables(force = false): Promise<boolean> {
-  const claimed = force
-    ? await sql`UPDATE public.nt_crypto_sync SET synced_at = now() WHERE id = 1 RETURNING 1`
-    : await sql`
-        UPDATE public.nt_crypto_sync SET synced_at = now()
-        WHERE id = 1 AND synced_at < now() - make_interval(mins => ${SYNC_EVERY_MIN})
-        RETURNING 1
-      `;
-  if (claimed.length === 0) return false;
-  try {
-    const [{ since }] = await sql`
-      SELECT COALESCE((SELECT max(trade_date) - 1 FROM public.nt_crypto_levels), DATE '2000-01-01')::text AS since
-    `;
-    const [lv] = await sql`
-      WITH up AS (
-        INSERT INTO public.nt_crypto_levels
-        SELECT currency, settlement_ccy, expiry_dt, trade_date, cmp, strike_size,
-               pe_oi_diff_tgt_low, pe_oi_intersection, pe_oi_diff_tgt_high, comb_oi_intersection,
-               ce_oi_diff_tgt_low, ce_oi_intersection, ce_oi_diff_tgt_high, call_oi, put_oi, snapshot_ts
-        FROM crypto.deribit_levels
-        WHERE trade_date >= ${since}::date
-        ON CONFLICT (currency, settlement_ccy, expiry_dt, trade_date) DO UPDATE SET
-          cmp = EXCLUDED.cmp, strike_size = EXCLUDED.strike_size,
-          put_low = EXCLUDED.put_low, put_int = EXCLUDED.put_int, put_high = EXCLUDED.put_high,
-          comb_int = EXCLUDED.comb_int, call_low = EXCLUDED.call_low, call_int = EXCLUDED.call_int,
-          call_high = EXCLUDED.call_high, call_oi = EXCLUDED.call_oi, put_oi = EXCLUDED.put_oi,
-          snapshot_ts = EXCLUDED.snapshot_ts
-        RETURNING 1
-      ) SELECT count(*)::int AS n FROM up
-    `;
-    const [ch] = await sql`
-      WITH up AS (
-        INSERT INTO public.nt_crypto_option_chain
-        SELECT currency, settlement_ccy, expiry_dt, trade_date, strike_pr, ce_oi, pe_oi, ce_close, pe_close,
-               underlying_price, snapshot_ts
-        FROM crypto.deribit_option_chain
-        WHERE trade_date >= ${since}::date
-        ON CONFLICT (currency, settlement_ccy, expiry_dt, trade_date, strike_pr) DO UPDATE SET
-          ce_oi = EXCLUDED.ce_oi, pe_oi = EXCLUDED.pe_oi, ce_close = EXCLUDED.ce_close, pe_close = EXCLUDED.pe_close,
-          underlying_price = EXCLUDED.underlying_price, snapshot_ts = EXCLUDED.snapshot_ts
-        RETURNING 1
-      ) SELECT count(*)::int AS n FROM up
-    `;
-    await sql`
-      UPDATE public.nt_crypto_sync SET
-        last_snapshot = (SELECT max(snapshot_ts) FROM public.nt_crypto_levels),
-        levels_rows = ${lv.n}, chain_rows = ${ch.n}
-      WHERE id = 1
-    `;
-    return true;
-  } catch (err) {
-    console.error('crypto sync failed (serving stored rows):', err instanceof Error ? err.message : err);
-    return false;
-  }
-}
-
-/** Kick a sync if one is due. Readers await it: at most one request per SYNC_EVERY_MIN pays ~0.3-1 s. */
-export async function ensureCryptoFresh(): Promise<void> {
-  await syncCryptoTables().catch(err => console.error('crypto sync claim failed:', err));
-}
 
 export interface CryptoInstrumentRow extends CryptoInstrument {
   latestTradeDate: string;

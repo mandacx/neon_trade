@@ -28,16 +28,6 @@ export default defineRailway(() => {
     env: { CRON_SECRET: "${{market-catalog-cron.CRON_SECRET}}" },
   });
 
-  // Scan alerts (lib/scannerSync.ts): copies new rows from the crypto project's us_scanner into
-  // intra_us_scanner_eod every 15 min on weekdays. The UTC range covers 07:45–15:45 CT in both DST
-  // states; the route enforces the exact window.
-  const scannerSyncCron = service("scanner-sync-cron", {
-    build: { buildEnvironment: "V3", builder: "DOCKERFILE", dockerfilePath: "Dockerfile" },
-    replicas: { "us-west2": 1 },
-    deploy: { cronSchedule: "*/15 13-21 * * 1-5", restartPolicyType: "NEVER" },
-    env: { CRON_SECRET: "${{market-catalog-cron.CRON_SECRET}}" },
-  });
-
   // US scanner universe (lib/usUniverse.ts, docs/us-scanner.md): listings, index flags and the
   // liquidity scan, weekly. Called every 10 min on Saturday morning; the route resumes the paced
   // liquidity scan where it stopped and skips every step once it is under 6 days old.
@@ -58,6 +48,6 @@ export default defineRailway(() => {
   });
 
   return project("neon-trade-crons", {
-    resources: [marketCatalogCron, telegramAlertsCron, earningsCron, scannerSyncCron, usUniverseCron, usUniverseMetaCron],
+    resources: [marketCatalogCron, telegramAlertsCron, earningsCron, usUniverseCron, usUniverseMetaCron],
   });
 });

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getCryptoTickers, type CryptoTicker } from '@/lib/marketdata';
-import { ensureCryptoFresh, listCryptoInstruments, getLatestCryptoLevels } from '@/lib/crypto';
+import { listCryptoInstruments, getLatestCryptoLevels } from '@/lib/crypto';
 import { getCurrentUserContext } from '@/lib/appUsers';
 import { FEATURE_CRYPTO_LEVELS, hasFeature } from '@/lib/features';
 
@@ -14,7 +14,6 @@ export const dynamic = 'force-dynamic';
  */
 export async function GET() {
   try {
-    await ensureCryptoFresh();
     const [ctx, instruments] = await Promise.all([getCurrentUserContext(), listCryptoInstruments()]);
     const entitled = hasFeature(ctx.features, FEATURE_CRYPTO_LEVELS);
     const coins = [...new Set(instruments.map(i => i.coin))];

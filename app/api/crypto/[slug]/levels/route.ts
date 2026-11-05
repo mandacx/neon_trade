@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { ensureCryptoFresh, getCryptoExpiries, getCryptoLevelHistory, resolveCryptoInstrument } from '@/lib/crypto';
+import { getCryptoExpiries, getCryptoLevelHistory, resolveCryptoInstrument } from '@/lib/crypto';
 import { requireFeatureApi } from '@/lib/routeGuards';
 import { FEATURE_CRYPTO_LEVELS } from '@/lib/features';
 
@@ -17,7 +17,6 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const { slug } = await params;
     const inst = await resolveCryptoInstrument(slug);
     if (!inst) return NextResponse.json({ success: false, error: 'Unknown instrument' }, { status: 404 });
-    await ensureCryptoFresh();
 
     const { latestTradeDate, expiries } = await getCryptoExpiries(inst.coin, inst.settlement);
     const asked = request.nextUrl.searchParams.get('expiry');
