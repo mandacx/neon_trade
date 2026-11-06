@@ -170,27 +170,86 @@ export async function getLatestTrade(symbol: string) {
 }
 
 /**
- * Batch quote+day-range lookup for watchlists — one call for up to a few
- * hundred symbols via Alpaca's /v2/stocks/snapshots, instead of fanning out
- * a single-symbol call per row. Returns {} (not a throw) on failure so a
- * flaky Alpaca call degrades to an empty quotes column rather than taking
- * down the whole watchlist response.
+ * Batch quote+day-range lookup for watchlists, the stock header and the quote pollers: one call for up to a
+ * few hundred symbols via Alpaca's /v2/stocks/snapshots, instead of a single-symbol call per row.
+ * Returns {} (not a throw) on failure so a flaky Alpaca call degrades to an empty quotes column rather than
+ * taking down the whole response.
+ *
+ * Alpaca's 200 requests/min limit is shared by the whole account, so reads are protected three ways
+ * (per server instance, in memory):
+ *  - a symbol read in the last SNAP_FRESH_MS is served from memory;
+ *  - identical in-flight requests share one call;
+ *  - after a 429 no call is made until Retry-After (default SNAP_COOLDOWN_MS) has passed, and symbols
+ *    seen in the last SNAP_STALE_MS are returned as-is (marginally old beats a blank price).
  */
+const SNAP_FRESH_MS = 5_000;
+const SNAP_STALE_MS = 120_000;
+const SNAP_COOLDOWN_MS = 2_000;
+const snapCache = new Map<string, { at: number; snap: Snapshot }>();
+const snapInflight = new Map<string, Promise<Record<string, Snapshot>>>();
+let snapCooldownUntil = 0;
+
 export async function getSnapshotsMulti(symbols: string[]): Promise<Record<string, Snapshot>> {
-  if (symbols.length === 0) return {};
-  try {
-    const response = await alpacaClient.get('/v2/stocks/snapshots', {
-      params: { symbols: symbols.map(s => s.toUpperCase()).join(','), feed: 'iex' },
-    });
-    return response.data?.snapshots ?? response.data ?? {};
-  } catch (error) {
-    console.error('Error fetching snapshots from Alpaca:', error);
-    if (axios.isAxiosError(error)) {
-      console.error('Response data:', error.response?.data);
-      console.error('Response status:', error.response?.status);
-    }
-    return {};
+  const wanted = [...new Set(symbols.map(s => s.toUpperCase()))];
+  if (wanted.length === 0) return {};
+  const now = Date.now();
+  const out: Record<string, Snapshot> = {};
+  const missing: string[] = [];
+  for (const sym of wanted) {
+    const hit = snapCache.get(sym);
+    if (hit && now - hit.at <= SNAP_FRESH_MS) out[sym] = hit.snap;
+    else missing.push(sym);
   }
+  if (missing.length === 0) return out;
+
+  const serveStale = () => {
+    const t = Date.now();
+    for (const sym of missing) {
+      const hit = snapCache.get(sym);
+      if (hit && t - hit.at <= SNAP_STALE_MS) out[sym] = hit.snap;
+    }
+    return out;
+  };
+  if (now < snapCooldownUntil) return serveStale();
+
+  const key = missing.slice().sort().join(',');
+  let call = snapInflight.get(key);
+  if (!call) {
+    call = (async () => {
+      try {
+        const response = await alpacaClient.get('/v2/stocks/snapshots', {
+          params: { symbols: key, feed: 'iex' },
+        });
+        const snaps: Record<string, Snapshot> = response.data?.snapshots ?? response.data ?? {};
+        const at = Date.now();
+        for (const [sym, snap] of Object.entries(snaps)) snapCache.set(sym, { at, snap });
+        if (snapCache.size > 5000) { // bound memory: drop entries too old to serve
+          for (const [sym, v] of snapCache) if (at - v.at > SNAP_STALE_MS) snapCache.delete(sym);
+        }
+        return snaps;
+      } catch (error) {
+        if (axios.isAxiosError(error) && error.response?.status === 429) {
+          const ra = Number(error.response.headers?.['retry-after']);
+          const wait = Number.isFinite(ra) && ra > 0 ? Math.min(ra * 1000, 30_000) : SNAP_COOLDOWN_MS;
+          snapCooldownUntil = Date.now() + wait;
+          console.error(`Alpaca snapshots rate limited (429); pausing ${wait} ms, serving cached quotes`);
+        } else {
+          console.error('Error fetching snapshots from Alpaca:', error);
+          if (axios.isAxiosError(error)) {
+            console.error('Response data:', error.response?.data);
+            console.error('Response status:', error.response?.status);
+          }
+        }
+        return null as unknown as Record<string, Snapshot>;
+      } finally {
+        snapInflight.delete(key);
+      }
+    })();
+    snapInflight.set(key, call);
+  }
+  const fetched = await call;
+  if (!fetched) return serveStale();
+  return Object.assign(out, fetched);
 }
 
 /** Run `fn` over `items` in groups of `size`, at most `parallel` groups at a time. */
