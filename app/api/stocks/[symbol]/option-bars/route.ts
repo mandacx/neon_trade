@@ -5,7 +5,7 @@ import { usTradingDayKey } from '@/lib/utils';
 import { format, subDays } from 'date-fns';
 import axios from 'axios';
 import { getCurrentUserContext } from '@/lib/appUsers';
-import { expiryAllowed, WEEKLY_EXPIRY_ERROR } from '@/lib/expiryAccess';
+import { expiryAllowed, expiryErrorFor } from '@/lib/expiryAccess';
 
 // Index options (SPX/SPXW/...) trade outside 09:30-16:00 and the history feed's
 // bars include those prints, so today's bars must too. Equity options: intraday
@@ -44,7 +44,7 @@ export async function GET(
     // Plans limited to monthly/quarterly expiries get no weekly contract bars (lib/expiryAccess.ts).
     const ctx = await getCurrentUserContext();
     if (!expiryAllowed(ctx.features, expiry)) {
-      return NextResponse.json(WEEKLY_EXPIRY_ERROR, { status: 403 });
+      return NextResponse.json(expiryErrorFor(ctx.features), { status: 403 });
     }
 
     // "Today"/"yesterday" must be the US Eastern trading day, not the server's

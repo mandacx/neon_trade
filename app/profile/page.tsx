@@ -61,7 +61,7 @@ export default async function ProfilePage() {
                     return (
                       <li key={f.code} className="flex items-center gap-2">
                         <span className={on ? 'text-green-600' : 'text-gray-300'}>{on ? '✓' : '–'}</span>
-                        <span className={on ? 'text-gray-700' : 'text-gray-400'}>{f.restriction ? 'Weekly expiries' : f.label}</span>
+                        <span className={on ? 'text-gray-700' : 'text-gray-400'}>{f.restriction ? (f.allowedLabel ?? f.label) : f.label}</span>
                       </li>
                     );
                   })}

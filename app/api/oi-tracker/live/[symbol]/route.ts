@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { guardOi, serverError } from '@/lib/oiTrackerApi';
-import { isStandardExpiry, standardExpiryOnly } from '@/lib/expiryAccess';
+import { expiryAllowed } from '@/lib/expiryAccess';
 import { getOptionChainSnapshots } from '@/lib/marketdata';
 import { etDateOf } from '@/lib/marketSession';
 import { parseOcc } from '@/lib/occ';
@@ -35,8 +35,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
       if (cache.size > 200) cache.clear();
       if (hit.all.length) cache.set(symbol, hit);
     }
-    const stdOnly = standardExpiryOnly(ctx.features);
-    const all = hit.all.filter(o => { const p = parseOcc(o.contract); return !!p && (!stdOnly || isStandardExpiry(p.expiry)); });
+        const all = hit.all.filter(o => { const p = parseOcc(o.contract); return !!p && expiryAllowed(ctx.features, p.expiry); });
     const { top, session, stale } = topBySessionVolume(all, TOP);
     return NextResponse.json({
       success: true,

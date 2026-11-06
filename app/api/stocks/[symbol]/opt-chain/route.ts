@@ -3,7 +3,7 @@ import { sql } from '@/lib/db';
 import { catalogLastSeen, catalogTradeDatesUpTo } from '@/lib/marketCatalog';
 import { sessionsForLoads } from '@/lib/marketSession';
 import { getCurrentUserContext } from '@/lib/appUsers';
-import { expiryAllowed, filterByExpiry, WEEKLY_EXPIRY_ERROR } from '@/lib/expiryAccess';
+import { expiryAllowed, filterByExpiry, expiryErrorFor } from '@/lib/expiryAccess';
 import { parseOcc } from '@/lib/occ';
 
 // The OI published on load date D results from session D-1, so each row also
@@ -59,7 +59,7 @@ export async function GET(
     // Plans limited to monthly/quarterly expiries get no weekly chains (lib/expiryAccess.ts).
     const ctx = await getCurrentUserContext();
     if (!allExpiries && !expiryAllowed(ctx.features, expiry)) {
-      return NextResponse.json(WEEKLY_EXPIRY_ERROR, { status: 403 });
+      return NextResponse.json(expiryErrorFor(ctx.features), { status: 403 });
     }
 
     const upperSymbol = symbol.toUpperCase();

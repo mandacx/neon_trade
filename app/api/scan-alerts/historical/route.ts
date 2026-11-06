@@ -10,7 +10,7 @@ import { requireFeatureApi } from '@/lib/routeGuards';
 import { hasFeature, FEATURE_EARNINGS, FEATURE_LEVELS, FEATURE_SCAN_ALERTS_HISTORY, FEATURE_WATCHLISTS } from '@/lib/features';
 import { getEarningsInWindows, windowKey } from '@/lib/earnings';
 import { getWatchlistsForUser, getWatchlistSymbols } from '@/lib/watchlists';
-import { expiryAllowed, filterExpiries, standardExpiryOnly, WEEKLY_EXPIRY_ERROR } from '@/lib/expiryAccess';
+import { expiryAllowed, filterExpiries, expiryErrorFor, expiryScope } from '@/lib/expiryAccess';
 
 // Historical scan alerts: browsed by calendar month. `metadata=true` alone lists
 // available months; `metadata=true&month=YYYY-MM` scopes trade/expiry date
@@ -53,11 +53,11 @@ export async function GET(request: NextRequest) {
     const tradeDate = searchParams.get('tradeDate') || undefined;
     const expiryDate = searchParams.get('expiry') || undefined;
     if (expiryDate && !expiryAllowed(ctx.features, expiryDate)) {
-      return NextResponse.json(WEEKLY_EXPIRY_ERROR, { status: 403 });
+      return NextResponse.json(expiryErrorFor(ctx.features), { status: 403 });
     }
 
     const [allAlerts, watchlistSymbols] = await Promise.all([
-      getScanAlerts({ yearMonth: month, tradeDate, expiryDate, standardOnly: standardExpiryOnly(ctx.features) }),
+      getScanAlerts({ yearMonth: month, tradeDate, expiryDate, standardOnly: expiryScope(ctx.features) }),
       watchlistId && watchlistsEnabled ? getWatchlistSymbols(watchlistId, ctx.userId) : Promise.resolve(null),
     ]);
     // See app/api/scan-alerts/latest/route.ts — watchlist narrows before lookups.

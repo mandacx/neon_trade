@@ -9,7 +9,7 @@ import { recordHit, rateLimitKey, rateLimitHeaders } from '@/lib/rateLimit';
 import { applyTieredLimit } from '@/lib/rateLimitConfig';
 import { FEATURE_EARNINGS, hasFeature } from '@/lib/features';
 import { getEarningsSummary } from '@/lib/earnings';
-import { standardExpiryOnly } from '@/lib/expiryAccess';
+import { expiryScope } from '@/lib/expiryAccess';
 import { getFundamentals } from '@/lib/usUniverse';
 
 export async function GET(
@@ -59,8 +59,8 @@ export async function GET(
     // Fundamentals (P/E, debt, cash) come from the scanner universe table, refreshed weekly; null for ETFs/indices.
     const [stockData, secRows, earningsMap, fundamentals] = await Promise.all([
       gate.meta.levelsWithheldAfter
-        ? getStockDataAsOf(symbol, gate.meta.levelsWithheldAfter, null, standardExpiryOnly(ctx.features))
-        : getLatestStockData(symbol, standardExpiryOnly(ctx.features)),
+        ? getStockDataAsOf(symbol, gate.meta.levelsWithheldAfter, null, expiryScope(ctx.features))
+        : getLatestStockData(symbol, expiryScope(ctx.features)),
       getSecuritiesMeta([symbol.toUpperCase()]),
       earningsEnabled ? getEarningsSummary([symbol]) : Promise.resolve(null),
       getFundamentals(symbol),

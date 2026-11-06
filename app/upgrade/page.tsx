@@ -85,7 +85,7 @@ export default async function UpgradePage({ searchParams }: { searchParams: Prom
                       return (
                         <li key={f.code} className="flex items-start gap-2">
                           <span className={on ? 'text-green-600' : 'text-gray-300'}>{on ? '✓' : '–'}</span>
-                          <span className={on ? 'text-gray-700' : 'text-gray-400'}>{f.restriction ? 'Weekly expiries' : f.label}</span>
+                          <span className={on ? 'text-gray-700' : 'text-gray-400'}>{f.restriction ? (f.allowedLabel ?? f.label) : f.label}</span>
                         </li>
                       );
                     })}

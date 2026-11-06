@@ -8,7 +8,7 @@ import { getSessionUser, getUserContextFor } from '@/lib/appUsers';
 import { levelGate, levelAccessFor, LEVEL_RANGE_RATE, LEVEL_POINT_RATE, DELAYED_RANGE_DAYS } from '@/lib/levelAccess';
 import { recordHit, rateLimitKey, rateLimitHeaders } from '@/lib/rateLimit';
 import { applyTieredLimit } from '@/lib/rateLimitConfig';
-import { expiryAllowed, standardExpiryOnly, WEEKLY_EXPIRY_ERROR } from '@/lib/expiryAccess';
+import { expiryAllowed, expiryErrorFor, expiryScope } from '@/lib/expiryAccess';
 
 export async function GET(
   request: NextRequest,
@@ -52,9 +52,9 @@ export async function GET(
     const gate = levelGate(ctx.features);
     // Plans limited to monthly/quarterly expiries: a weekly is rejected, and "no expiry given"
     // picks among the monthly/quarterly rows only (lib/expiryAccess.ts).
-    const stdOnly = standardExpiryOnly(ctx.features);
+    const stdOnly = expiryScope(ctx.features);
     if (expiryDate && !expiryAllowed(ctx.features, expiryDate)) {
-      return NextResponse.json(WEEKLY_EXPIRY_ERROR, { status: 403 });
+      return NextResponse.json(expiryErrorFor(ctx.features), { status: 403 });
     }
     const limit = await applyTieredLimit(hit, rl.name, rlKey, levelAccessFor(ctx.features) === 'latest');
     if (!limit.allowed) {

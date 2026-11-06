@@ -4,7 +4,7 @@ import { sql } from '@/lib/db';
 import { getScanAlertsSince, TickerAlert } from '@/lib/scanAlerts';
 import { getWatchlistSymbols } from '@/lib/watchlists';
 import { sendTelegramMessage, isPermanentTelegramError } from '@/lib/telegram';
-import { isStandardExpiry } from '@/lib/expiryAccess';
+import { expiryInScope } from '@/lib/expiryAccess';
 import { getLevelDisplayName, isUsMarketHours } from '@/lib/utils';
 import { getEarningsSummary } from '@/lib/earnings';
 import type { EarningsSummary } from '@/types/earnings';
@@ -26,6 +26,7 @@ interface Subscriber {
   earnings: boolean;
   /** Plan is limited to monthly/quarterly expiries: weekly-expiry alerts are not sent. */
   std_only: boolean;
+  qtr_only: boolean;
 }
 
 function sleep(ms: number) {
@@ -89,7 +90,8 @@ export async function GET(request: NextRequest) {
              c.last_alert_time::timestamp::text as last_alert_time, c.consecutive_failures,
              (e.features ? 'telegram_alerts') AS tg_alerts,
              (e.features ? 'earnings') AS earnings,
-             (e.features ? 'standard_expiry_only') AS std_only
+             (e.features ? 'standard_expiry_only') AS std_only,
+             (e.features ? 'quarterly_expiry_only') AS qtr_only
       FROM public.nt_telegram_alert_subscriptions s
       JOIN public.nt_app_user_profiles u ON u.user_id = s.user_id
       JOIN public.nt_telegram_alert_cursors c ON c.user_id = s.user_id
@@ -131,7 +133,7 @@ export async function GET(request: NextRequest) {
         const matched = newForUser
           .filter(a => symbols.has(a.symbol))
           .filter(() => sub.tg_alerts)
-          .filter(a => !sub.std_only || isStandardExpiry(a.expiryDate));
+          .filter(a => expiryInScope(sub.qtr_only ? 'quarterly' : sub.std_only ? 'standard' : null, a.expiryDate));
 
         // Cursor advances to everything this user *considered*, matched or
         // not — prevents endless re-scanning of irrelevant rows and still

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { guardOi, parseScreenParams, scopeExpiry, serverError } from '@/lib/oiTrackerApi';
-import { filterByExpiry, isStandardExpiry, standardExpiryOnly } from '@/lib/expiryAccess';
+import { expiryAllowed, filterByExpiry } from '@/lib/expiryAccess';
 import { getOiScreen, getStockFullOi, getStrategyRows, getOiLoadDates } from '@/lib/oiTracker';
 import { detectStrategies } from '@/lib/oiStrategies';
 import { getOptionChainSnapshots, type OptionSnapshot } from '@/lib/marketdata';
@@ -62,7 +62,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       // OCC symbol = root + YYMMDD + C/P + 8-digit strike, so the expiry is the 6 digits before the last 9 characters.
       const occExpiry = (c: string) => `20${c.slice(-15, -13)}-${c.slice(-13, -11)}-${c.slice(-11, -9)}`;
       const all = chainKeys
-        .filter(k => !standardExpiryOnly(ctx.features) || isStandardExpiry(occExpiry(k)))
+        .filter(k => expiryAllowed(ctx.features, occExpiry(k)))
         .map(k => toLive(k, chain[k]));
       const inReport = new Set((contracts.rows as OiContractRow[]).map(r => r.contract));
       const ranked = topBySessionVolume(all, 100);

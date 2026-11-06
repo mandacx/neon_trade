@@ -7,6 +7,21 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-11-05 — Quarterly-only expiry gate (quarterly + January) and the "Long investors" plan
+
+Requested: a separate gate, on the lines of the monthly/quarterly one, that allows quarterly expiries plus the January expiry of every year; and a new plan "Long investors" with it enabled (users to be reassigned later).
+
+- **Design:** new restriction feature `quarterly_expiry_only` (`FEATURE_QUARTERLY_EXPIRY_ONLY`, `lib/features.ts`), a *restriction* like `standard_expiry_only`. Allowed = 3rd Friday of Jan/Mar/Jun/Sep/Dec (a subset of the monthly gate). If a user has both codes, quarterly wins (`expiryScope()`).
+- **Files:** `lib/expiryAccess.ts` rewritten around an `ExpiryScope` ('standard' | 'quarterly'): `expiryScope`, `expiryInScope`, `expirySqlPredicate`, `quarterlyExpiryOnly`, `expiryErrorFor(features)` (replaces `WEEKLY_EXPIRY_ERROR`; wording and `feature` follow the tier). SQL: `lib/db.ts` (4 readers), `lib/scanAlerts.ts` (2), `lib/oiTracker.ts`; their `standardOnly` param is now `ExpiryScope | boolean | null` (true still means 'standard'). Routes that passed the boolean now pass `expiryScope(ctx.features)`; routes that filtered in JS (`oi-tracker/live`, `oi-tracker/stock`, Telegram cron via a new `qtr_only` column) use `expiryInScope`/`expiryAllowed`. `expiry-dates` and `oi-tracker/meta` also return `quarterlyExpiryOnly`; the OI tracker page hides the Monthly filter for it. `/upgrade` and `/profile` show each restriction with its own inverted label (`allowedLabel`), not a single "Weekly expiries" row.
+- **Plan:** `scripts/add-long-investors-plan.mjs` (insert-only, `--dry-run`). Created **`LONG_INVESTORS` / "Long investors"**, sort_order 15, **`is_active = false`** (not on the public /upgrade page; still visible in /admin/plans and assignable in the user editor). Features = the live PRO list (stock_analysis, levels, scan_alerts_latest, scan_alerts_history, quadrant, watchlists, telegram_alerts, earnings, oi_tracker, us_market_scanner, option_chain) with `standard_expiry_only` dropped and `quarterly_expiry_only` added. `planLabel` and the Header plan tag know the new code. No users are on it.
+- **Verified:** `tsc --noEmit` clean (apart from a stale `.next/types` reference to the deleted `cron/scanner-sync` route, unrelated); eslint 0 errors on the changed files. Rule fixtures (7 dates) pass. Live DB, AAPL expiries since 2026-10-01: no gate 37, monthly gate 14, quarterly gate 10 (2026-12-18, 2027-01-15, 2027-03-19, 2027-09-17, 2027-12-17, 2028-01-21, 2028-03-17, 2028-06-16, 2028-12-15, 2029-01-19). `getLatestStockData`/`getHistoricalStockData` with `'quarterly'` return only those expiries. The plan row was read back after the insert.
+- **Not verified:** no signed-in run on the new plan (no user is on it): the 403 on a non-quarterly `?expiry=`, the stock page expiry selector, the OI tracker page and Telegram were not exercised over HTTP or in a browser.
+- **Holiday exception (added after review):** `HOLIDAY_SHIFTED_EXPIRIES` in `lib/expiryAccess.ts` = 2025-04-17 (Good Friday), 2026-06-18 and 2027-06-17 (Juneteenth), the Thursday-shifted monthlies found by listing Thursdays (14th-20th) in `nt_market_expiries` with no expiry the next day. Both gates treat them as monthlies, and as quarterlies when the month is Jan/Mar/Jun/Sep/Dec (so April 2025 stays out of the quarterly gate); the SQL predicates (`lib/db.ts`, `lib/scanAlerts.ts`, `expirySqlPredicate`) read the same list. Gates only: `expiryKind()` and the expiry colours elsewhere still show these as weeklies. A future holiday shift needs a date added to the list by hand.
+- **Caveats:** Pro still carries `standard_expiry_only`, as it did before.
+- **Follow-ups:** the plan's feature list was my choice (copy of Pro); adjust in /admin/plans. Set `is_active = true` if it should be sold on /upgrade. The OI tracker's own `quarterly` filter still means Mar/Jun/Sep/Dec only (no January).
+
+---
+
 ## 2026-11-05 — Extended-hours quote from the all-session feed (stock quote route)
 
 Requested: switch `ALPACA_DATA_FEED` to sip as a config change; use Tradier's all-session feed (which includes overnight bars, 00:00-04:00 ET) to show the quote as an after-hours quote; Tradier stays the source for option intraday.

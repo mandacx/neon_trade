@@ -2,6 +2,7 @@ import { sql } from '@/lib/db';
 import { calculateLevels } from '@/lib/calculations';
 import { SCAN_CODE_TO_LEVEL } from '@/lib/utils';
 import { StockData, ScanAlert } from '@/types/stock';
+import { HOLIDAY_SHIFTED_EXPIRIES, expirySqlPredicate, normalizeScope, type ExpiryScope } from '@/lib/expiryAccess';
 
 function sanitizeNum(value: any): number {
   if (value === null || value === undefined || isNaN(value)) return 0;
@@ -62,8 +63,8 @@ export interface ScanAlertQueryFilters {
   expiryDate?: string;
   futureExpiryOnly?: boolean;
   yearMonth?: string; // 'YYYY-MM', scopes to that calendar month of trade_date
-  /** Monthly/quarterly (3rd Friday) expiries only: plans with FEATURE_STANDARD_EXPIRY_ONLY. */
-  standardOnly?: boolean;
+  /** Expiry restriction from the viewer's plan (lib/expiryAccess.ts): 'standard' = 3rd Fridays, 'quarterly' = quarterly + January; true = 'standard'. */
+  standardOnly?: ExpiryScope | boolean | null;
 }
 
 /**
@@ -122,9 +123,8 @@ export async function getScanAlerts(filters: ScanAlertQueryFilters): Promise<Sca
   if (filters.futureExpiryOnly) {
     conditions.push(`expiry_dt >= CURRENT_DATE`);
   }
-  if (filters.standardOnly) {
-    conditions.push(`(EXTRACT(DOW FROM expiry_dt) = 5 AND EXTRACT(DAY FROM expiry_dt) BETWEEN 15 AND 21)`);
-  }
+  const scopePredicate = expirySqlPredicate(filters.standardOnly);
+  if (scopePredicate) conditions.push(scopePredicate);
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
   const query = `
@@ -349,8 +349,8 @@ export interface AlertsByExpiryOptions {
   /** Pin to one exact expiry_dt instead of the N-most-recent-distinct-expiries window — for the
    * watchlist-wide monthly-expiry toggle (see app/watchlists/page.tsx). Takes precedence over expiryCount. */
   expiryDate?: string;
-  /** Count only monthly/quarterly (3rd Friday) expiries among the N most recent. */
-  standardOnly?: boolean;
+  /** Count only expiries inside the viewer's restriction among the N most recent (true = 'standard'). */
+  standardOnly?: ExpiryScope | boolean | null;
 }
 
 /** Alerts for a set of symbols, bounded to one exact expiry or the N most recent distinct expiry_dt values across that symbol set. */
@@ -377,7 +377,7 @@ export async function getAlertsForSymbolsByExpiry(symbols: string[], opts: Alert
           WITH recent_expiries AS (
             SELECT DISTINCT expiry_dt FROM public.intra_us_scanner_eod
             WHERE symbol = ANY(${upperSymbols})
-              AND (NOT ${!!opts.standardOnly}::boolean OR (EXTRACT(DOW FROM expiry_dt) = 5 AND EXTRACT(DAY FROM expiry_dt) BETWEEN 15 AND 21))
+              AND (${normalizeScope(opts.standardOnly)}::text IS NULL OR ((EXTRACT(DOW FROM expiry_dt) = 5 AND EXTRACT(DAY FROM expiry_dt) BETWEEN 15 AND 21 OR expiry_dt = ANY(${HOLIDAY_SHIFTED_EXPIRIES as string[]}::date[])) AND (${normalizeScope(opts.standardOnly)}::text = 'standard' OR EXTRACT(MONTH FROM expiry_dt) IN (1, 3, 6, 9, 12))))
             ORDER BY expiry_dt DESC
             LIMIT ${Math.min(opts.expiryCount ?? 6, 24)}
           )

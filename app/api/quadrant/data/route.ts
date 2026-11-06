@@ -11,7 +11,7 @@ import { earningsBadge, getEarningsSummary, todayET } from '@/lib/earnings';
 import { EARNINGS_FILTER_OPTIONS, earningsFilterMatches, type EarningsFilter } from '@/lib/earningsFilter';
 import { getWatchlistsForUser, getWatchlistSymbols } from '@/lib/watchlists';
 import { isLevelCompare, levelCompareMatches } from '@/lib/levelCompare';
-import { expiryAllowed, filterByExpiry, filterExpiries, WEEKLY_EXPIRY_ERROR } from '@/lib/expiryAccess';
+import { expiryAllowed, filterByExpiry, filterExpiries, expiryErrorFor } from '@/lib/expiryAccess';
 
 export async function GET(request: NextRequest) {
   const { ctx, blocked } = await requireFeatureApi(FEATURE_QUADRANT);
@@ -69,7 +69,7 @@ export async function GET(request: NextRequest) {
     // live snapshots and the securities metadata below — each pair goes out
     // together instead of as four sequential round trips.
     if (expiryDate && !expiryAllowed(ctx.features, expiryDate)) {
-      return NextResponse.json(WEEKLY_EXPIRY_ERROR, { status: 403 });
+      return NextResponse.json(expiryErrorFor(ctx.features), { status: 403 });
     }
     const [rawStocksData, [latestDate]] = await Promise.all([
       date && expiryDate

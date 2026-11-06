@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getExpiryDates } from '@/lib/db';
 import { getCurrentUserContext } from '@/lib/appUsers';
-import { filterExpiries, standardExpiryOnly } from '@/lib/expiryAccess';
+import { filterExpiries, quarterlyExpiryOnly, standardExpiryOnly } from '@/lib/expiryAccess';
 
 export async function GET(
   request: NextRequest,
@@ -38,6 +38,7 @@ export async function GET(
         expiryDates: filterExpiries(ctx.features, expiryDates),
         ...(historicalExpiryDates ? { historicalExpiryDates: filterExpiries(ctx.features, historicalExpiryDates) } : {}),
         standardExpiryOnly: standardExpiryOnly(ctx.features),
+        quarterlyExpiryOnly: quarterlyExpiryOnly(ctx.features),
       },
     });
   } catch (error) {

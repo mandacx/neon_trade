@@ -5,7 +5,7 @@
 import { NextResponse } from 'next/server';
 import { requireFeatureApi } from '@/lib/routeGuards';
 import { FEATURE_OI_TRACKER, FEATURE_WATCHLISTS, hasFeature } from '@/lib/features';
-import { standardExpiryOnly } from '@/lib/expiryAccess';
+import { expiryScope, type ExpiryScope } from '@/lib/expiryAccess';
 import { checkRateLimit, rateLimitHeaders } from '@/lib/rateLimit';
 import { resolveLimit } from '@/lib/rateLimitConfig';
 import type { CurrentUserContext } from '@/lib/appUsers';
@@ -93,8 +93,9 @@ export function scopeWatchlist<T extends { watchlistId?: string | null; userId?:
 }
 
 /** Restrict a query to monthly/quarterly expiries when the viewer's plan says so (the query string cannot lift it). */
-export function scopeExpiry<T extends object>(params: T, ctx: CurrentUserContext): T & { standardOnly?: boolean } {
-  return standardExpiryOnly(ctx.features) ? { ...params, standardOnly: true } : params;
+export function scopeExpiry<T extends object>(params: T, ctx: CurrentUserContext): T & { standardOnly?: ExpiryScope } {
+  const scope = expiryScope(ctx.features);
+  return scope ? { ...params, standardOnly: scope } : params;
 }
 
 export function serverError(tag: string, error: unknown) {

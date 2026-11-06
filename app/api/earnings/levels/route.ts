@@ -6,7 +6,7 @@ import { getAvailableExpiryDates, getNearestExpiryLatestForSymbols, getStockData
 import { calculateLevels, findClosestLevel } from '@/lib/calculations';
 import { levelGate } from '@/lib/levelAccess';
 import { isThirdFridayOfMonth } from '@/lib/utils';
-import { standardExpiryOnly } from '@/lib/expiryAccess';
+import { expiryScope } from '@/lib/expiryAccess';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
   const symbols = await getTrackedSymbols();
   const stockRows = expiry
     ? await getStockDataForSymbolsAtExpiry(symbols, expiry)
-    : await getNearestExpiryLatestForSymbols(symbols, standardExpiryOnly(ctx.features));
+    : await getNearestExpiryLatestForSymbols(symbols, expiryScope(ctx.features));
   const gate = levelGate(ctx.features);
 
   const rows = stockRows.map(data => {

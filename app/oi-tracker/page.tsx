@@ -18,6 +18,7 @@ interface Meta {
   loadDates: string[]; latest: string | null; expiries: string[]; maxLoads: number; maxLoadsContract: number;
   /** The plan is limited to monthly and quarterly expiries (no weeklies). */
   standardExpiryOnly?: boolean;
+  quarterlyExpiryOnly?: boolean;
   filters: { sectors: string[]; indices: Array<{ code: string; name: string }> };
   /** The user's own watchlists first, then curated sector/index lists; empty without the Watchlists feature. */
   watchlists: Array<{ id: string; name: string; isSystem: boolean; symbolCount: number }>;
@@ -302,7 +303,7 @@ export default function OiTrackerPage() {
                   )}
                   <div>
                     <label className={labelClass}>Expiry type</label>
-                    <Segmented value={expiryKind} onChange={setExpiryKind} options={[['', 'All'], ...(meta.standardExpiryOnly ? [] : [['weekly', 'Weekly'] as [string, string]]), ['monthly', 'Monthly'], ['quarterly', 'Quarterly']]} />
+                    <Segmented value={expiryKind} onChange={setExpiryKind} options={[['', 'All'], ...(meta.standardExpiryOnly ? [] : [['weekly', 'Weekly'] as [string, string]]), ...(meta.quarterlyExpiryOnly ? [] : [['monthly', 'Monthly'] as [string, string]]), ['quarterly', 'Quarterly']]} />
                   </div>
                   <div>
                     <label className={labelClass}>Expiry</label>

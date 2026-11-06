@@ -38,10 +38,17 @@ export const FEATURE_CRYPTO_LEVELS = 'crypto_levels';
  * No plan has it by default, so nothing changes until an admin ticks it in the Plans editor.
  */
 export const FEATURE_STANDARD_EXPIRY_ONLY = 'standard_expiry_only';
+/**
+ * A stricter *restriction* than the one above: only quarterly expiries (3rd Friday of
+ * Mar/Jun/Sep/Dec) plus the January expiry of every year (the LEAPS month). Wins when a user
+ * has both codes. Used by the "Long investors" plan (LONG_INVESTORS).
+ */
+export const FEATURE_QUARTERLY_EXPIRY_ONLY = 'quarterly_expiry_only';
 
 /** Display name for a plan code (matches `nt_plans.name`; EXPERT is shown as "Pro Plus"). */
 export function planLabel(planCode: string): string {
   if (planCode === 'EXPERT') return 'Pro Plus';
+  if (planCode === 'LONG_INVESTORS') return 'Long investors';
   return planCode.charAt(0).toUpperCase() + planCode.slice(1).toLowerCase();
 }
 
@@ -54,7 +61,7 @@ export function hasFeature(features: string[] | undefined | null, code: string):
  * All known feature codes + display labels, for the admin plan editor, the
  * /upgrade comparison table and the /profile entitlement list.
  */
-export const ALL_FEATURES: Array<{ code: string; label: string; restriction?: boolean }> = [
+export const ALL_FEATURES: Array<{ code: string; label: string; restriction?: boolean; allowedLabel?: string }> = [
   { code: FEATURE_STOCK_ANALYSIS, label: 'Charts & Stock Analysis' },
   { code: FEATURE_LEVELS, label: 'Price Levels (live)' },
   { code: FEATURE_SCAN_ALERTS_LATEST, label: 'Latest Scan Alerts' },
@@ -69,7 +76,8 @@ export const ALL_FEATURES: Array<{ code: string; label: string; restriction?: bo
   { code: FEATURE_OPTION_CHAIN, label: 'Live Option Chain' },
   { code: FEATURE_STRATEGY_BUILDER, label: 'Option Strategy Builder (includes the live chain)' },
   { code: FEATURE_CRYPTO_LEVELS, label: 'Crypto Price Levels' },
-  { code: FEATURE_STANDARD_EXPIRY_ONLY, label: 'Monthly & quarterly expiries only (no weeklies)', restriction: true },
+  { code: FEATURE_STANDARD_EXPIRY_ONLY, label: 'Monthly & quarterly expiries only (no weeklies)', restriction: true, allowedLabel: 'Weekly expiries' },
+  { code: FEATURE_QUARTERLY_EXPIRY_ONLY, label: 'Quarterly & January expiries only (no weeklies or other monthlies)', restriction: true, allowedLabel: 'Weekly & other monthly expiries' },
 ];
 
 // Route gating lives in exactly two places: middleware.ts (login) and the

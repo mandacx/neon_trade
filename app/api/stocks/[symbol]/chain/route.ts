@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUserContext } from '@/lib/appUsers';
 import { FEATURE_OPTION_CHAIN, FEATURE_STRATEGY_BUILDER, hasFeature } from '@/lib/features';
-import { expiryAllowed, WEEKLY_EXPIRY_ERROR } from '@/lib/expiryAccess';
+import { expiryAllowed, expiryErrorFor } from '@/lib/expiryAccess';
 import { checkRateLimit, rateLimitHeaders } from '@/lib/rateLimit';
 import { resolveLimit } from '@/lib/rateLimitConfig';
 import { getFallbackQuote, getOptionChainContracts, getOptionChainSnapshots, type OptionChainContract, type OptionSnapshot } from '@/lib/marketdata';
@@ -130,7 +130,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (expiry < etDateOf(Date.now())) {
     return NextResponse.json({ success: false, error: 'Expired', message: 'Live quotes exist only for expiries that have not passed.' }, { status: 400 });
   }
-  if (!expiryAllowed(ctx.features, expiry)) return NextResponse.json(WEEKLY_EXPIRY_ERROR, { status: 403 });
+  if (!expiryAllowed(ctx.features, expiry)) return NextResponse.json(expiryErrorFor(ctx.features), { status: 403 });
 
   const { limit: cap, windowSeconds } = await resolveLimit(LIMITER, false);
   const limit = await checkRateLimit(LIMITER, `user:${ctx.userId}`, cap, windowSeconds);
