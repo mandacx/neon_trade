@@ -93,7 +93,7 @@ export default async function UpgradePage({ searchParams }: { searchParams: Prom
 
                   {!isCurrent && (
                     <a
-                      href={`mailto:support@neontrade.app?subject=${encodeURIComponent(`Plan upgrade request: ${plan.name}`)}&body=${encodeURIComponent(
+                      href={`mailto:support@stockstrendz.com?subject=${encodeURIComponent(`Plan upgrade request: ${plan.name}`)}&body=${encodeURIComponent(
                         `Hi,\n\nI'd like to upgrade to the ${plan.name} plan.\n\nAccount email: ${ctx.email ?? '(not logged in — please reply to confirm)'}\nCurrent plan: ${ctx.planCode}\n`
                       )}`}
                       className="mt-4 block text-center py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold"

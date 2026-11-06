@@ -7,6 +7,30 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-11-06 — stockstrendz.com blocked by corporate web filters: categorization groundwork
+
+Reported: the new domain `stockstrendz.com` is blocked on many organization networks.
+
+- **Diagnosis (verified):** DNS resolves (216.150.16.193 / .1.193), `https://stockstrendz.com` returns 200 from Vercel, `www` 307-redirects to the apex. So the site is up; the blocking is in third-party filters. **Cause is inferred, not confirmed:** most likely "newly registered / uncategorized domain" rules, possibly a finance-category block. No block page or vendor category was seen.
+- **Found:** the site had no About / Contact / Privacy / Terms pages, no footer, no `robots.txt`, no `sitemap.xml`, no `security.txt`, and root metadata without `metadataBase` / Open Graph.
+- **Files:** new `components/layout/SiteFooter.tsx` (About, Guide, Plans, Contact, Privacy, Terms + disclaimer; added to the home page `app/page.tsx` only, because the chart pages are fixed-height), `components/layout/LegalPage.tsx`, `app/{about,contact,privacy,terms}/page.tsx`, `app/robots.ts`, `app/sitemap.ts`, `public/.well-known/security.txt`; `app/layout.tsx` (`metadataBase`, description, `openGraph`). All new pages are public (not in the `middleware.ts` matcher).
+- **Content caveats:** the privacy policy lists only what the code does (email/password and Google sign-in in `app/login/page.tsx`, Vercel Analytics, activity events, Telegram chat id); it is a plain draft, **not reviewed by a lawyer**. Contact address is the existing `support@neontrade.app` (old domain; no `@stockstrendz.com` mailbox was given), which weakens the "same domain" signal. `security.txt` expires 2027-11-06.
+- **Verified:** `tsc --noEmit` clean (ignoring stale `.next/types`).
+- **Not verified:** a build, rendering of the new pages in a browser, and the deployed result. Nothing is committed or deployed yet.
+- **Update (same day): Resend email.** `.env.local` now has `EMAIL_PROVIDER=resend`, `EMAIL_API_KEY`, `EMAIL_FROM` (`Stocks Trendz <support@stockstrendz.com>`), `EMAIL_REPLY_TO`, `APP_BASE_URL` (values read for the non-secret ones only; the key was not printed). Before this, nothing in the code sent email: sign-up codes go through Neon Auth's own sender (`authClient.emailOtp.sendVerificationOtp`, `app/login/page.tsx`).
+  - **Files:** new `lib/email.ts` (server-only `sendEmail()` over Resend's HTTP API, no SDK dependency, 10 s timeout, never throws: returns `{ ok, id | error }`; `emailConfigured()`), `lib/site.ts` (`SUPPORT_EMAIL`, `SITE_URL`); the contact address is now `support@stockstrendz.com` in `app/{contact,privacy,terms,upgrade}` and `public/.well-known/security.txt`; `.env.example` documents the new vars.
+  - **Neon Auth emails (not done, needs the Neon console):** per Neon's docs (web search, not tested here) the default sender is shared and rate limited, and a custom SMTP provider is configured in the console (Auth settings) or with `neon neon-auth config email-provider update`; the sender domain must already be verified at the provider. Resend SMTP values (host `smtp.resend.com`, port 465 or 587, username `resend`, password = the API key) are from Resend's docs, unverified here.
+  - **`APP_BASE_URL` is `https://www.stockstrendz.com`, but `www` 307-redirects to the apex** (checked 2026-11-06). Nothing reads `APP_BASE_URL` yet; use the apex when it is first used, or flip the redirect.
+  - **Verified:** `tsc --noEmit` clean. **Not verified:** that the Resend key and domain work (no email was sent), DNS records (SPF/DKIM/DMARC) in Resend, and the Vercel env vars (only `.env.local` was seen).
+- **Update (same day): Resend verified, sign-out hardened.**
+  - **Resend:** `GET /domains` returned 200 with `stockstrendz.com` verified (sending + receiving). A test through a copy of `lib/email.ts` (the `server-only` import removed, because it is a Next alias that plain Node cannot load) was accepted and shown `delivered` in Resend's log. After the owner set Neon Auth's custom SMTP to Resend, two sign-in codes triggered via the Neon Auth API (origins `us.niftytrendz.com` and `localhost:3000`) appear in Resend's log as sent from `"Stocks Trendz" <support@stockstrendz.com>`, `delivered`, subject "Your Sign-In Code - neon_us" (the app name comes from Neon). The owner also received a signup code.
+  - **Origin check (inconclusive):** calling Neon Auth directly with `Origin: https://stockstrendz.com` or `https://www.stockstrendz.com` returned 403 `INVALID_ORIGIN`; `us.niftytrendz.com` and `localhost:3000` returned 200. A browser goes through `/api/auth/[...path]` first, so this may not apply to real logins (not checked). If login fails on the new domain, add it to Neon Auth's trusted domains (guide: neon.com/docs/auth/guides/configure-domains).
+  - **Sign-out reported not working** (on `https://stockstrendz.com/stock/FN?tab=oi`). Not reproduced: `POST /api/auth/sign-out` without a session returns 200 and clears the four `__Secure-neon-auth.*` cookies on both domains. `components/auth/SignOutButton.tsx` ignored errors and used `router.push` + `refresh`; it now shows "Could not sign out" on an error and otherwise does `window.location.assign('/login')` (full reload). **Cause unconfirmed; the fix is unverified in a signed-in browser.**
+  - **Verified:** `tsc --noEmit` and eslint clean on the button.
+- **Follow-ups (manual, by the owner):** after deploy, submit `stockstrendz.com` and `www.stockstrendz.com` for recategorization (Finance / Investing) to Zscaler, Palo Alto, Fortinet, Cisco Talos, Symantec/Broadcom, Netskope, Trellix, Sophos, Forcepoint; check VirusTotal / Safe Browsing; create a `support@stockstrendz.com` mailbox and switch the contact address; keep `us.niftytrendz.com` live (crons point at it); disable WHOIS privacy and add SPF/DKIM/DMARC if mail is sent from the domain.
+
+---
+
 ## 2026-11-05 — Option Chain and Strategy Builder split into two tabs, two independent gates
 
 Requested: separate the option chain and the strategy builder into two tabs and add two gates under the plans.

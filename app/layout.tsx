@@ -6,8 +6,16 @@ import ActivityTracker from "@/components/providers/ActivityTracker";
 import { getCurrentUserContext } from "@/lib/appUsers";
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://stockstrendz.com"),
   title: "StocksTrendz - Stock Analysis Platform",
-  description: "Advanced stock analysis with candlestick charts and quadrant visualization",
+  description: "US stock and options analysis: option open-interest price levels, candlestick charts, scanners, earnings and watchlists.",
+  openGraph: {
+    type: "website",
+    siteName: "StocksTrendz",
+    title: "StocksTrendz - Stock Analysis Platform",
+    description: "US stock and options analysis: option open-interest price levels, candlestick charts, scanners, earnings and watchlists.",
+    url: "https://stockstrendz.com",
+  },
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",

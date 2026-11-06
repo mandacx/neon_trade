@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import Header from '@/components/layout/Header';
+import SiteFooter from '@/components/layout/SiteFooter';
 import ScanAlertsTicker from '@/components/ui/ScanAlertsTicker';
 import EarningsBadgeCell from '@/components/ui/EarningsBadgeCell';
 import { useAuthContext } from '@/components/providers/AuthContextProvider';
@@ -489,6 +490,7 @@ export default function Home() {
           </section>
 
         </div>
+        <SiteFooter />
       </div>
     </>
   );

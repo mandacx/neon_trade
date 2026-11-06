@@ -47,6 +47,8 @@ Tradier is also the **OHLC fallback for symbols Alpaca has no bars for** (indice
 
 Note the split from what `README.md`/`QUICK_START.md` describe: those docs predate the current code and describe Tradier as the OHLC source — in the actual code, **Alpaca provides OHLC/bars, Tradier provides symbol search plus the index OHLC fallback above**. Trust the code in `lib/` over the older docs when they disagree.
 
+**Email (Resend)** — `EMAIL_PROVIDER=resend`, `EMAIL_API_KEY`, `EMAIL_FROM`, `EMAIL_REPLY_TO`, `APP_BASE_URL`. `lib/email.ts` `sendEmail()` posts to Resend's HTTP API and never throws. Sign-up/verification codes are sent by Neon Auth, not by this helper, until its custom SMTP is pointed at Resend (console setting; see `docs/CHANGES.md`, 2026-11-06). Public contact address: `SUPPORT_EMAIL` in `lib/site.ts`.
+
 **Deployment**: hosted on Vercel, connected to the same Neon Postgres instance and Tradier API in production as in local dev — set `DATABASE_URL`, `TRADIER_API_KEY`, `TRADIER_API_URL`, `ALPACA_API_KEY`, `ALPACA_SECRET_KEY`, `ALPACA_BASE_URL` as Vercel project environment variables. API routes that read these are Node runtime by default (no `export const runtime = 'edge'` present), so Vercel serverless functions handle them.
 
 **Crons (Railway)**: the `neon-trade-crons` Railway project runs three services, each a tiny curl container that calls a protected route on `https://us.niftytrendz.com` with `Authorization: Bearer $CRON_SECRET` (`lib/cronAuth.ts`; the secret is set in Vercel Production and on `market-catalog-cron`/`telegram-alerts-cron`; `earnings-cron` references it as `${{market-catalog-cron.CRON_SECRET}}`):
