@@ -74,7 +74,7 @@ export const ALL_FEATURES: Array<{ code: string; label: string; restriction?: bo
   { code: FEATURE_OI_TRACKER, label: 'Options OI Tracker' },
   { code: FEATURE_US_MARKET_SCANNER, label: 'US Market Scanner' },
   { code: FEATURE_OPTION_CHAIN, label: 'Live Option Chain' },
-  { code: FEATURE_STRATEGY_BUILDER, label: 'Option Strategy Builder (includes the live chain)' },
+  { code: FEATURE_STRATEGY_BUILDER, label: 'Option Strategy Builder (separate tab; does not include the Option Chain tab)' },
   { code: FEATURE_CRYPTO_LEVELS, label: 'Crypto Price Levels' },
   { code: FEATURE_STANDARD_EXPIRY_ONLY, label: 'Monthly & quarterly expiries only (no weeklies)', restriction: true, allowedLabel: 'Weekly expiries' },
   { code: FEATURE_QUARTERLY_EXPIRY_ONLY, label: 'Quarterly & January expiries only (no weeklies or other monthlies)', restriction: true, allowedLabel: 'Weekly & other monthly expiries' },

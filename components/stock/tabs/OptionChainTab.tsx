@@ -15,9 +15,10 @@ import StrategyBuilder from '@/components/stock/strategy/StrategyBuilder';
 import ChainTable from '@/components/stock/strategy/ChainTable';
 import { Spinner } from './shared';
 
-// Option Chain tab of the stock page: live chain for the selected expiry plus the
-// Strategy Builder (docs/strategy-builder.md). Pro feature `strategy_builder`;
-// `option_chain` alone shows the chain without the builder.
+// Option Chain and Strategy Builder tabs of the stock page (docs/strategy-builder.md), one component
+// mounted once per tab (`mode`). 'chain' = the plain live chain, full width (feature `option_chain`);
+// 'builder' = the chain on the left third plus the Strategy Builder (feature `strategy_builder`).
+// The two gates are independent.
 // Quotes are read once per expiry and only re-read when the user clicks
 // "Refresh quotes" — never on a timer — so a position under review doesn't move.
 
@@ -30,7 +31,7 @@ function age(iso: string, now: number): string {
   return m < 60 ? `${m} min old` : `${Math.floor(m / 60)} h ${m % 60} min old`;
 }
 
-export default function OptionChainTab({ symbol, selectedExpiry: pageExpiry, expiryMode, expiries: pageExpiries, expiriesReady, levels, earnings, entitled, builder, loggedIn, onOpenContract }: {
+export default function OptionChainTab({ symbol, selectedExpiry: pageExpiry, expiryMode, expiries: pageExpiries, expiriesReady, levels, earnings, mode, entitled, hasBuilder, onOpenBuilder, loggedIn, onOpenContract }: {
   symbol: string;
   /** The page's selected expiry; '' when the symbol has no levels, then the tab lists expiries itself. */
   selectedExpiry: string;
@@ -42,13 +43,17 @@ export default function OptionChainTab({ symbol, selectedExpiry: pageExpiry, exp
   /** This app's levels for the selected expiry (strangles / condors anchor on them). */
   levels: Levels;
   earnings: EarningsSummary | null;
-  /** May read the live chain (`option_chain` or `strategy_builder`). */
+  /** 'chain': plain chain, full width, bid/ask not clickable. 'builder': chain + Strategy Builder. */
+  mode: 'chain' | 'builder';
+  /** May use this tab: `option_chain` for 'chain', `strategy_builder` for 'builder'. */
   entitled: boolean;
-  /** Has the Strategy Builder; without it the plain chain is shown full width, bid/ask not clickable. */
-  builder: boolean;
+  /** The viewer also has the Strategy Builder (chain tab links to its tab instead of the upgrade page). */
+  hasBuilder: boolean;
+  onOpenBuilder?: () => void;
   loggedIn: boolean;
   onOpenContract: (strike: number, optType: 'call' | 'put', occRoot?: string) => void;
 }) {
+  const builder = mode === 'builder';
   const [chains, setChains] = useState<Map<string, OptionChain>>(new Map());
   const [loading, setLoading] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
@@ -193,13 +198,16 @@ export default function OptionChainTab({ symbol, selectedExpiry: pageExpiry, exp
   if (!entitled) {
     return (
       <div className="bg-white rounded-lg shadow-md p-6 text-center">
-        <h3 className="text-base font-bold mb-1">Live option chain &amp; Strategy Builder</h3>
-        <p className="text-sm text-gray-600 max-w-xl mx-auto mb-1">Bid, ask, mid, last, IV, greeks and volume for every strike of the selected expiry.</p>
-        <p className="text-sm text-gray-600 max-w-xl mx-auto">
-          Pick a market view (bullish, bearish, neutral, volatile) or any of 45 strategies, see the payoff at expiry and before it,
-          probability of profit, breakevens and greeks, priced from the live chain.
-        </p>
-        <Link href={loggedIn ? '/upgrade?feature=strategy_builder' : '/login'} className="inline-block mt-3 px-4 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700">
+        <h3 className="text-base font-bold mb-1">{builder ? 'Strategy Builder' : 'Live option chain'}</h3>
+        {builder ? (
+          <p className="text-sm text-gray-600 max-w-xl mx-auto">
+            Pick a market view (bullish, bearish, neutral, volatile) or any of 45 strategies, see the payoff at expiry and before it,
+            probability of profit, breakevens and greeks, priced from the live chain.
+          </p>
+        ) : (
+          <p className="text-sm text-gray-600 max-w-xl mx-auto">Bid, ask, mid, last, IV, greeks, volume and open interest for every strike of the selected expiry.</p>
+        )}
+        <Link href={loggedIn ? `/upgrade?feature=${builder ? 'strategy_builder' : 'option_chain'}` : '/login'} className="inline-block mt-3 px-4 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700">
           {loggedIn ? 'Upgrade to use it' : 'Sign in'}
         </Link>
       </div>
@@ -267,7 +275,9 @@ export default function OptionChainTab({ symbol, selectedExpiry: pageExpiry, exp
         {!builder && (
           <p className="mt-2 text-xs text-gray-500">
             Build strategies from this chain (payoff, probability of profit, breakevens, greeks) with the{' '}
-            <Link href="/upgrade?feature=strategy_builder" className="text-blue-600 hover:underline">Strategy Builder</Link>.
+            {hasBuilder && onOpenBuilder
+              ? <button type="button" onClick={onOpenBuilder} className="text-blue-600 hover:underline">Strategy Builder</button>
+              : <Link href="/upgrade?feature=strategy_builder" className="text-blue-600 hover:underline">Strategy Builder</Link>}.
           </p>
         )}
       </div>

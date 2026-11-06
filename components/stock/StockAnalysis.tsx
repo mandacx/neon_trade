@@ -78,8 +78,8 @@ const coversRange = (c: LevelsCoverage | null, symbol: string, expiry: string, f
 const NO_LEVELS = new Map<string, LevelHistoryEntry>();
 
 // Tabs below the chart (docs/CHANGES.md 2026-10-28 "stock page tabs"); `?tab=` keeps the open one.
-type StockTab = 'levels' | 'oi' | 'chain' | 'earnings';
-const STOCK_TABS: StockTab[] = ['levels', 'oi', 'chain', 'earnings'];
+type StockTab = 'levels' | 'oi' | 'chain' | 'builder' | 'earnings';
+const STOCK_TABS: StockTab[] = ['levels', 'oi', 'chain', 'builder', 'earnings'];
 
 // Shape of /api/stocks/[symbol]/quote. Every field but `price` can be null —
 // The snapshot omits prevDailyBar/dailyBar for names that haven't printed, and the
@@ -1345,7 +1345,8 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
       tabs={[
         { id: 'levels', tone: 'green', label: 'Chart & Price Levels', title: 'Price chart with the level lines, and all seven levels, close and OI per day for the selected expiry' },
         { id: 'oi', tone: 'orange', label: 'Open Interest', title: 'Open interest trend, OI change by strike and by contract' },
-        { id: 'chain', tone: 'blue', label: 'Option Chain', title: 'Live option chain and the Strategy Builder (payoff, POP, greeks)', badge: hasFeature(authCtx.features, FEATURE_STRATEGY_BUILDER) || hasFeature(authCtx.features, FEATURE_OPTION_CHAIN) ? undefined : 'Pro' },
+        { id: 'chain', tone: 'blue', label: 'Option Chain', title: 'Live option chain: bid, ask, IV, greeks, volume and open interest by strike', badge: hasFeature(authCtx.features, FEATURE_OPTION_CHAIN) ? undefined : 'Pro' },
+        { id: 'builder', tone: 'violet', label: 'Strategy Builder', title: 'Payoff, probability of profit, breakevens and greeks for 45 option strategies', badge: hasFeature(authCtx.features, FEATURE_STRATEGY_BUILDER) ? undefined : 'Pro' },
         { id: 'earnings', tone: 'amber', label: 'Earnings', title: 'Reported quarters: EPS and sales vs consensus', badge: earningsLocked === true ? 'Pro' : undefined },
       ]}
     />
@@ -1508,8 +1509,29 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
                     expiriesReady={!isLoading}
                     levels={builderLevels}
                     earnings={earnings}
-                    entitled={hasFeature(authCtx.features, FEATURE_STRATEGY_BUILDER) || hasFeature(authCtx.features, FEATURE_OPTION_CHAIN)}
-                    builder={hasFeature(authCtx.features, FEATURE_STRATEGY_BUILDER)}
+                    mode="chain"
+                    entitled={hasFeature(authCtx.features, FEATURE_OPTION_CHAIN)}
+                    hasBuilder={hasFeature(authCtx.features, FEATURE_STRATEGY_BUILDER)}
+                    onOpenBuilder={() => openTab('builder')}
+                    loggedIn={authCtx.loggedIn}
+                    onOpenContract={(strike, optType, occRoot) => setSelectedOptContract({ strike, optType, occRoot })}
+                  />
+                </div>
+              )}
+              {visitedTabs.has('builder') && (
+                <div hidden={tab !== 'builder'}>
+                  <OptionChainTab
+                    symbol={symbol.toUpperCase()}
+                    selectedExpiry={selectedExpiry}
+                    expiryMode={expiryMode}
+                    expiries={upcomingExpiries}
+                    expiriesReady={!isLoading}
+                    levels={builderLevels}
+                    earnings={earnings}
+                    mode="builder"
+                    entitled={hasFeature(authCtx.features, FEATURE_STRATEGY_BUILDER)}
+                    hasBuilder={hasFeature(authCtx.features, FEATURE_STRATEGY_BUILDER)}
+                    onOpenBuilder={() => openTab('builder')}
                     loggedIn={authCtx.loggedIn}
                     onOpenContract={(strike, optType, occRoot) => setSelectedOptContract({ strike, optType, occRoot })}
                   />

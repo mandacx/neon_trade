@@ -7,6 +7,19 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-11-05 — Option Chain and Strategy Builder split into two tabs, two independent gates
+
+Requested: separate the option chain and the strategy builder into two tabs and add two gates under the plans.
+
+- **Found:** the two gate codes already existed (`option_chain` "Live Option Chain", `strategy_builder` "Option Strategy Builder (includes the live chain)") but fed one combined tab, and `strategy_builder` implied the chain. So "two gates" meant making them independent, not new codes: **no new feature code and no DB change**.
+- **Files:** `components/stock/StockAnalysis.tsx` (new tab id `builder`, violet; `chain` tab gated by `option_chain` only, `builder` by `strategy_builder` only; `OptionChainTab` mounted once per tab, each lazily on first open, `?tab=chain` / `?tab=builder`), `components/stock/tabs/OptionChainTab.tsx` (prop `mode` replaces `builder`; `entitled` is now per tab; locked teaser text and upgrade link per mode; the chain tab's hint links to the Strategy Builder tab via `onOpenBuilder` when the viewer has it), `lib/features.ts` (label), `docs/strategy-builder.md`. The `/chain` and `/chain-expiries` routes still accept either feature (the builder tab needs them), so no route change.
+- **Behaviour change:** a plan with `strategy_builder` but not `option_chain` no longer gets the Option Chain tab. Live plans (read 2026-11-05): Pro has `option_chain` only, Pro Plus (EXPERT) has both, Long investors has `option_chain` only, so nobody loses a tab today. To give a plan the builder, tick `strategy_builder` in /admin/plans.
+- **Cost:** with both tabs opened the chain is fetched twice per expiry (one per tab instance); the route's 15 s cache and 30/min limiter absorb it. A shared store would avoid it; not done.
+- **Verified:** `tsc --noEmit` clean, eslint 0 errors on the changed files. Dev server, signed out (Playwright, 1400 px): five tabs, Option Chain and Strategy Builder each show their own locked panel with a Pro badge, `?tab=` is written, no console errors.
+- **Not verified:** the entitled views (no entitled login; chain full width on its tab, builder tab layout, the link between the tabs), and a production build.
+
+---
+
 ## 2026-11-05 — Quarterly-only expiry gate (quarterly + January) and the "Long investors" plan
 
 Requested: a separate gate, on the lines of the monthly/quarterly one, that allows quarterly expiries plus the January expiry of every year; and a new plan "Long investors" with it enabled (users to be reassigned later).

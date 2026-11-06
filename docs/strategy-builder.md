@@ -1,19 +1,20 @@
 # Stock page tabs and the Option Strategy Builder
 
 Design and runbook for the stock page tabs and the optionstrat-style
-Strategy Builder in the **Option Chain** tab (Pro feature `strategy_builder`; `option_chain` alone gives the plain chain without the builder).
+Strategy Builder. They are two tabs with two independent gates: **Option Chain** (feature `option_chain`) and **Strategy Builder** (feature `strategy_builder`).
 The maths is a TypeScript port of the `options-alert-lab` payoff lab
 (`backend/app/payoff.py`, `backend/app/engine/strategies.py`).
 
 ## Tabs
 
-`components/stock/StockAnalysis.tsx` renders four tabs under the quote, Analysis box and expiry selector (passed to `TVChart` as `afterHeader`). The tab bar is `components/ui/Tabs.tsx` (solid boxes, one light colour per tab via `tone`, a darker fill of that colour for the selected one).
+`components/stock/StockAnalysis.tsx` renders five tabs under the quote, Analysis box and expiry selector (passed to `TVChart` as `afterHeader`). The tab bar is `components/ui/Tabs.tsx` (solid boxes, one light colour per tab via `tone`, a darker fill of that colour for the selected one).
 
 | Tab (`?tab=`) | Component | Data |
 |---|---|---|
 | Chart & Price Levels (`levels`, default) | the chart, then `components/stock/tabs/PriceLevelsTab.tsx` | `/levels?range=true` (fetch stays in `StockAnalysis`; it reuses the chart's levels when they cover the range) |
 | Open Interest (`oi`) | `components/stock/tabs/OpenInterestTab.tsx`; sub-views OI changes / Live volume (`/api/oi-tracker/live/[symbol]`, feature `oi_tracker`, fetched when opened, 30 s shared cache) | `/opt-chain?loads=N` (last N trading days, 1D default) for the strike ladder (selected expiry) and the contract table beside it; `expiry=all` only when the table is switched to all expiries; `OiTrendModal` reads `/levels?range=true` only when its button is clicked |
-| Option Chain (`chain`) | `components/stock/tabs/OptionChainTab.tsx`: chain on the left third (mirrored, selectable columns `stockChain`, sides scroll together), builder on the right with a hover explainer (`StrategyInfo`) | `/api/stocks/[symbol]/chain` (live chain) |
+| Option Chain (`chain`) | `components/stock/tabs/OptionChainTab.tsx` with `mode="chain"`: the plain chain at full width (selectable columns `stockChain`) | `/api/stocks/[symbol]/chain` (live chain) |
+| Strategy Builder (`builder`) | the same component with `mode="builder"`: chain on the left third (mirrored, sides scroll together, bid/ask add legs), builder on the right with a hover explainer (`StrategyInfo`) | `/api/stocks/[symbol]/chain` (each tab fetches its own copy when first opened; the route's 15 s cache absorbs it) |
 | Earnings (`earnings`) | `EarningsHistoryTable` | `/earnings` (already fetched for the chart markers) |
 
 - **Lazy loading.** A tab mounts, and fetches, the first time it is opened, then stays mounted (`hidden`).
@@ -106,13 +107,15 @@ Users reach a template either **by view** (cards priced from the chain, with a s
 
 Two feature codes, both ticked per plan at `/admin/plans` (plans live in the DB; no plan has either until then):
 
-| Feature | Label in `ALL_FEATURES` | Option Chain tab shows |
+| Feature | Label in `ALL_FEATURES` | Tab it unlocks |
 |---|---|---|
-| `strategy_builder` | "Option Strategy Builder (includes the live chain)" | chain on the left third, builder on the right; bid/ask clicks add legs |
-| `option_chain` | "Live Option Chain" | the plain chain at full width (centred, capped at its column width), bid/ask as plain numbers, the chart cell, Refresh quotes, and a one-line link to the builder upgrade |
-| neither | | a teaser with Sign in / Upgrade; nothing is fetched |
+| `option_chain` | "Live Option Chain" | **Option Chain**: the plain chain at full width (centred, capped at its column width), bid/ask as plain numbers, the chart cell, Refresh quotes, and a one-line link to the Strategy Builder tab (or the upgrade page without that feature) |
+| `strategy_builder` | "Option Strategy Builder (separate tab; does not include the Option Chain tab)" | **Strategy Builder**: chain on the left third, builder on the right; bid/ask clicks add legs |
+| neither | | each tab shows a teaser with Sign in / Upgrade; nothing is fetched |
 
-Both use the same `/chain` route, rate limiter (`option_chain`) and cache.
+The gates are independent: `strategy_builder` no longer implies the Option Chain tab (it did before 2026-11-05). A plan wanting both ticks both.
+
+Both tabs use the same `/chain` route (which accepts either feature), rate limiter (`option_chain`) and cache.
 
 **Data source:** the chain (bid, ask, last, volume, greeks, IV and **open interest**) comes from one request per expiry to the live-chain provider (`getOptionChainContracts`); quote snapshots are only a backup when it returns nothing (no OI then). OI is the previous session's close, published once a day, with no date and no history; per-contract history stays on the contract chart (Alpaca bars + our `us_opt_chg_rpt`).
 
