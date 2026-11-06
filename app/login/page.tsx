@@ -122,6 +122,18 @@ function LoginPageInner() {
     setOtp(next);
     if (digit && i < 5) otpRefs.current[i + 1]?.focus();
   }
+  // Pasting the whole code into any box fills this box and the ones after it.
+  function handleOtpPaste(i: number, e: React.ClipboardEvent<HTMLInputElement>) {
+    const digits = e.clipboardData.getData('text').replace(/\D/g, '');
+    if (!digits) return;
+    e.preventDefault();
+    // A full 6-digit code always fills every box, wherever it was pasted.
+    const start = digits.length >= 6 ? 0 : i;
+    const next = [...otp];
+    for (let k = 0; k < digits.length && start + k < 6; k++) next[start + k] = digits[k];
+    setOtp(next);
+    otpRefs.current[Math.min(start + digits.length, 5)]?.focus();
+  }
   function handleOtpKeyDown(i: number, e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === 'Backspace' && !otp[i] && i > 0) otpRefs.current[i - 1]?.focus();
   }
@@ -235,6 +247,7 @@ function LoginPageInner() {
                         maxLength={1}
                         value={d}
                         onChange={e => handleOtpChange(i, e.target.value)}
+                        onPaste={e => handleOtpPaste(i, e)}
                         onKeyDown={e => handleOtpKeyDown(i, e)}
                       />
                     ))}
