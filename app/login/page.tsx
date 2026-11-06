@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, Suspense } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import Header from '@/components/layout/Header';
 import { authClient } from '@/lib/auth/client';
 
@@ -19,7 +19,6 @@ function safeRedirectTarget(raw: string | null): string {
 }
 
 function LoginPageInner() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const redirectTarget = safeRedirectTarget(searchParams.get('redirect'));
   const [mode, setMode] = useState<Mode>('login');
@@ -39,9 +38,18 @@ function LoginPageInner() {
   async function afterSessionEstablished() {
     // Single-session enforcement: the just-created session is the only one
     // that stays valid going forward.
-    await authClient.revokeOtherSessions();
-    router.push(redirectTarget);
-    router.refresh();
+    // Best-effort: if this call fails or hangs, the user must still leave this
+    // page (otherwise they sit on the code screen with a valid session).
+    try {
+      await Promise.race([
+        authClient.revokeOtherSessions(),
+        new Promise((resolve) => setTimeout(resolve, 5000)),
+      ]);
+    } catch (e) {
+      console.error('revokeOtherSessions failed', e);
+    }
+    // Full page load so the server layout re-reads the new session cookie.
+    window.location.assign(redirectTarget);
   }
 
   async function handleLogin(e: React.FormEvent) {
@@ -85,7 +93,16 @@ function LoginPageInner() {
     setBusy(true);
     setError(null);
     const code = otp.join('');
-    const { data, error: err } = await authClient.emailOtp.verifyEmail({ email, otp: code });
+    let result;
+    try {
+      result = await authClient.emailOtp.verifyEmail({ email, otp: code });
+    } catch (e) {
+      console.error('verifyEmail failed', e);
+      setBusy(false);
+      setError('Could not verify the code. Please try again.');
+      return;
+    }
+    const { data, error: err } = result;
     setBusy(false);
     if (err) { setError(err.message ?? 'Invalid or expired code.'); return; }
     if (!data?.token) { setError('Verified, but no session was returned — please log in.'); setMode('login'); return; }
