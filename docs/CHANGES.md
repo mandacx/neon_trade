@@ -7,6 +7,18 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-11-07 — Open Interest tab: Expiry column filter and Expired include/exclude
+
+Requested: on the stock page's Open Interest tab, an expiry-date filter at column level (like the OI tracker) and an include/exclude toggle for expired contracts, because windows over 1D can list contracts that have since expired.
+
+- **Found:** the contract table (`components/stock/tabs/OpenInterestTab.tsx`) had a toolbar-only Expiry dropdown (single date, only in "All expiries" scope) and no way to hide expired contracts. The OI tracker's tables use `DataTable`'s ⏷ header popover (date from/to).
+- **Files:** `components/oi/DataTable.tsx` (`FilterPopover` and `ColumnFilter` now exported, no behaviour change), `components/stock/tabs/OpenInterestTab.tsx`, `docs/strategy-builder.md`.
+- **Design:** the Expiry header gets the ⏷ date-range filter (shown in "All expiries" scope when more than one expiry is present), replacing the toolbar dropdown; filters are `expiryFrom` / `expiryTo`, inclusive, string-compared (no `Date` parsing). New toolbar toggle **Expired: Include | Exclude** (default Include, so nothing changes until used), with the number of expired rows in its label. Expired = expiry before today in US/Eastern (`Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' })`); an expiry of today is not expired. The toggle shows only in "All expiries" scope on a live expiry; in a historical expiry every row is expired, and in single-expiry scope all rows share one expiry. Both count in "Clear filters (n)". Client-side only; no route or SQL change. A small `min-h` keeps the popover from being clipped by the table's scroll box when few rows remain.
+- **Verified (local dev server + headless Chromium, SPY, `/opt-chain` response modified in the browser to add three rows expiring 2026-11-03, 11-04 and 11-06):** toggle label "Expired (3)"; Exclude hides them (617 of 620); Include restores 620; Expiry from 2026-11-05 hides the 11-03 row; from 11-05 to 11-06 leaves 1 row; popover fully visible; no page errors. `tsc` clean; eslint 0 errors (one existing warning in `DataTable.tsx`, not from this change).
+- **Not verified:** with real expired contracts (the live signed-out response has none, because the signed-out plan only gets monthly expiries and all 10 sampled loads were non-expired; a Pro or unrestricted account with weeklies and a 5D+ window is the real case), and on a phone-width layout.
+
+---
+
 ## 2026-11-06 — stockstrendz.com blocked by corporate web filters: categorization groundwork
 
 Reported: the new domain `stockstrendz.com` is blocked on many organization networks.

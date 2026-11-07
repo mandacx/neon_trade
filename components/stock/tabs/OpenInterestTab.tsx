@@ -10,6 +10,7 @@ import { useColumnPrefs } from '@/components/ui/useColumnPrefs';
 import type { ColumnMeta } from '@/lib/tableColumns';
 import OiTrendModal from './OiTrendModal';
 import LiveVolumeTable, { type LiveOption } from '@/components/oi/LiveVolumeTable';
+import { FilterPopover, type Column } from '@/components/oi/DataTable';
 import { useAuthContext } from '@/components/providers/AuthContextProvider';
 import { FEATURE_OI_TRACKER, hasFeature } from '@/lib/features';
 import { parseOcc } from '@/lib/occ';
@@ -61,10 +62,19 @@ type Scope = 'expiry' | 'all';
 type ChangeDir = 'all' | 'added' | 'cut';
 type Moneyness = 'all' | 'itm' | 'otm';
 interface Filters {
-  search: string; type: 'all' | 'call' | 'put'; date: string; expiry: string; dir: ChangeDir; money: Moneyness;
+  search: string; type: 'all' | 'call' | 'put'; date: string; dir: ChangeDir; money: Moneyness;
+  /** Expiry column filter: from / to (YYYY-MM-DD, inclusive), either may be empty. */
+  expiryFrom: string; expiryTo: string;
+  /** A contract is expired when its expiry is before today (US/Eastern). Windows over 1D can hold some. */
+  expired: 'include' | 'exclude';
   strikeMin: string; strikeMax: string; minChg: string; minValue: string;
 }
-const NO_FILTERS: Filters = { search: '', type: 'all', date: '', expiry: '', dir: 'all', money: 'all', strikeMin: '', strikeMax: '', minChg: '', minValue: '' };
+const NO_FILTERS: Filters = { search: '', type: 'all', date: '', dir: 'all', money: 'all', expiryFrom: '', expiryTo: '', expired: 'include', strikeMin: '', strikeMax: '', minChg: '', minValue: '' };
+
+/** Today's date in US/Eastern as YYYY-MM-DD (string compare only; never parsed as a local Date). */
+const todayET = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date());
+/** The Expiry column's filter popover is the OI tracker's date-range one. */
+const EXPIRY_COL: Column<unknown> = { key: 'expiry', label: 'Expiry', type: 'date', value: () => null };
 
 function OptChainSortLabel({ label, active, dir, onClick, align = 'right' }: {
   label: string; active: boolean; dir: 'asc' | 'desc'; onClick: () => void; align?: 'left' | 'right';
@@ -196,7 +206,10 @@ export default function OpenInterestTab({ symbol, selectedExpiry, expiryMode, on
   const anyLoading = one.loading || (scope === 'all' && every.loading);
 
   // Filters that point at values of the other scope / window would hide everything.
-  useEffect(() => { setF(prev => ({ ...prev, date: '', expiry: '' })); }, [scope, preset, selectedExpiry]);
+  useEffect(() => { setF(prev => ({ ...prev, date: '', expiryFrom: '', expiryTo: '' })); }, [scope, preset, selectedExpiry]);
+  const [expiryFilterOpen, setExpiryFilterOpen] = useState(false);
+  // In a historical expiry every row is expired by definition, so the toggle only applies to live expiries.
+  const canToggleExpired = scope === 'all' && expiryMode === 'current';
 
   function handleSort(key: OptChainSortKey) {
     if (sortKey === key) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
@@ -211,13 +224,17 @@ export default function OpenInterestTab({ symbol, selectedExpiry, expiryMode, on
     const num = (s: string) => (s.trim() === '' ? null : Number(s));
     const sMin = num(f.strikeMin), sMax = num(f.strikeMax), minChg = num(f.minChg), minValue = num(f.minValue);
     const dir = sortDir === 'asc' ? 1 : -1;
+    const today = todayET();
+    const hideExpired = canToggleExpired && f.expired === 'exclude';
     return tableRows
       // Notional $ value of the OI change: contracts changed * premium * 100 shares/contract.
       .map(r => ({ ...r, expiry: r.expiry ?? selectedExpiry, chgOpenIntPrice: r.oiChg * r.ltp * 100 }))
       .filter(r => {
         if (f.type !== 'all' && r.optType !== f.type) return false;
         if (f.date && (r.tradeDate ?? r.loadDate) !== f.date) return false;
-        if (f.expiry && r.expiry !== f.expiry) return false;
+        if (f.expiryFrom && r.expiry < f.expiryFrom) return false;
+        if (f.expiryTo && r.expiry > f.expiryTo) return false;
+        if (hideExpired && r.expiry < today) return false;
         if (f.dir === 'added' && r.oiChg <= 0) return false;
         if (f.dir === 'cut' && r.oiChg >= 0) return false;
         if (f.money !== 'all') {
@@ -241,8 +258,10 @@ export default function OpenInterestTab({ symbol, selectedExpiry, expiryMode, on
         if (typeof av === 'string' && typeof bv === 'string') return av.localeCompare(bv) * dir;
         return ((av as number) - (bv as number)) * dir;
       });
-  }, [tableRows, f, sortKey, sortDir, selectedExpiry]);
+  }, [tableRows, f, sortKey, sortDir, selectedExpiry, canToggleExpired]);
   const activeFilters = (Object.keys(NO_FILTERS) as (keyof Filters)[]).filter(k => f[k] !== NO_FILTERS[k]).length;
+  const expiredCount = useMemo(() => { const t = todayET(); return tableRows.filter(r => (r.expiry ?? selectedExpiry) < t).length; }, [tableRows, selectedExpiry]);
+  const expiryFilterActive = !!(f.expiryFrom || f.expiryTo);
 
   // OI change summed per strike over the window (selected expiry only), with the latest reported OI.
   // The report only lists contracts whose OI moved, so "latest OI" is the last load the contract appeared in.
@@ -422,12 +441,16 @@ export default function OpenInterestTab({ symbol, selectedExpiry, expiryMode, on
                 </select>
               </Field>
             )}
-            {scope === 'all' && expiries.length > 1 && (
-              <Field label="Expiry">
-                <select value={f.expiry} onChange={e => setFilter('expiry', e.target.value)} className={inputCls}>
-                  <option value="">All</option>
-                  {expiries.map(d => <option key={d} value={d}>{d}</option>)}
-                </select>
+            {canToggleExpired && (
+              <Field label={<span title="Contracts whose expiry is before today (US/Eastern). A window longer than 1D can include contracts that have since expired.">Expired{expiredCount > 0 ? ` (${expiredCount.toLocaleString()})` : ''}</span>}>
+                <div className="flex gap-1 bg-gray-100 p-0.5 rounded-md" role="group" aria-label="Expired contracts">
+                  {(['include', 'exclude'] as const).map(v => (
+                    <button key={v} type="button" onClick={() => setFilter('expired', v)} aria-pressed={f.expired === v}
+                      className={`px-2 py-0.5 rounded text-xs font-semibold transition-colors ${f.expired === v ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500'}`}>
+                      {v === 'include' ? 'Include' : 'Exclude'}
+                    </button>
+                  ))}
+                </div>
               </Field>
             )}
             <Field label="Strike">
@@ -455,13 +478,23 @@ export default function OpenInterestTab({ symbol, selectedExpiry, expiryMode, on
               {table.loading || !table.data ? 'Loading…' : `No OI changes reported${scope === 'expiry' ? ` for expiry ${selectedExpiry}` : ''} in this window.`}
             </div>
           ) : (
-            <div className={`overflow-auto max-h-[70vh] ${ocCols.hideUntilReady}`}>
+            <div className={`overflow-auto max-h-[70vh] ${expiryFilterOpen ? 'min-h-[15rem]' : ''} ${ocCols.hideUntilReady}`}>
               <table className="w-full text-xs whitespace-nowrap">
                 <thead className="[&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-white [&_th]:shadow-[inset_0_-1px_0_0_#e5e7eb]">
                   <ColRow layout={ocCols.layout} header className="text-gray-500 align-bottom">
                     <th data-col="symbol" className="sticky text-left py-1.5 pr-2 font-medium">Symbol</th>
                     {oc('expiry') && (<th data-col="expiry" className="sticky text-left py-1.5 px-1.5 font-medium">
-                      <OptChainSortLabel label="Expiry" align="left" active={sortKey === 'expiry'} dir={sortDir} onClick={() => handleSort('expiry')} />
+                      <div className="relative flex items-center gap-1">
+                        <OptChainSortLabel label="Expiry" align="left" active={sortKey === 'expiry'} dir={sortDir} onClick={() => handleSort('expiry')} />
+                        {scope === 'all' && expiries.length > 1 && (
+                          <button type="button" onClick={e => { e.stopPropagation(); setExpiryFilterOpen(o => !o); }} aria-label="Filter Expiry"
+                            className={`px-0.5 ${expiryFilterActive ? 'text-blue-600' : 'text-gray-300 hover:text-gray-600'}`}>⏷</button>
+                        )}
+                        {expiryFilterOpen && (
+                          <FilterPopover col={EXPIRY_COL} filter={{ from: f.expiryFrom, to: f.expiryTo }} onClose={() => setExpiryFilterOpen(false)}
+                            onChange={nf => setF(prev => ({ ...prev, expiryFrom: nf.from ?? '', expiryTo: nf.to ?? '' }))} />
+                        )}
+                      </div>
                     </th>)}
                     {oc('loadDate') && (<th data-col="loadDate" className="sticky text-left py-1.5 px-1.5 font-medium">
                       <OptChainSortLabel label="Trade Date" align="left" active={sortKey === 'loadDate'} dir={sortDir} onClick={() => handleSort('loadDate')} />

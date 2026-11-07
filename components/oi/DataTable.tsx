@@ -65,7 +65,9 @@ function csvCell(v: unknown): string {
 
 const inputCls = 'w-full px-2 py-1 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-400';
 
-function FilterPopover<T>({ col, filter, onChange, onClose }: { col: Column<T>; filter: Filter; onChange: (f: Filter) => void; onClose: () => void }) {
+export type ColumnFilter = Filter;
+/** The ⏷ popover of a column header; exported so other tables (the stock page's Open Interest tab) share it. */
+export function FilterPopover<T>({ col, filter, onChange, onClose }: { col: Column<T>; filter: Filter; onChange: (f: Filter) => void; onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const onDown = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) onClose(); };

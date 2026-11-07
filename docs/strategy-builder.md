@@ -17,6 +17,7 @@ The maths is a TypeScript port of the `options-alert-lab` payoff lab
 | Strategy Builder (`builder`) | the same component with `mode="builder"`: chain on the left third (mirrored, sides scroll together, bid/ask add legs), builder on the right with a hover explainer (`StrategyInfo`) | `/api/stocks/[symbol]/chain` (each tab fetches its own copy when first opened; the route's 15 s cache absorbs it) |
 | Earnings (`earnings`) | `EarningsHistoryTable` | `/earnings` (already fetched for the chart markers) |
 
+- **Open Interest contract table filters (2026-11-07).** In "All expiries" scope the Expiry header has a ⏷ date-range filter (the OI tracker's `FilterPopover`, exported from `components/oi/DataTable.tsx`), replacing the old toolbar dropdown. An **Expired Include / Exclude** toggle sits in the toolbar (default Include; it shows the count of expired rows). Expired = expiry before today in US/Eastern (`todayET()`); it is client-side only, no route change. It is hidden in a historical expiry (every row is expired there) and in single-expiry scope. They only matter for windows over 1D, which can hold contracts that have since expired.
 - **Lazy loading.** A tab mounts, and fetches, the first time it is opened, then stays mounted (`hidden`).
   - Opening a stock no longer requests `/opt-chain`.
   - The Price Levels fetch is gated on the tab having been visited, and it is the default tab.
