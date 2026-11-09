@@ -41,7 +41,7 @@ export const FEATURE_STANDARD_EXPIRY_ONLY = 'standard_expiry_only';
 /**
  * A stricter *restriction* than the one above: only quarterly expiries (3rd Friday of
  * Mar/Jun/Sep/Dec) plus the January expiry of every year (the LEAPS month). Wins when a user
- * has both codes. Used by the "Long investors" plan (LONG_INVESTORS).
+ * has both codes. Used by the "Self learners" plan (LONG_INVESTORS).
  */
 export const FEATURE_QUARTERLY_EXPIRY_ONLY = 'quarterly_expiry_only';
 /** Trade Ideas Desk, short-term ideas (horizons intraday + swing; lib/ideas.ts, docs/trade-ideas.md). */
@@ -57,7 +57,7 @@ export const FEATURE_PUBLISH_IDEAS = 'publish_ideas';
 /** Display name for a plan code (matches `nt_plans.name`; EXPERT is shown as "Pro Plus"). */
 export function planLabel(planCode: string): string {
   if (planCode === 'EXPERT') return 'Pro Plus';
-  if (planCode === 'LONG_INVESTORS') return 'Long investors';
+  if (planCode === 'LONG_INVESTORS') return 'Self learners';
   if (planCode === 'SHORT_TERM') return 'Short term';
   if (planCode === 'LONG_TERM') return 'Long term';
   if (planCode === 'PLATINUM') return 'Platinum';

@@ -39,7 +39,7 @@ const PLAN_TAGS: Record<string, { label: string; cls: string }> = {
   FREE: { label: 'Free', cls: 'bg-gray-200 text-gray-700 ring-gray-400' },
   PRO: { label: 'Pro', cls: 'bg-amber-400 text-amber-950 ring-amber-600' },
   EXPERT: { label: 'Pro Plus', cls: 'bg-purple-600 text-white ring-purple-800' },
-  LONG_INVESTORS: { label: 'Long investors', cls: 'bg-teal-600 text-white ring-teal-800' },
+  LONG_INVESTORS: { label: 'Self learners', cls: 'bg-teal-600 text-white ring-teal-800' },
   SHORT_TERM: { label: 'Short term', cls: 'bg-sky-500 text-white ring-sky-700' },
   LONG_TERM: { label: 'Long term', cls: 'bg-emerald-600 text-white ring-emerald-800' },
   PLATINUM: { label: 'Platinum', cls: 'bg-slate-800 text-slate-100 ring-slate-500' },

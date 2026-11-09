@@ -32,6 +32,12 @@ export async function updatePlanFeatures(planId: number, features: string[]): Pr
   await sql`UPDATE public.nt_plans SET features = ${JSON.stringify(features)}::jsonb WHERE id = ${planId}`;
 }
 
+/** Show or hide a plan on the public /upgrade page. Holders keep their access; this only changes the listing. */
+export async function setPlanActive(planId: number, isActive: boolean): Promise<boolean> {
+  const rows = await sql`UPDATE public.nt_plans SET is_active = ${isActive} WHERE id = ${planId} RETURNING id`;
+  return rows.length > 0;
+}
+
 export interface AdminUserSummary {
   id: string;
   email: string;

@@ -71,7 +71,7 @@ New feature codes (`lib/features.ts`, shown in `/admin/plans` as checkboxes like
 | `levels`, `quadrant`, `watchlists`, `earnings`, `us_market_scanner`, `stock_analysis` | on | on | on |
 | `scan_alerts_latest`, `scan_alerts_history`, `telegram_alerts` | on | off | on |
 | `oi_tracker` | off | on | on |
-| `quarterly_expiry_only` (restriction) | off | **on** (like "Long investors") | off |
+| `quarterly_expiry_only` (restriction) | off | **on** (like "Self learners", code `LONG_INVESTORS`) | off |
 | `option_chain`, `strategy_builder`, options-for-ideas | off | off | off (later) |
 | `performance`, `crypto_levels` | off | off | off (Pro does not have `performance` live either) |
 

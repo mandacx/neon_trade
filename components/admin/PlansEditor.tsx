@@ -19,6 +19,30 @@ export default function PlansEditor({ plans, allFeatures }: { plans: AdminPlan[]
     });
   }
 
+  const [live, setLive] = useState<Record<number, boolean>>(() => Object.fromEntries(plans.map(p => [p.id, p.is_active])));
+  const [liveBusy, setLiveBusy] = useState<number | null>(null);
+  const [liveError, setLiveError] = useState<number | null>(null);
+
+  /** Listed on /upgrade or not. Saves immediately; plan holders keep their access either way. */
+  async function setListed(planId: number, isActive: boolean) {
+    setLiveBusy(planId);
+    setLiveError(null);
+    try {
+      const res = await fetch(`/api/admin/plans/${planId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isActive }),
+      });
+      const json = await res.json();
+      if (json.success) setLive(prev => ({ ...prev, [planId]: isActive }));
+      else setLiveError(planId);
+    } catch {
+      setLiveError(planId);
+    } finally {
+      setLiveBusy(null);
+    }
+  }
+
   async function save(planId: number) {
     setSaving(planId);
     try {
@@ -41,6 +65,26 @@ export default function PlansEditor({ plans, allFeatures }: { plans: AdminPlan[]
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-bold text-gray-900">{plan.name}</h3>
             <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">{plan.code}</span>
+          </div>
+          <div className="flex items-center justify-between gap-2 mb-3 rounded-lg bg-gray-50 border border-gray-200 px-3 py-2">
+            <div className="min-w-0">
+              <p className={`text-xs font-semibold ${live[plan.id] ? 'text-green-700' : 'text-gray-500'}`}>
+                {live[plan.id] ? 'Live on /upgrade' : 'Not listed on /upgrade'}
+              </p>
+              <p className="text-[10px] text-gray-400">Current holders keep access either way.</p>
+              {liveError === plan.id && <p className="text-[10px] text-red-600">Could not update, try again.</p>}
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={live[plan.id] ?? false}
+              aria-label={`List ${plan.name} on the upgrade page`}
+              disabled={liveBusy === plan.id}
+              onClick={() => setListed(plan.id, !live[plan.id])}
+              className={`relative h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-50 ${live[plan.id] ? 'bg-green-600' : 'bg-gray-300'}`}
+            >
+              <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${live[plan.id] ? 'left-[18px]' : 'left-0.5'}`} />
+            </button>
           </div>
           <div className="space-y-1.5">
             {allFeatures.map(f => (

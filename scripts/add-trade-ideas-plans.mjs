@@ -25,7 +25,7 @@ const LONG_TOOLS = [
 const unique = (a) => [...new Set(a)];
 
 const PLANS = [
-  // Long-term holders only need quarterly + January expiries (same restriction as "Long investors").
+  // Long-term holders only need quarterly + January expiries (same restriction as "Self learners").
   { code: 'SHORT_TERM', name: 'Short term', sort: 30, features: unique([...SHORT_TOOLS, 'ideas_short_term']) },
   { code: 'LONG_TERM', name: 'Long term', sort: 40, features: unique([...LONG_TOOLS, 'ideas_long_term', 'quarterly_expiry_only']) },
   // Platinum = both idea terms and the union of both tool sets, with no expiry restriction.

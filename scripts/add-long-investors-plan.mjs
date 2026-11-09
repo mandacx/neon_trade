@@ -1,4 +1,4 @@
-// Create the "Long investors" plan (code LONG_INVESTORS). It has the same features as the live PRO
+// Create the "Self learners" plan (renamed from "Long investors" 2026-11-09) (code LONG_INVESTORS). It has the same features as the live PRO
 // plan plus `quarterly_expiry_only` (lib/features.ts: only quarterly + January expiries, no weeklies
 // or other monthlies). Insert-only: never touches an existing LONG_INVESTORS row, so it is safe to
 // re-run. Users are moved onto it afterwards from /admin/users.
@@ -11,7 +11,7 @@
 import { neon } from '@neondatabase/serverless';
 
 const CODE = 'LONG_INVESTORS';
-const NAME = 'Long investors';
+const NAME = 'Self learners';
 const SORT_ORDER = 15; // between Pro (10) and Pro Plus (20)
 const RESTRICTION = 'quarterly_expiry_only';
 // A user on a stricter plan should not also carry the looser restriction.
