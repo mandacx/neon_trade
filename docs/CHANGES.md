@@ -2562,3 +2562,9 @@ per-user behavior panel and delete user.
 - **What changed:** `app/upgrade/page.tsx`. Each plan card used to list every feature with a tick or a dash; it now lists only the features the plan has. Restrictions (`standard_expiry_only`, `quarterly_expiry_only`) show their positive label ("Weekly expiries", ...) only when the plan is *not* restricted, as before; a restricted plan simply omits the line. `publish_ideas` (analyst permission) is never shown.
 - **Verified:** `npx tsc --noEmit` clean, eslint on the file. **Not verified:** the page in a browser.
 - **Follow-up:** a plan with a quarterly-only restriction no longer says so on this page; add a note line if that should be visible to buyers.
+
+## 2026-11-09 — Guide page: Trade ideas (Short term, Long term, Platinum) write-up
+
+- **What changed:** `app/guide/page.tsx`: new section `#trade-ideas` after "Free vs. Pro": what an idea is, the three plans by horizon (Short term = intraday + swing, Long term = positional + long term, Platinum = both), how to read an idea, how results are scored (worst-fill entry, stop first, R-multiples, open ideas excluded), alert channels, "I took this", a short risk note. Source for every statement: `docs/trade-ideas.md`, `lib/ideaTypes.ts` (horizon descriptions), `app/ideas/page.tsx` (reward : risk shown), `components/ideas/IdeasFrame.tsx` (Alerts menu).
+- **Design:** the text does not list each plan's other tools (levels, OI, scanners...); those are admin-editable at /admin/plans, so it points to /upgrade instead of going stale.
+- **Verified:** `npx tsc --noEmit` clean, eslint on the file. **Not verified:** the page in a browser (layout at phone width).

@@ -110,6 +110,74 @@ export default function GuidePage() {
             </p>
           </section>
 
+          <section id="trade-ideas" className="mt-5 bg-white rounded-xl border border-gray-200 p-5">
+            <h2 className="text-sm font-bold text-gray-900 mb-1">Trade ideas: Short term, Long term and Platinum</h2>
+            <p className="text-xs text-gray-600 leading-relaxed">
+              The <Link href="/ideas" className="text-blue-600 hover:underline font-semibold">Trade Ideas</Link> desk publishes
+              structured calls: a symbol and direction, an <strong>entry zone</strong>, a ladder of <strong>targets</strong>, a
+              <strong> stop</strong>, a time horizon and the reasoning behind it. An idea is a published thesis and a plan,
+              not a recommendation made for you personally, and nothing is traded on your behalf.
+            </p>
+
+            <div className="grid sm:grid-cols-3 gap-3 mt-4">
+              <div className="rounded-lg border border-gray-200 p-3">
+                <h3 className="text-xs font-bold text-gray-900">Short term</h3>
+                <p className="text-[11px] text-gray-600 leading-relaxed mt-1">
+                  <strong>Intraday</strong> (opened and closed within a day or two) and <strong>swing</strong> ideas
+                  (days to a few weeks). For people who trade actively and want the next setup.
+                </p>
+              </div>
+              <div className="rounded-lg border border-gray-200 p-3">
+                <h3 className="text-xs font-bold text-gray-900">Long term</h3>
+                <p className="text-[11px] text-gray-600 leading-relaxed mt-1">
+                  <strong>Positional</strong> (weeks to a few months) and <strong>long-term</strong> ideas (months to
+                  years). For people who hold through the noise and check in less often.
+                </p>
+              </div>
+              <div className="rounded-lg border border-gray-200 p-3">
+                <h3 className="text-xs font-bold text-gray-900">Platinum</h3>
+                <p className="text-[11px] text-gray-600 leading-relaxed mt-1">
+                  Everything in both: the short term and the long term ideas, in one plan.
+                </p>
+              </div>
+            </div>
+            <p className="text-[11px] text-gray-400 mt-2">
+              Which other tools each plan includes (price levels, open interest, scanners, quadrant and so on) is
+              shown on the <Link href="/upgrade" className="text-blue-600 hover:underline font-semibold">Plans</Link> page.
+              Ideas outside your plan are not shown; the board only tells you how many are locked.
+            </p>
+
+            <h3 className="text-xs font-bold text-gray-900 mt-5 mb-1.5">Reading an idea</h3>
+            <ul className="space-y-2 text-xs text-gray-600 leading-relaxed list-disc list-inside">
+              <li><strong className="text-gray-700">Entry zone.</strong> The price range the idea expects to be entered in. If price runs to the first target, or through the stop, without ever touching the zone, the idea is recorded as <em>not triggered</em>, never as a win.</li>
+              <li><strong className="text-gray-700">Targets and stop.</strong> The position is split equally across the targets, and the stop is the level where the idea is wrong. The original entry, targets and stop are what get scored.</li>
+              <li><strong className="text-gray-700">Published ideas don&apos;t change.</strong> Once live, the plan can&apos;t be edited. Anything new (a note, a moved stop, a partial profit, an early close) is added to a dated timeline on the idea and alerted, so the record can&apos;t be rewritten after the fact.</li>
+              <li><strong className="text-gray-700">Risk rating and reward : risk.</strong> Each idea shows how risky the desk judges it to be and the reward-to-risk ratio of its own plan.</li>
+            </ul>
+
+            <h3 className="text-xs font-bold text-gray-900 mt-5 mb-1.5">How results are scored</h3>
+            <p className="text-xs text-gray-600 leading-relaxed">
+              Results come from the daily price bars, never from anyone&apos;s say-so, and the rules lean against flattering the desk:
+            </p>
+            <ul className="space-y-2 text-xs text-gray-600 leading-relaxed list-disc list-inside mt-2">
+              <li>Entry is taken at the <strong>worst price in the zone</strong>, not the best.</li>
+              <li>When one daily bar touches both the stop and a target, <strong>the stop counts first</strong>. A gap through the stop fills at the open, which is worse than the stop.</li>
+              <li>Results are shown as <strong>R-multiples</strong> (profit divided by the risk to the stop), so a ten-dollar stock and a thousand-dollar stock compare fairly. Ideas that are still open show an unrealised figure and are left out of the desk statistics.</li>
+              <li>The <Link href="/ideas/performance" className="text-blue-600 hover:underline font-semibold">Performance</Link> page shows hit rate, average R and the other desk statistics together with what they cover. Intraday ideas are also scored on daily bars, so treat their results as approximate.</li>
+            </ul>
+
+            <h3 className="text-xs font-bold text-gray-900 mt-5 mb-1.5">Alerts and your own trades</h3>
+            <ul className="space-y-2 text-xs text-gray-600 leading-relaxed list-disc list-inside">
+              <li><strong className="text-gray-700">In-app feed</strong> is always on for the ideas in your plan. <strong className="text-gray-700">Email</strong>, <strong className="text-gray-700">Telegram</strong> and <strong className="text-gray-700">browser push</strong> are opt-in from the Alerts menu on the Trade Ideas page. Telegram also needs your chat linked in your profile and a plan that includes Telegram alerts.</li>
+              <li><strong className="text-gray-700">I took this.</strong> If you act on an idea, record your own quantity and price. It is a private journal: nothing is sent to a broker. <em>My trades</em> then shows your result next to the desk&apos;s, and how ideas you followed compare with ones you didn&apos;t.</li>
+            </ul>
+
+            <p className="text-[11px] text-gray-500 leading-relaxed mt-4 bg-amber-50/60 border border-amber-200 rounded-lg px-3 py-2">
+              Trade ideas are information, not personal advice. Entries may not fill, stops can slip in fast markets, and
+              past results do not predict future ones. You are responsible for your own decisions and for how much you risk.
+            </p>
+          </section>
+
           <footer className="mt-10 pt-4 border-t border-gray-200 text-[10px] text-gray-400 leading-relaxed">
             <strong>Disclaimer:</strong> This page is for educational and informational purposes only and does not
             constitute investment advice, a recommendation, or a solicitation to buy or sell any security or
