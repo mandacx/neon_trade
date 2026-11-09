@@ -13,6 +13,7 @@
   "dependencies": {
     "@neondatabase/auth": "^0.4.2-beta",
     "@neondatabase/serverless": "^0.10.4",
+    "@types/web-push": "^3.6.4",
     "@vercel/analytics": "^2.0.1",
     "axios": "^1.7.9",
     "clsx": "^2.1.1",
@@ -23,6 +24,7 @@
     "react-dom": "^19.0.0",
     "recharts": "^2.15.0",
     "tailwind-merge": "^2.6.0",
+    "web-push": "^4.0.0",
     "zustand": "^5.0.2"
   },
   "devDependencies": {

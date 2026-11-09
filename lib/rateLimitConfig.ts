@@ -66,6 +66,14 @@ export const LIMITERS: LimiterDef[] = [
     standard: 30,
     entitled: null,
   },
+  {
+    name: 'ideas',
+    label: 'Trade Ideas requests',
+    description: 'Board, idea pages, feed and performance on the Trade Ideas Desk (plan-gated, so one tier).',
+    windowSeconds: 60,
+    standard: 90,
+    entitled: null,
+  },
 ];
 
 export const RATE_LIMITS_KEY = 'rate_limits';

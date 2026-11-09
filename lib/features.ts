@@ -44,11 +44,23 @@ export const FEATURE_STANDARD_EXPIRY_ONLY = 'standard_expiry_only';
  * has both codes. Used by the "Long investors" plan (LONG_INVESTORS).
  */
 export const FEATURE_QUARTERLY_EXPIRY_ONLY = 'quarterly_expiry_only';
+/** Trade Ideas Desk, short-term ideas (horizons intraday + swing; lib/ideas.ts, docs/trade-ideas.md). */
+export const FEATURE_IDEAS_SHORT_TERM = 'ideas_short_term';
+/** Trade Ideas Desk, long-term ideas (horizons positional + long_term). */
+export const FEATURE_IDEAS_LONG_TERM = 'ideas_long_term';
+/**
+ * Who may publish ideas is an entitlement, not a role check (docs/trade-ideas.md). Admins always may.
+ * Not part of any plan: grant it to an analyst with a per-user override in /admin/users.
+ */
+export const FEATURE_PUBLISH_IDEAS = 'publish_ideas';
 
 /** Display name for a plan code (matches `nt_plans.name`; EXPERT is shown as "Pro Plus"). */
 export function planLabel(planCode: string): string {
   if (planCode === 'EXPERT') return 'Pro Plus';
   if (planCode === 'LONG_INVESTORS') return 'Long investors';
+  if (planCode === 'SHORT_TERM') return 'Short term';
+  if (planCode === 'LONG_TERM') return 'Long term';
+  if (planCode === 'PLATINUM') return 'Platinum';
   return planCode.charAt(0).toUpperCase() + planCode.slice(1).toLowerCase();
 }
 
@@ -76,6 +88,9 @@ export const ALL_FEATURES: Array<{ code: string; label: string; restriction?: bo
   { code: FEATURE_OPTION_CHAIN, label: 'Live Option Chain' },
   { code: FEATURE_STRATEGY_BUILDER, label: 'Option Strategy Builder (separate tab; does not include the Option Chain tab)' },
   { code: FEATURE_CRYPTO_LEVELS, label: 'Crypto Price Levels' },
+  { code: FEATURE_IDEAS_SHORT_TERM, label: 'Trade Ideas: short term (intraday & swing)' },
+  { code: FEATURE_IDEAS_LONG_TERM, label: 'Trade Ideas: long term (positional & long-term)' },
+  { code: FEATURE_PUBLISH_IDEAS, label: 'Publish trade ideas (analysts; admins always can; not for subscriber plans)' },
   { code: FEATURE_STANDARD_EXPIRY_ONLY, label: 'Monthly & quarterly expiries only (no weeklies)', restriction: true, allowedLabel: 'Weekly expiries' },
   { code: FEATURE_QUARTERLY_EXPIRY_ONLY, label: 'Quarterly & January expiries only (no weeklies or other monthlies)', restriction: true, allowedLabel: 'Weekly & other monthly expiries' },
 ];

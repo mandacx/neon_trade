@@ -45,5 +45,6 @@ export const config = {
     '/earnings/:path*',
     '/oi-tracker/:path*',
     '/scanner/:path*',
+    '/ideas/:path*',
   ],
 };

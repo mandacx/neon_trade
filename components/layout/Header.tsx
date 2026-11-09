@@ -11,6 +11,7 @@ import IndicesStrip from '@/components/layout/IndicesStrip';
 import {
   hasFeature, planLabel, FEATURE_QUADRANT, FEATURE_SCAN_ALERTS_LATEST, FEATURE_SCAN_ALERTS_HISTORY,
   FEATURE_WATCHLISTS, FEATURE_PERFORMANCE, FEATURE_EARNINGS, FEATURE_OI_TRACKER, FEATURE_US_MARKET_SCANNER, FEATURE_CRYPTO_LEVELS,
+  FEATURE_IDEAS_SHORT_TERM, FEATURE_IDEAS_LONG_TERM,
 } from '@/lib/features';
 
 // Small "needs upgrade" flag for nav entries — shown before a click, not just
@@ -39,6 +40,9 @@ const PLAN_TAGS: Record<string, { label: string; cls: string }> = {
   PRO: { label: 'Pro', cls: 'bg-amber-400 text-amber-950 ring-amber-600' },
   EXPERT: { label: 'Pro Plus', cls: 'bg-purple-600 text-white ring-purple-800' },
   LONG_INVESTORS: { label: 'Long investors', cls: 'bg-teal-600 text-white ring-teal-800' },
+  SHORT_TERM: { label: 'Short term', cls: 'bg-sky-500 text-white ring-sky-700' },
+  LONG_TERM: { label: 'Long term', cls: 'bg-emerald-600 text-white ring-emerald-800' },
+  PLATINUM: { label: 'Platinum', cls: 'bg-slate-800 text-slate-100 ring-slate-500' },
 };
 
 function planTag(planCode: string) {
@@ -71,6 +75,7 @@ export default function Header() {
   const needsOiTracker = !hasFeature(authCtx.features, FEATURE_OI_TRACKER);
   const needsScanner = !hasFeature(authCtx.features, FEATURE_US_MARKET_SCANNER);
   const needsCrypto = !hasFeature(authCtx.features, FEATURE_CRYPTO_LEVELS);
+  const needsIdeas = !hasFeature(authCtx.features, FEATURE_IDEAS_SHORT_TERM) && !hasFeature(authCtx.features, FEATURE_IDEAS_LONG_TERM);
 
   useEffect(() => {
     function onClickOutside(e: MouseEvent) {
@@ -206,7 +211,7 @@ export default function Header() {
               <button
                 onClick={() => setTrackersMenuOpen(v => !v)}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                  pathname?.startsWith('/earnings') || pathname?.startsWith('/oi-tracker') || pathname?.startsWith('/scanner') || pathname?.startsWith('/crypto') ? 'bg-indigo-700 text-white' : 'bg-indigo-600 text-white hover:bg-indigo-700'
+                  pathname?.startsWith('/earnings') || pathname?.startsWith('/oi-tracker') || pathname?.startsWith('/scanner') || pathname?.startsWith('/crypto') || pathname?.startsWith('/ideas') ? 'bg-indigo-700 text-white' : 'bg-indigo-600 text-white hover:bg-indigo-700'
                 }`}
               >
                 📊 Trackers
@@ -217,8 +222,17 @@ export default function Header() {
               {trackersMenuOpen && (
                 <div className="absolute right-0 mt-1 w-48 bg-white rounded-lg shadow-lg border border-gray-200 overflow-hidden z-30">
                   <button
-                    onClick={() => { setTrackersMenuOpen(false); router.push('/earnings'); }}
+                    onClick={() => { setTrackersMenuOpen(false); router.push('/ideas'); }}
                     className={`w-full text-left px-3 py-2 text-xs font-medium hover:bg-indigo-50 ${
+                      pathname?.startsWith('/ideas') ? 'text-indigo-700 bg-indigo-50' : 'text-gray-700'
+                    }`}
+                  >
+                    💡 Trade Ideas
+                    {needsIdeas && <MobileProBadge />}
+                  </button>
+                  <button
+                    onClick={() => { setTrackersMenuOpen(false); router.push('/earnings'); }}
+                    className={`w-full text-left px-3 py-2 text-xs font-medium hover:bg-indigo-50 border-t border-gray-100 ${
                       pathname?.startsWith('/earnings') ? 'text-indigo-700 bg-indigo-50' : 'text-gray-700'
                     }`}
                   >
@@ -397,6 +411,13 @@ export default function Header() {
               🏆 Performance
             </button>
           )}
+          <button
+            onClick={() => router.push('/ideas')}
+            className="w-full text-left px-3 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-50 rounded-lg"
+          >
+            💡 Trade Ideas
+            {needsIdeas && <MobileProBadge />}
+          </button>
           <button
             onClick={() => router.push('/earnings')}
             className="w-full text-left px-3 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-50 rounded-lg"

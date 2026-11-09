@@ -47,7 +47,17 @@ export default defineRailway(() => {
     env: { CRON_SECRET: "${{market-catalog-cron.CRON_SECRET}}" },
   });
 
+  // Trade Ideas tracker (lib/ideas.ts, docs/trade-ideas.md): re-scores live ideas against the daily bars and sends
+  // opted-in email alerts. Idempotent and cheap, so it runs every 30 min around the clock (daily bars are final
+  // after the close; the route only ever uses complete sessions). Defined here, NOT yet applied.
+  const ideasCron = service("ideas-cron", {
+    build: { buildEnvironment: "V3", builder: "DOCKERFILE", dockerfilePath: "Dockerfile" },
+    replicas: { "us-west2": 1 },
+    deploy: { cronSchedule: "*/30 * * * *", restartPolicyType: "NEVER" },
+    env: { CRON_SECRET: "${{market-catalog-cron.CRON_SECRET}}" },
+  });
+
   return project("neon-trade-crons", {
-    resources: [marketCatalogCron, telegramAlertsCron, earningsCron, usUniverseCron, usUniverseMetaCron],
+    resources: [marketCatalogCron, telegramAlertsCron, earningsCron, usUniverseCron, usUniverseMetaCron, ideasCron],
   });
 });
