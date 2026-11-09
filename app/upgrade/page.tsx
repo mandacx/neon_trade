@@ -3,7 +3,7 @@ import Header from '@/components/layout/Header';
 import TrialStartButton from '@/components/upgrade/TrialStartButton';
 import { sql } from '@/lib/db';
 import { getCurrentUserContext } from '@/lib/appUsers';
-import { ALL_FEATURES } from '@/lib/features';
+import { ALL_FEATURES, FEATURE_PUBLISH_IDEAS } from '@/lib/features';
 import { LEVEL_DELAY_DAYS } from '@/lib/levelAccess';
 import { formatCTDate } from '@/lib/time';
 
@@ -79,16 +79,16 @@ export default async function UpgradePage({ searchParams }: { searchParams: Prom
                   )}
                   <h2 className="text-base font-bold text-gray-900">{plan.name}</h2>
 
+                  {/* Only what the plan includes. A restriction (e.g. no weeklies) counts as included
+                      when the plan does NOT have it, and is then shown by its positive label.
+                      "Publish trade ideas" is an analyst permission, never part of what a plan sells. */}
                   <ul className="mt-3 space-y-1 text-xs">
-                    {ALL_FEATURES.map(f => {
-                      const on = f.restriction ? !plan.features.includes(f.code) : plan.features.includes(f.code);
-                      return (
-                        <li key={f.code} className="flex items-start gap-2">
-                          <span className={on ? 'text-green-600' : 'text-gray-300'}>{on ? '✓' : '–'}</span>
-                          <span className={on ? 'text-gray-700' : 'text-gray-400'}>{f.restriction ? (f.allowedLabel ?? f.label) : f.label}</span>
-                        </li>
-                      );
-                    })}
+                    {ALL_FEATURES.filter(f => f.code !== FEATURE_PUBLISH_IDEAS && (f.restriction ? !plan.features.includes(f.code) : plan.features.includes(f.code))).map(f => (
+                      <li key={f.code} className="flex items-start gap-2">
+                        <span className="text-green-600">✓</span>
+                        <span className="text-gray-700">{f.restriction ? (f.allowedLabel ?? f.label) : f.label}</span>
+                      </li>
+                    ))}
                   </ul>
 
                   {!isCurrent && (

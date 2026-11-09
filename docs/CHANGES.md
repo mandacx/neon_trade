@@ -2556,3 +2556,9 @@ per-user behavior panel and delete user.
 
 - **What changed:** display name only. `nt_plans.name` for code `LONG_INVESTORS` (live DB, one row updated), `lib/features.ts` (`planLabel`), `components/layout/Header.tsx` (plan tag), `scripts/add-long-investors-plan.mjs` (`NAME`), `docs/trade-ideas.md`. The plan **code stays `LONG_INVESTORS`** (users, gates and scripts key on it). Older changelog entries keep the old name as history.
 - **Verified:** `npx tsc --noEmit` clean; the plan list read back from the DB shows `LONG_INVESTORS` = "Self learners", still inactive. **Not verified:** the label in the browser (needs a deploy).
+
+## 2026-11-09 — /upgrade lists only what each plan includes
+
+- **What changed:** `app/upgrade/page.tsx`. Each plan card used to list every feature with a tick or a dash; it now lists only the features the plan has. Restrictions (`standard_expiry_only`, `quarterly_expiry_only`) show their positive label ("Weekly expiries", ...) only when the plan is *not* restricted, as before; a restricted plan simply omits the line. `publish_ideas` (analyst permission) is never shown.
+- **Verified:** `npx tsc --noEmit` clean, eslint on the file. **Not verified:** the page in a browser.
+- **Follow-up:** a plan with a quarterly-only restriction no longer says so on this page; add a note line if that should be visible to buyers.
