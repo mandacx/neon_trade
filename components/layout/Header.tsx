@@ -14,26 +14,6 @@ import {
   FEATURE_IDEAS_SHORT_TERM, FEATURE_IDEAS_LONG_TERM,
 } from '@/lib/features';
 
-// Small "needs upgrade" flag for nav entries — shown before a click, not just
-// after a redirect to /upgrade, so Free users know upfront what's gated.
-function ProBadge() {
-  return (
-    <span className="text-[9px] font-bold uppercase tracking-wide px-1 py-0.5 rounded bg-white/25 leading-none">
-      PRO
-    </span>
-  );
-}
-
-// Same signal, styled for the mobile dropdown's light-background buttons
-// (ProBadge's white/25 tint needs a solid colored button to read against).
-function MobileProBadge() {
-  return (
-    <span className="ml-1.5 text-[9px] font-bold uppercase tracking-wide px-1 py-0.5 rounded bg-amber-100 text-amber-700 leading-none">
-      PRO
-    </span>
-  );
-}
-
 // Plan tag for the avatar: Free / Pro / Pro Plus (EXPERT) from the signed-in user's plan code.
 const PLAN_TAGS: Record<string, { label: string; cls: string }> = {
   FREE: { label: 'Free', cls: 'bg-gray-200 text-gray-700 ring-gray-400' },
@@ -65,17 +45,28 @@ export default function Header() {
   const isActive = (path: string) => pathname === path;
   const isScanAlertsPath = pathname?.startsWith('/scan-alerts');
 
-  const needsQuadrant = !hasFeature(authCtx.features, FEATURE_QUADRANT);
-  const needsScanAlerts = !hasFeature(authCtx.features, FEATURE_SCAN_ALERTS_LATEST) || !hasFeature(authCtx.features, FEATURE_SCAN_ALERTS_HISTORY);
-  const needsWatchlists = !hasFeature(authCtx.features, FEATURE_WATCHLISTS);
-  // Performance is hidden (not just badged) for signed-out users and for plans/users without the feature.
-  const showPerformance = authCtx.loggedIn && hasFeature(authCtx.features, FEATURE_PERFORMANCE);
+  // Menu entries the user's plan does not include are hidden, not badged. Signed-out visitors
+  // resolve to the Free plan's features, so they see what Free includes. Stock Analysis and the
+  // Guide are open to everyone (the stock page is not gated). /upgrade stays reachable through the
+  // "Plans" button, which only appears when something is hidden.
+  const has = (code: string) => hasFeature(authCtx.features, code);
+  const showQuadrant = has(FEATURE_QUADRANT);
+  const showScanLatest = has(FEATURE_SCAN_ALERTS_LATEST);
+  const showScanHistory = has(FEATURE_SCAN_ALERTS_HISTORY);
+  const showScanAlerts = showScanLatest || showScanHistory;
+  const showWatchlists = has(FEATURE_WATCHLISTS);
+  // Performance is hidden for signed-out users and for plans/users without the feature.
+  const showPerformance = authCtx.loggedIn && has(FEATURE_PERFORMANCE);
+  const showEarnings = has(FEATURE_EARNINGS);
+  const showOiTracker = has(FEATURE_OI_TRACKER);
+  const showScanner = has(FEATURE_US_MARKET_SCANNER);
+  const showCrypto = has(FEATURE_CRYPTO_LEVELS);
+  // Same rule as app/ideas/layout.tsx: at least one idea term (short or long), and signed in.
+  const showIdeas = authCtx.loggedIn && (has(FEATURE_IDEAS_SHORT_TERM) || has(FEATURE_IDEAS_LONG_TERM));
+  const showTrackers = showEarnings || showOiTracker || showScanner || showCrypto;
+  const hasHidden = !showQuadrant || !showScanAlerts || !showWatchlists || !showEarnings || !showOiTracker
+    || !showScanner || !showCrypto || !(has(FEATURE_IDEAS_SHORT_TERM) || has(FEATURE_IDEAS_LONG_TERM));
   const tag = planTag(authCtx.planCode);
-  const needsEarnings = !hasFeature(authCtx.features, FEATURE_EARNINGS);
-  const needsOiTracker = !hasFeature(authCtx.features, FEATURE_OI_TRACKER);
-  const needsScanner = !hasFeature(authCtx.features, FEATURE_US_MARKET_SCANNER);
-  const needsCrypto = !hasFeature(authCtx.features, FEATURE_CRYPTO_LEVELS);
-  const needsIdeas = !hasFeature(authCtx.features, FEATURE_IDEAS_SHORT_TERM) && !hasFeature(authCtx.features, FEATURE_IDEAS_LONG_TERM);
 
   useEffect(() => {
     function onClickOutside(e: MouseEvent) {
@@ -110,49 +101,55 @@ export default function Header() {
 
           {/* Action buttons — right */}
           <div className="hidden xl:flex items-center gap-2 shrink-0">
-            <button
-              onClick={() => router.push('/quadrant')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                isActive('/quadrant') ? 'bg-blue-700 text-white' : 'bg-blue-600 text-white hover:bg-blue-700'
-              }`}
-            >
-              📊 Quadrant Analysis
-              {needsQuadrant && <ProBadge />}
-            </button>
-            <div className="relative" ref={scanMenuRef}>
+            {showQuadrant && (
               <button
-                onClick={() => setScanMenuOpen(v => !v)}
+                onClick={() => router.push('/quadrant')}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                  isScanAlertsPath ? 'bg-purple-700 text-white' : 'bg-purple-600 text-white hover:bg-purple-700'
+                  isActive('/quadrant') ? 'bg-blue-700 text-white' : 'bg-blue-600 text-white hover:bg-blue-700'
                 }`}
               >
-                🔔 Scan Alerts
-                {needsScanAlerts && <ProBadge />}
-                <svg className={`w-3 h-3 transition-transform ${scanMenuOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
+                📊 Quadrant Analysis
               </button>
-              {scanMenuOpen && (
-                <div className="absolute right-0 mt-1 w-44 bg-white rounded-lg shadow-lg border border-gray-200 overflow-hidden z-30">
-                  <button
-                    onClick={() => { setScanMenuOpen(false); router.push('/scan-alerts/latest'); }}
-                    className={`w-full text-left px-3 py-2 text-xs font-medium hover:bg-purple-50 ${
-                      isActive('/scan-alerts/latest') ? 'text-purple-700 bg-purple-50' : 'text-gray-700'
-                    }`}
-                  >
-                    🆕 Latest
-                  </button>
-                  <button
-                    onClick={() => { setScanMenuOpen(false); router.push('/scan-alerts/historical'); }}
-                    className={`w-full text-left px-3 py-2 text-xs font-medium hover:bg-purple-50 border-t border-gray-100 ${
-                      isActive('/scan-alerts/historical') ? 'text-purple-700 bg-purple-50' : 'text-gray-700'
-                    }`}
-                  >
-                    🕓 Historical
-                  </button>
-                </div>
-              )}
-            </div>
+            )}
+            {showScanAlerts && (
+              <div className="relative" ref={scanMenuRef}>
+                <button
+                  onClick={() => setScanMenuOpen(v => !v)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                    isScanAlertsPath ? 'bg-purple-700 text-white' : 'bg-purple-600 text-white hover:bg-purple-700'
+                  }`}
+                >
+                  🔔 Scan Alerts
+                  <svg className={`w-3 h-3 transition-transform ${scanMenuOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+                {scanMenuOpen && (
+                  <div className="absolute right-0 mt-1 w-44 bg-white rounded-lg shadow-lg border border-gray-200 overflow-hidden z-30">
+                    {showScanLatest && (
+                      <button
+                        onClick={() => { setScanMenuOpen(false); router.push('/scan-alerts/latest'); }}
+                        className={`w-full text-left px-3 py-2 text-xs font-medium hover:bg-purple-50 ${
+                          isActive('/scan-alerts/latest') ? 'text-purple-700 bg-purple-50' : 'text-gray-700'
+                        }`}
+                      >
+                        🆕 Latest
+                      </button>
+                    )}
+                    {showScanHistory && (
+                      <button
+                        onClick={() => { setScanMenuOpen(false); router.push('/scan-alerts/historical'); }}
+                        className={`w-full text-left px-3 py-2 text-xs font-medium hover:bg-purple-50 ${showScanLatest ? 'border-t border-gray-100' : ''} ${
+                          isActive('/scan-alerts/historical') ? 'text-purple-700 bg-purple-50' : 'text-gray-700'
+                        }`}
+                      >
+                        🕓 Historical
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
             <button
               onClick={() => router.push('/stock/SPY')}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
@@ -161,40 +158,51 @@ export default function Header() {
             >
               📈 Stock Analysis
             </button>
-            <div className="relative" ref={watchMenuRef}>
+            {showIdeas && (
               <button
-                onClick={() => setWatchMenuOpen(v => !v)}
+                onClick={() => router.push('/ideas')}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                  pathname?.startsWith('/watchlists') ? 'bg-amber-700 text-white' : 'bg-amber-600 text-white hover:bg-amber-700'
+                  pathname?.startsWith('/ideas') ? 'bg-rose-700 text-white' : 'bg-rose-600 text-white hover:bg-rose-700'
                 }`}
               >
-                ⭐ Watchlists
-                {needsWatchlists && <ProBadge />}
-                <svg className={`w-3 h-3 transition-transform ${watchMenuOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
+                💡 Trade Ideas
               </button>
-              {watchMenuOpen && (
-                <div className="absolute right-0 mt-1 w-44 bg-white rounded-lg shadow-lg border border-gray-200 overflow-hidden z-30">
-                  <button
-                    onClick={() => { setWatchMenuOpen(false); router.push('/watchlists'); }}
-                    className={`w-full text-left px-3 py-2 text-xs font-medium hover:bg-amber-50 ${
-                      isActive('/watchlists') ? 'text-amber-700 bg-amber-50' : 'text-gray-700'
-                    }`}
-                  >
-                    📋 My Watchlists
-                  </button>
-                  <button
-                    onClick={() => { setWatchMenuOpen(false); router.push('/watchlists/view'); }}
-                    className={`w-full text-left px-3 py-2 text-xs font-medium hover:bg-amber-50 border-t border-gray-100 ${
-                      isActive('/watchlists/view') ? 'text-amber-700 bg-amber-50' : 'text-gray-700'
-                    }`}
-                  >
-                    🪟 Watchlist W Chart
-                  </button>
-                </div>
-              )}
-            </div>
+            )}
+            {showWatchlists && (
+              <div className="relative" ref={watchMenuRef}>
+                <button
+                  onClick={() => setWatchMenuOpen(v => !v)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                    pathname?.startsWith('/watchlists') ? 'bg-amber-700 text-white' : 'bg-amber-600 text-white hover:bg-amber-700'
+                  }`}
+                >
+                  ⭐ Watchlists
+                  <svg className={`w-3 h-3 transition-transform ${watchMenuOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+                {watchMenuOpen && (
+                  <div className="absolute right-0 mt-1 w-44 bg-white rounded-lg shadow-lg border border-gray-200 overflow-hidden z-30">
+                    <button
+                      onClick={() => { setWatchMenuOpen(false); router.push('/watchlists'); }}
+                      className={`w-full text-left px-3 py-2 text-xs font-medium hover:bg-amber-50 ${
+                        isActive('/watchlists') ? 'text-amber-700 bg-amber-50' : 'text-gray-700'
+                      }`}
+                    >
+                      📋 My Watchlists
+                    </button>
+                    <button
+                      onClick={() => { setWatchMenuOpen(false); router.push('/watchlists/view'); }}
+                      className={`w-full text-left px-3 py-2 text-xs font-medium hover:bg-amber-50 border-t border-gray-100 ${
+                        isActive('/watchlists/view') ? 'text-amber-700 bg-amber-50' : 'text-gray-700'
+                      }`}
+                    >
+                      🪟 Watchlist W Chart
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
             {showPerformance && (
               <button
                 onClick={() => router.push('/performance')}
@@ -205,70 +213,68 @@ export default function Header() {
                 🏆 Performance
               </button>
             )}
-            {/* Earnings + OI Tracker share one dropdown: a separate OI button overflowed the
-                nav at 1280-1366px (measured), see docs/CHANGES.md. PRO tags are on the items. */}
-            <div className="relative" ref={trackersMenuRef}>
-              <button
-                onClick={() => setTrackersMenuOpen(v => !v)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                  pathname?.startsWith('/earnings') || pathname?.startsWith('/oi-tracker') || pathname?.startsWith('/scanner') || pathname?.startsWith('/crypto') || pathname?.startsWith('/ideas') ? 'bg-indigo-700 text-white' : 'bg-indigo-600 text-white hover:bg-indigo-700'
-                }`}
-              >
-                📊 Trackers
-                <svg className={`w-3 h-3 transition-transform ${trackersMenuOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
-              {trackersMenuOpen && (
-                <div className="absolute right-0 mt-1 w-48 bg-white rounded-lg shadow-lg border border-gray-200 overflow-hidden z-30">
-                  <button
-                    onClick={() => { setTrackersMenuOpen(false); router.push('/ideas'); }}
-                    className={`w-full text-left px-3 py-2 text-xs font-medium hover:bg-indigo-50 ${
-                      pathname?.startsWith('/ideas') ? 'text-indigo-700 bg-indigo-50' : 'text-gray-700'
-                    }`}
-                  >
-                    💡 Trade Ideas
-                    {needsIdeas && <MobileProBadge />}
-                  </button>
-                  <button
-                    onClick={() => { setTrackersMenuOpen(false); router.push('/earnings'); }}
-                    className={`w-full text-left px-3 py-2 text-xs font-medium hover:bg-indigo-50 border-t border-gray-100 ${
-                      pathname?.startsWith('/earnings') ? 'text-indigo-700 bg-indigo-50' : 'text-gray-700'
-                    }`}
-                  >
-                    🗓️ Earnings
-                    {needsEarnings && <MobileProBadge />}
-                  </button>
-                  <button
-                    onClick={() => { setTrackersMenuOpen(false); router.push('/oi-tracker'); }}
-                    className={`w-full text-left px-3 py-2 text-xs font-medium hover:bg-indigo-50 border-t border-gray-100 ${
-                      pathname?.startsWith('/oi-tracker') ? 'text-indigo-700 bg-indigo-50' : 'text-gray-700'
-                    }`}
-                  >
-                    📊 Options OI Tracker
-                    {needsOiTracker && <MobileProBadge />}
-                  </button>
-                  <button
-                    onClick={() => { setTrackersMenuOpen(false); router.push('/scanner'); }}
-                    className={`w-full text-left px-3 py-2 text-xs font-medium hover:bg-indigo-50 border-t border-gray-100 ${
-                      pathname?.startsWith('/scanner') ? 'text-indigo-700 bg-indigo-50' : 'text-gray-700'
-                    }`}
-                  >
-                    🔎 US Market Scanner
-                    {needsScanner && <MobileProBadge />}
-                  </button>
-                  <button
-                    onClick={() => { setTrackersMenuOpen(false); router.push('/crypto'); }}
-                    className={`w-full text-left px-3 py-2 text-xs font-medium hover:bg-indigo-50 border-t border-gray-100 ${
-                      pathname?.startsWith('/crypto') ? 'text-indigo-700 bg-indigo-50' : 'text-gray-700'
-                    }`}
-                  >
-                    ₿ Crypto Levels
-                    {needsCrypto && <MobileProBadge />}
-                  </button>
-                </div>
-              )}
-            </div>
+            {/* Earnings, OI Tracker, Scanner and Crypto share one dropdown: separate buttons overflowed the
+                nav at 1280-1366px (measured), see docs/CHANGES.md. Items the plan lacks are hidden; the
+                dropdown itself disappears when none are left. */}
+            {showTrackers && (
+              <div className="relative" ref={trackersMenuRef}>
+                <button
+                  onClick={() => setTrackersMenuOpen(v => !v)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                    pathname?.startsWith('/earnings') || pathname?.startsWith('/oi-tracker') || pathname?.startsWith('/scanner') || pathname?.startsWith('/crypto') ? 'bg-indigo-700 text-white' : 'bg-indigo-600 text-white hover:bg-indigo-700'
+                  }`}
+                >
+                  📊 Trackers
+                  <svg className={`w-3 h-3 transition-transform ${trackersMenuOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+                {trackersMenuOpen && (
+                  <div className="absolute right-0 mt-1 w-48 bg-white rounded-lg shadow-lg border border-gray-200 overflow-hidden z-30 divide-y divide-gray-100">
+                    {showEarnings && (
+                      <button
+                        onClick={() => { setTrackersMenuOpen(false); router.push('/earnings'); }}
+                        className={`w-full text-left px-3 py-2 text-xs font-medium hover:bg-indigo-50 ${
+                          pathname?.startsWith('/earnings') ? 'text-indigo-700 bg-indigo-50' : 'text-gray-700'
+                        }`}
+                      >
+                        🗓️ Earnings
+                      </button>
+                    )}
+                    {showOiTracker && (
+                      <button
+                        onClick={() => { setTrackersMenuOpen(false); router.push('/oi-tracker'); }}
+                        className={`w-full text-left px-3 py-2 text-xs font-medium hover:bg-indigo-50 ${
+                          pathname?.startsWith('/oi-tracker') ? 'text-indigo-700 bg-indigo-50' : 'text-gray-700'
+                        }`}
+                      >
+                        📊 Options OI Tracker
+                      </button>
+                    )}
+                    {showScanner && (
+                      <button
+                        onClick={() => { setTrackersMenuOpen(false); router.push('/scanner'); }}
+                        className={`w-full text-left px-3 py-2 text-xs font-medium hover:bg-indigo-50 ${
+                          pathname?.startsWith('/scanner') ? 'text-indigo-700 bg-indigo-50' : 'text-gray-700'
+                        }`}
+                      >
+                        🔎 US Market Scanner
+                      </button>
+                    )}
+                    {showCrypto && (
+                      <button
+                        onClick={() => { setTrackersMenuOpen(false); router.push('/crypto'); }}
+                        className={`w-full text-left px-3 py-2 text-xs font-medium hover:bg-indigo-50 ${
+                          pathname?.startsWith('/crypto') ? 'text-indigo-700 bg-indigo-50' : 'text-gray-700'
+                        }`}
+                      >
+                        ₿ Crypto Levels
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
             <button
               onClick={() => router.push('/guide')}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
@@ -277,6 +283,16 @@ export default function Header() {
             >
               📘 Guide
             </button>
+            {hasHidden && (
+              <button
+                onClick={() => router.push('/upgrade')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                  pathname?.startsWith('/upgrade') ? 'border-gray-700 text-gray-900 bg-gray-100' : 'border-gray-300 text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                ⬆ Plans
+              </button>
+            )}
 
             {authCtx.loggedIn ? (
               <div className="relative" ref={accountMenuRef}>
@@ -357,52 +373,65 @@ export default function Header() {
           <StockSearch compact />
         </div>
 
-        {/* Mobile dropdown */}
+        {/* Mobile dropdown — same visibility rules as the desktop nav */}
         <div id="mobile-menu" className="hidden xl:!hidden border-t border-gray-100 py-3 space-y-1">
           <Link href="/" className="block px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 rounded-lg">
             🏠 Home
           </Link>
-          <button
-            onClick={() => router.push('/quadrant')}
-            className="w-full text-left px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50 rounded-lg"
-          >
-            📊 Quadrant Analysis
-            {needsQuadrant && <MobileProBadge />}
-          </button>
-          <button
-            onClick={() => router.push('/scan-alerts/latest')}
-            className="w-full text-left px-3 py-2 text-sm font-semibold text-purple-700 hover:bg-purple-50 rounded-lg"
-          >
-            🆕 Scan Alerts — Latest
-            {needsScanAlerts && <MobileProBadge />}
-          </button>
-          <button
-            onClick={() => router.push('/scan-alerts/historical')}
-            className="w-full text-left px-3 py-2 text-sm font-semibold text-purple-700 hover:bg-purple-50 rounded-lg"
-          >
-            🕓 Scan Alerts — Historical
-            {needsScanAlerts && <MobileProBadge />}
-          </button>
+          {showQuadrant && (
+            <button
+              onClick={() => router.push('/quadrant')}
+              className="w-full text-left px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50 rounded-lg"
+            >
+              📊 Quadrant Analysis
+            </button>
+          )}
+          {showScanLatest && (
+            <button
+              onClick={() => router.push('/scan-alerts/latest')}
+              className="w-full text-left px-3 py-2 text-sm font-semibold text-purple-700 hover:bg-purple-50 rounded-lg"
+            >
+              🆕 Scan Alerts — Latest
+            </button>
+          )}
+          {showScanHistory && (
+            <button
+              onClick={() => router.push('/scan-alerts/historical')}
+              className="w-full text-left px-3 py-2 text-sm font-semibold text-purple-700 hover:bg-purple-50 rounded-lg"
+            >
+              🕓 Scan Alerts — Historical
+            </button>
+          )}
           <button
             onClick={() => router.push('/stock/SPY')}
             className="w-full text-left px-3 py-2 text-sm font-semibold text-green-700 hover:bg-green-50 rounded-lg"
           >
             📈 Stock Analysis
           </button>
-          <button
-            onClick={() => router.push('/watchlists')}
-            className="w-full text-left px-3 py-2 text-sm font-semibold text-amber-700 hover:bg-amber-50 rounded-lg"
-          >
-            ⭐ Watchlists
-            {needsWatchlists && <MobileProBadge />}
-          </button>
-          <button
-            onClick={() => router.push('/watchlists/view')}
-            className="w-full text-left px-3 py-2 text-sm font-semibold text-amber-700 hover:bg-amber-50 rounded-lg"
-          >
-            🪟 Watchlist W Chart
-            {needsWatchlists && <MobileProBadge />}
-          </button>
+          {showIdeas && (
+            <button
+              onClick={() => router.push('/ideas')}
+              className="w-full text-left px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50 rounded-lg"
+            >
+              💡 Trade Ideas
+            </button>
+          )}
+          {showWatchlists && (
+            <>
+              <button
+                onClick={() => router.push('/watchlists')}
+                className="w-full text-left px-3 py-2 text-sm font-semibold text-amber-700 hover:bg-amber-50 rounded-lg"
+              >
+                ⭐ Watchlists
+              </button>
+              <button
+                onClick={() => router.push('/watchlists/view')}
+                className="w-full text-left px-3 py-2 text-sm font-semibold text-amber-700 hover:bg-amber-50 rounded-lg"
+              >
+                🪟 Watchlist W Chart
+              </button>
+            </>
+          )}
           {showPerformance && (
             <button
               onClick={() => router.push('/performance')}
@@ -411,47 +440,52 @@ export default function Header() {
               🏆 Performance
             </button>
           )}
-          <button
-            onClick={() => router.push('/ideas')}
-            className="w-full text-left px-3 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-50 rounded-lg"
-          >
-            💡 Trade Ideas
-            {needsIdeas && <MobileProBadge />}
-          </button>
-          <button
-            onClick={() => router.push('/earnings')}
-            className="w-full text-left px-3 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-50 rounded-lg"
-          >
-            🗓️ Earnings
-            {needsEarnings && <MobileProBadge />}
-          </button>
-          <button
-            onClick={() => router.push('/oi-tracker')}
-            className="w-full text-left px-3 py-2 text-sm font-semibold text-cyan-800 hover:bg-cyan-50 rounded-lg"
-          >
-            📊 OI Tracker
-            {needsOiTracker && <MobileProBadge />}
-          </button>
-          <button
-            onClick={() => router.push('/scanner')}
-            className="w-full text-left px-3 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-50 rounded-lg"
-          >
-            🔎 US Market Scanner
-            {needsScanner && <MobileProBadge />}
-          </button>
-          <button
-            onClick={() => router.push('/crypto')}
-            className="w-full text-left px-3 py-2 text-sm font-semibold text-amber-700 hover:bg-amber-50 rounded-lg"
-          >
-            ₿ Crypto Levels
-            {needsCrypto && <MobileProBadge />}
-          </button>
+          {showEarnings && (
+            <button
+              onClick={() => router.push('/earnings')}
+              className="w-full text-left px-3 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-50 rounded-lg"
+            >
+              🗓️ Earnings
+            </button>
+          )}
+          {showOiTracker && (
+            <button
+              onClick={() => router.push('/oi-tracker')}
+              className="w-full text-left px-3 py-2 text-sm font-semibold text-cyan-800 hover:bg-cyan-50 rounded-lg"
+            >
+              📊 OI Tracker
+            </button>
+          )}
+          {showScanner && (
+            <button
+              onClick={() => router.push('/scanner')}
+              className="w-full text-left px-3 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-50 rounded-lg"
+            >
+              🔎 US Market Scanner
+            </button>
+          )}
+          {showCrypto && (
+            <button
+              onClick={() => router.push('/crypto')}
+              className="w-full text-left px-3 py-2 text-sm font-semibold text-amber-700 hover:bg-amber-50 rounded-lg"
+            >
+              ₿ Crypto Levels
+            </button>
+          )}
           <button
             onClick={() => router.push('/guide')}
             className="w-full text-left px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 rounded-lg"
           >
             📘 Guide
           </button>
+          {hasHidden && (
+            <button
+              onClick={() => router.push('/upgrade')}
+              className="w-full text-left px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 rounded-lg"
+            >
+              ⬆ Plans
+            </button>
+          )}
           <div className="px-3 pt-2 border-t border-gray-100 mt-2">
             {authCtx.loggedIn ? (
               <div className="space-y-1">

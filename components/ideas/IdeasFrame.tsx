@@ -13,8 +13,8 @@ const TAB = (active: boolean) => `px-3 py-1.5 rounded-lg text-xs font-semibold t
 
 /**
  * Chrome for every Trade Ideas page: site header, section tabs, the alert feed (in-app channel) with the email
- * opt-in, the server-supplied disclaimer and the one-time acknowledgement. The disclaimer is shown in full on the
- * idea and performance pages and as a compact banner elsewhere (docs/trade-ideas.md, rule 9).
+ * opt-in, the server-supplied disclaimer and the one-time acknowledgement. The disclaimer is shown in full at the
+ * bottom of every page (no top strip), plus a compact banner inside the Alerts menu (docs/trade-ideas.md, rule 9).
  */
 export default function IdeasFrame({ canPublish, children }: { canPublish: boolean; children: React.ReactNode }) {
   const pathname = usePathname() ?? '';
@@ -58,8 +58,6 @@ export default function IdeasFrame({ canPublish, children }: { canPublish: boole
     finally { setAckBusy(false); }
   }
 
-  const full = /^\/ideas\/(performance|\d+)/.test(pathname);
-
   return (
     <>
       <Header />
@@ -97,7 +95,6 @@ export default function IdeasFrame({ canPublish, children }: { canPublish: boole
             </div>
           </div>
 
-          {!full && <div className="mb-3"><IdeaDisclaimer data={disclaimer} variant="banner" /></div>}
           {children}
           <div className="mt-6"><IdeaDisclaimer data={disclaimer} variant="full" /></div>
         </div>

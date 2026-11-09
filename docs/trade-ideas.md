@@ -238,8 +238,9 @@ One server-side copy, `lib/ideaDisclaimer.ts` (versioned). It says: the publishe
 or research analyst; ideas are for information and education only, not advice or a recommendation to buy or sell; trading
 involves risk of loss including principal and past performance (including the desk's tracked results) does not guarantee
 future results; trade only as your own adviser advises and do your own research. Shown as a designed callout (icon, title
-"For information only", bullets) in full on the idea, performance and acknowledgement screens and in the publisher preview,
-as a one-line banner with "Read more" on the board and in the alert feed, and as a styled footer in emails. A first-time
+"For information only", bullets) in full at the bottom of every Trade Ideas page (there is no strip at the top; removed
+2026-11-09), in the acknowledgement screen and the publisher preview, as a one-line banner with "Read more" inside the
+Alerts menu, and as a styled footer in emails. A first-time
 reader must acknowledge it once (stored with timestamp and version; bumping the version asks everyone again). Edit the text
 in that one file only. **The app has no dark theme** (`app/globals.css`), so the callout uses fixed light colours with
 checked contrast; there is nothing theme-dependent to break.
