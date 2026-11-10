@@ -1,5 +1,6 @@
 'use client';
 
+import QuoteFlash from '@/components/ui/QuoteFlash';
 import { useEffect, useMemo, useRef, useState, ReactNode } from 'react';
 import { createChart, type TickMarkType, IChartApi, ISeriesApi, IPriceLine, CandlestickData, HistogramData, MouseEventParams, SeriesMarker, Time, type AutoscaleInfo } from 'lightweight-charts';
 import { LevelCalculation, ScanAlert } from '@/types/stock';
@@ -1278,7 +1279,7 @@ export default function TVChart({
             <div className="flex items-baseline gap-2 flex-wrap">
               <h2 className="text-2xl font-bold">{symbol}</h2>
               {displayPrice !== undefined && (
-                <span className="text-lg text-gray-600">{fmtPrice(displayPrice)}</span>
+                <QuoteFlash value={displayPrice} className="text-lg text-gray-600">{fmtPrice(displayPrice)}</QuoteFlash>
               )}
               {headerQuote !== undefined && (marketSession === 'regular' ? (
                 <span className="inline-flex items-center gap-1 text-[10px] font-bold text-green-600 uppercase tracking-wide">
@@ -1299,14 +1300,14 @@ export default function TVChart({
             {(dayChange != null || dayHigh != null) && (
               <div className="mt-0.5 flex items-baseline gap-3 flex-wrap text-xs">
                 {dayChange != null && (
-                  <span className={`font-bold ${dayChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  <QuoteFlash value={dayChange} className={`font-bold ${dayChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                     {dayChange >= 0 ? '+' : '−'}{fmtPrice(Math.abs(dayChange))}
                     {dayChangePercent != null && (
                       <span className="ml-1">
                         ({dayChangePercent >= 0 ? '+' : '−'}{Math.abs(dayChangePercent).toFixed(2)}%)
                       </span>
                     )}
-                  </span>
+                  </QuoteFlash>
                 )}
                 {dayHigh != null && dayLow != null && (
                   <span className="text-gray-500">

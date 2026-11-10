@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import ExtendedMove from '@/components/ui/ExtendedMove';
+import QuoteFlash from '@/components/ui/QuoteFlash';
 import StripPicker from '@/components/ui/StripPicker';
 import { useStripPrefs } from '@/components/ui/useStripPrefs';
 import { pollDelayMs, type MarketClock } from '@/lib/pollDelay';
@@ -76,7 +77,7 @@ export default function IndicesStrip() {
                 className={`${bg} flex-1 basis-[190px] min-w-fit flex items-baseline justify-center gap-2 border rounded px-2 py-1 text-xs leading-tight hover:shadow-sm transition-shadow`}
               >
                 <span className="font-bold text-gray-800">{idx.symbol}</span>
-                <span className="font-semibold text-gray-900">{idx.price != null ? idx.price.toFixed(2) : '—'}</span>
+                <QuoteFlash value={idx.price} className="font-semibold text-gray-900">{idx.price != null ? idx.price.toFixed(2) : '—'}</QuoteFlash>
                 {idx.change != null && (
                   <span className={`font-semibold ${color}`}>
                     {idx.change >= 0 ? '+' : '−'}{Math.abs(idx.change).toFixed(2)}

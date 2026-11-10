@@ -47,3 +47,20 @@ textarea::placeholder {
 .scan-ticker-track:hover {
   animation-play-state: paused;
 }
+
+/* Live quote flash (components/ui/QuoteFlash.tsx): a value that just ticked up / down. */
+@keyframes quote-flash-up {
+  from { background-color: rgba(34, 197, 94, 0.45); }
+  to { background-color: rgba(34, 197, 94, 0); }
+}
+@keyframes quote-flash-down {
+  from { background-color: rgba(239, 68, 68, 0.45); }
+  to { background-color: rgba(239, 68, 68, 0); }
+}
+.quote-flash-up { animation: quote-flash-up 1.1s ease-out; }
+.quote-flash-down { animation: quote-flash-down 1.1s ease-out; }
+
+@media (prefers-reduced-motion: reduce) {
+  .quote-flash-up,
+  .quote-flash-down { animation: none; }
+}

@@ -7,6 +7,21 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-11-10 — Watchlists: collapsible filters, scrolling table, flash on quote updates
+
+Requested: (1) collapsible filters module, (2) the watchlist table scrolls vertically instead of growing the page, (3) a visible effect when quotes refresh silently (indexes and other pages).
+
+- **Files:** new `components/ui/QuoteFlash.tsx`; `app/globals.css` (`.quote-flash-up/down`, off under `prefers-reduced-motion`); `app/watchlists/page.tsx`; `app/watchlists/view/page.tsx`; `components/layout/IndicesStrip.tsx`; `components/charts/TVChart.tsx`.
+- **Design:**
+  - *Filters:* a "Filters" button (with a count of active filters) in the toolbar hides Expiry, Search, Level, Direction, Near-a-level and Earnings; View, Row height and Columns stay. Filters keep applying while hidden. State is remembered in `localStorage` (`watchlists.filtersOpen`), open by default.
+  - *Scroll:* the quotes table box is `overflow-auto max-h-[calc(100vh-17rem)] min-h-[16rem]` with a sticky header (`sticky` is in the `th` class because `ColRow` forces `position: relative` otherwise, same as the earnings page). The add-symbol input sits outside the scroll box, so its dropdown is not clipped. `/watchlists/view` already scrolled inside its panel.
+  - *Flash:* `QuoteFlash` wraps a number and flashes green/red for ~1.1 s when it changes up/down; never on first render or from/to null. Applied to Last Price / Change / Change % (both watchlist pages), the index strip price (every page), and the stock page header price and day change.
+- **Verified:** `tsc --noEmit` clean; eslint 0 errors on the touched files.
+- **NOT verified:** nothing was run in a browser (layout of the collapsed toolbar, sticky header, max height at different window sizes, the flash itself, `localStorage` restore); the dev server was not started.
+- **Not changed (decision):** quadrant (scatter points, no price cells), scanner and earnings tables, OI tracker; say if you want the flash there too. The 30 s / 60 s poll cadence is unchanged, so a flash happens at most that often.
+
+---
+
 ## 2026-11-08 (later) — Trade Ideas: scheduled publishing, "I took this", Telegram and web push
 
 Requested: build the remaining items from `docs/ideas.md`: scheduled publishing, "I took this", Telegram and web push.

@@ -6,6 +6,7 @@ import StockAnalysis from '@/components/stock/StockAnalysis';
 import AddSymbolInput from '@/components/watchlists/AddSymbolInput';
 import { getLevelDisplayName } from '@/lib/utils';
 import ExtendedMove from '@/components/ui/ExtendedMove';
+import QuoteFlash from '@/components/ui/QuoteFlash';
 import { pollDelayMs, type MarketClock } from '@/lib/pollDelay';
 import ColRow from '@/components/ui/ColRow';
 import ColumnsMenu from '@/components/ui/ColumnsMenu';
@@ -490,9 +491,9 @@ export default function WatchlistViewPage() {
                             <span className="font-semibold text-gray-900">{r.symbol}</span>
                           </div>
                         </td>
-                        {on('lastPrice') && <td data-col="lastPrice" className={`${th} text-right font-semibold text-gray-800 tabular-nums overflow-hidden`}>{fmtPrice(r.lastPrice)}</td>}
-                        {on('change') && <td data-col="change" className={`${th} text-right overflow-hidden`}><ChangeCell change={r.change} /></td>}
-                        {on('changePercent') && <td data-col="changePercent" className={`${th} text-right overflow-hidden`}><ChangePercentCell changePercent={r.changePercent} /></td>}
+                        {on('lastPrice') && <td data-col="lastPrice" className={`${th} text-right font-semibold text-gray-800 tabular-nums overflow-hidden`}><QuoteFlash value={r.lastPrice}>{fmtPrice(r.lastPrice)}</QuoteFlash></td>}
+                        {on('change') && <td data-col="change" className={`${th} text-right overflow-hidden`}><QuoteFlash value={r.change}><ChangeCell change={r.change} /></QuoteFlash></td>}
+                        {on('changePercent') && <td data-col="changePercent" className={`${th} text-right overflow-hidden`}><QuoteFlash value={r.changePercent}><ChangePercentCell changePercent={r.changePercent} /></QuoteFlash></td>}
                         {on('ext') && <td data-col="ext" className={`${th} text-right overflow-hidden`}>{r.ext ? <ExtendedMove ext={r.ext} /> : <span className="text-gray-300">—</span>}</td>}
                         {on('level') && <td data-col="level" className={`${th} overflow-hidden`}><LevelCell level={levelBySymbol.get(r.symbol)} compact /></td>}
                         {on('earnings') && <td data-col="earnings" className={`${th} text-right overflow-hidden`}><NextEarningsCell earnings={r.earnings} compact /></td>}
