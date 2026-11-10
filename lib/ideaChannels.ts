@@ -13,9 +13,10 @@ import { sendNotification, setVapidDetails } from 'web-push';
 import { sql } from '@/lib/db';
 import { sendEmail, emailConfigured } from '@/lib/email';
 import { isPermanentTelegramError, sendTelegramMessage } from '@/lib/telegram';
-import { SITE_URL } from '@/lib/site';
-import { disclaimerHtml, disclaimerText } from '@/lib/ideaDisclaimer';
-import { pushPayload, telegramText } from '@/lib/ideaMessages';
+import { etDateOf } from '@/lib/marketSession';
+import { parseFacts, toAlertIdea, type AlertIdea, type AlertInput } from '@/lib/ideaAlertModel';
+import { buildEmail } from '@/lib/ideaEmail';
+import { buildPush, buildTelegram } from '@/lib/ideaMessages';
 
 export const telegramConfigured = () => !!process.env.TELEGRAM_BOT_TOKEN;
 export const pushConfigured = () => !!process.env.VAPID_PUBLIC_KEY && !!process.env.VAPID_PRIVATE_KEY;
@@ -63,7 +64,31 @@ export async function countPushDevices(userId: string): Promise<number> {
 type Channel = 'email' | 'telegram' | 'push';
 const PREF_COLUMN: Record<Channel, string> = { email: 'email_alerts', telegram: 'telegram_alerts', push: 'push_alerts' };
 
-interface Candidate { event_id: number; idea_id: number; summary: string; event_type: string; user_id: string; email: string | null; telegram_chat_id: string | null }
+interface Candidate { event_id: number; idea_id: number; summary: string; event_type: string; event_key: string; payload: unknown; user_id: string; email: string | null; telegram_chat_id: string | null }
+
+/**
+ * The immutable plans of the candidates' ideas, one read per channel run. A published plan cannot change or be deleted
+ * (DB trigger), so reading it at delivery time gives exactly what the event was about. A missing row yields the
+ * summary-only layout. No gating here: the candidate rows are already gated per user and term.
+ */
+async function loadIdeas(cands: Candidate[]): Promise<Map<number, AlertIdea>> {
+  const ids = [...new Set(cands.map(c => Number(c.idea_id)).filter(n => Number.isSafeInteger(n)))];
+  const out = new Map<number, AlertIdea>();
+  if (!ids.length) return out;
+  const rows = await sql(
+    `SELECT id, symbol, direction, horizon, title, rationale, entry_low::float8 AS entry_low, entry_high::float8 AS entry_high,
+       stop::float8 AS stop, targets, valid_until::text AS valid_until, risk_rating, option_strategy
+     FROM public.nt_trade_ideas WHERE id = ANY($1::bigint[])`,
+    [ids],
+  );
+  for (const r of rows as any[]) { const idea = toAlertIdea(r); if (idea) out.set(Number(r.id), idea); }
+  return out;
+}
+
+const toInput = (c: Candidate, ideas: Map<number, AlertIdea>, today: string): AlertInput => ({
+  eventId: c.event_id, ideaId: c.idea_id, eventType: c.event_type, eventKey: c.event_key, summary: c.summary,
+  idea: ideas.get(Number(c.idea_id)) ?? null, facts: parseFacts(c.payload), today,
+});
 
 async function candidates(channel: Channel): Promise<Candidate[]> {
   // The column name comes from a fixed map, never from input.
@@ -82,7 +107,7 @@ async function candidates(channel: Channel): Promise<Candidate[]> {
         ), '[]'::jsonb) AS features
       FROM public.nt_app_user_profiles u JOIN public.nt_plans p ON p.id = u.plan_id
     )
-    SELECT e.id AS event_id, e.idea_id, e.summary, e.event_type, p.user_id, a.email, u.telegram_chat_id
+    SELECT e.id AS event_id, e.idea_id, e.summary, e.event_type, e.event_key, to_jsonb(e) -> 'payload' AS payload, p.user_id, a.email, u.telegram_chat_id
     FROM public.nt_idea_events e
     JOIN public.nt_idea_prefs p ON p.${flag}
     JOIN public.nt_app_user_profiles u ON u.user_id = p.user_id
@@ -116,17 +141,14 @@ async function deliverEmail(deadline: number): Promise<ChannelResult> {
   if (!out.configured) return out;
   const cands = await candidates('email');
   out.candidates = cands.length;
+  const ideas = await loadIdeas(cands);
+  const today = etDateOf(Date.now());
   for (const c of cands) {
     if (Date.now() > deadline) break;
     const id = await claim(c, 'email');
     if (!id || !c.email) { if (id) await finish(id, false, 'no email address'); continue; }
-    const link = `${SITE_URL}/ideas/${c.idea_id}`;
-    const r = await sendEmail({
-      to: c.email,
-      subject: c.summary.slice(0, 120),
-      text: `${c.summary}\n\nOpen the idea: ${link}\n\n${disclaimerText()}`,
-      html: `<div style="font-family:Arial,Helvetica,sans-serif;color:#111827"><p style="font-size:15px">${c.summary.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</p><p><a href="${link}">Open the idea</a></p>${disclaimerHtml()}</div>`,
-    });
+    const m = buildEmail(toInput(c, ideas, today));
+    const r = await sendEmail({ to: c.email, subject: m.subject, text: m.text, html: m.html });
     await finish(id, r.ok, r.ok ? null : r.error);
     if (r.ok) out.sent++; else out.failed++;
   }
@@ -138,11 +160,19 @@ async function deliverTelegram(deadline: number): Promise<ChannelResult> {
   if (!out.configured) return out;
   const cands = await candidates('telegram');
   out.candidates = cands.length;
+  const ideas = await loadIdeas(cands);
+  const today = etDateOf(Date.now());
   for (const c of cands) {
     if (Date.now() > deadline) break;
     const id = await claim(c, 'telegram');
     if (!id || !c.telegram_chat_id) { if (id) await finish(id, false, 'no linked chat'); continue; }
-    const r = await sendTelegramMessage(c.telegram_chat_id, telegramText(c.summary, `${SITE_URL}/ideas/${c.idea_id}`));
+    const m = buildTelegram(toInput(c, ideas, today));
+    let r = await sendTelegramMessage(c.telegram_chat_id, m.html, { parseMode: 'HTML', replyMarkup: { inline_keyboard: [[{ text: m.button.text, url: m.button.url }]] } });
+    // A formatting problem (400, but not "chat not found") must not lose the alert: one plain-text retry, same claimed row.
+    if (!r.ok && r.errorCode === 400 && !isPermanentTelegramError(r)) {
+      console.warn('[ideas] telegram HTML send rejected, retrying as plain text:', r.description);
+      r = await sendTelegramMessage(c.telegram_chat_id, m.plain);
+    }
     await finish(id, r.ok, r.ok ? null : `${r.errorCode ?? ''} ${r.description ?? 'failed'}`.trim());
     // A blocked bot or a deleted chat will never work: stop trying for this user (they can switch it back on).
     if (!r.ok && isPermanentTelegramError(r)) await sql(`UPDATE public.nt_idea_prefs SET telegram_alerts = false, updated_at = now() WHERE user_id = $1`, [c.user_id]);
@@ -157,12 +187,14 @@ async function deliverPush(deadline: number): Promise<ChannelResult> {
   setVapidDetails(process.env.VAPID_SUBJECT || `mailto:${process.env.EMAIL_REPLY_TO || 'support@stockstrendz.com'}`, process.env.VAPID_PUBLIC_KEY as string, process.env.VAPID_PRIVATE_KEY as string);
   const cands = await candidates('push');
   out.candidates = cands.length;
+  const ideas = await loadIdeas(cands);
+  const today = etDateOf(Date.now());
   for (const c of cands) {
     if (Date.now() > deadline) break;
     const id = await claim(c, 'push');
     if (!id) continue;
     const subs = await sql(`SELECT endpoint, p256dh, auth FROM public.nt_idea_push_subscriptions WHERE user_id = $1`, [c.user_id]);
-    const body = JSON.stringify(pushPayload(c.summary, c.idea_id, c.event_type));
+    const body = JSON.stringify(buildPush(toInput(c, ideas, today)));
     let ok = 0;
     let lastError: string | null = null;
     for (const s of subs as any[]) {

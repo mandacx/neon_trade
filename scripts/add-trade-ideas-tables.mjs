@@ -222,4 +222,9 @@ await sql`
 `;
 await sql`CREATE INDEX IF NOT EXISTS nt_idea_taken_user_idx ON public.nt_idea_taken (user_id, taken_at DESC)`;
 
+// --- Phase 6 (2026-11-10): alert payload -------------------------------------------------------------------------
+// Facts of each event for the alert builders (lib/ideaAlertModel.ts). Nullable, no default, no backfill. Also in
+// scripts/add-idea-event-payload.mjs, which is what a live database runs.
+await sql`ALTER TABLE public.nt_idea_events ADD COLUMN IF NOT EXISTS payload JSONB`;
+
 console.log('Trade Ideas tables ready.');

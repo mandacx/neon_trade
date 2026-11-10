@@ -252,10 +252,27 @@ export default function PublishPage() {
               </ul>
             </div>
             <div>
-              <div className={labelClass}>Alert (in-app and email)</div>
-              <div className="rounded-lg bg-gray-50 border border-gray-200 px-3 py-2 text-xs">
-                <div className="font-semibold text-gray-800">{preview.alert.subject}</div>
-                <div className="text-gray-600 mt-0.5">{preview.alert.summary}</div>
+              <div className={labelClass}>Alert preview</div>
+              <div className="rounded-lg bg-gray-50 border border-gray-200 px-3 py-2 text-xs space-y-2">
+                <div>
+                  <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Email subject</div>
+                  <div className="font-semibold text-gray-800">{preview.alert.subject}</div>
+                  <div className="text-gray-500 mt-0.5">{preview.alert.preheader}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Push notification</div>
+                  <div className="font-semibold text-gray-800">{preview.alert.push.title}</div>
+                  <div className="text-gray-600 whitespace-pre-line">{preview.alert.push.body}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">In-app</div>
+                  <div className="text-gray-600">{preview.alert.summary}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 mb-1">Email</div>
+                  {/* Empty sandbox: no scripts, no same-origin access. The HTML is built by the server from the validated plan. */}
+                  <iframe sandbox="" srcDoc={preview.alert.email.html} title="Email preview" className="w-full h-[420px] rounded border border-gray-200 bg-white" />
+                </div>
               </div>
             </div>
           </div>

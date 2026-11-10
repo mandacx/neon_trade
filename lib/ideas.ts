@@ -19,7 +19,10 @@ import {
 } from '@/lib/ideaTypes';
 import { scoreIdea, type ScoreBar, type ScoreClosure, type ScoreResult } from '@/lib/ideaScoring';
 import { computeStats, breakdownBy, type StatRow } from '@/lib/ideaStats';
-import { IDEA_DISCLAIMER, DISCLAIMER_VERSION, disclaimerText } from '@/lib/ideaDisclaimer';
+import { IDEA_DISCLAIMER, DISCLAIMER_VERSION } from '@/lib/ideaDisclaimer';
+import { allTargetsFacts, scoreEventFacts, toAlertIdea, type AlertFacts, type AlertInput } from '@/lib/ideaAlertModel';
+import { buildEmail } from '@/lib/ideaEmail';
+import { buildPush, buildTelegram } from '@/lib/ideaMessages';
 import type { LiveOfficial, LivePlan } from '@/lib/ideaLiveMath';
 import { etDateOf } from '@/lib/marketSession';
 import { getDailyBars } from '@/lib/dailyBars';
@@ -339,7 +342,10 @@ export interface IdeaPreview {
   warnings: string[];
   tiers: PreviewTier[];
   /** Exactly what the alert on publish will say. */
-  alert: { subject: string; summary: string; disclaimer: typeof IDEA_DISCLAIMER; email: { text: string } };
+  alert: {
+    subject: string; preheader: string; summary: string; disclaimer: typeof IDEA_DISCLAIMER;
+    email: { text: string; html: string }; push: { title: string; body: string }; telegram: { text: string };
+  };
 }
 
 /** What each audience will receive, without publishing anything (brief rule 8, "dry run"). */
@@ -367,9 +373,24 @@ export async function previewIdea(access: IdeaAccess, raw: unknown): Promise<Ide
   ];
   const rr = riskReward(plan);
   const summary = ideaSummary(plan.symbol, plan.direction, plan.title, 'published', plan);
+  // The real alert builders on the validated plan (no idea id yet, so the link goes to the board).
+  const alertInput: AlertInput = {
+    eventId: null, ideaId: null, eventType: 'published', eventKey: 'published', summary, facts: { v: 1 }, today: todayET(),
+    idea: toAlertIdea({
+      symbol: plan.symbol, direction: plan.direction, horizon: plan.horizon, title: plan.title, rationale: plan.rationale,
+      entry_low: plan.entryLow, entry_high: plan.entryHigh, stop: plan.stop, targets: plan.targets, valid_until: plan.validUntil,
+      risk_rating: plan.riskRating, option_strategy: plan.optionStrategy,
+    }),
+  };
+  const mail = buildEmail(alertInput);
+  const push = buildPush(alertInput);
+  const tg = buildTelegram(alertInput);
   return {
     plan, riskReward: rr, refPrice, warnings, tiers,
-    alert: { subject: `New ${plan.direction} idea: ${plan.symbol}`, summary, disclaimer: IDEA_DISCLAIMER, email: { text: `${summary}\n\n${disclaimerText()}` } },
+    alert: {
+      subject: mail.subject, preheader: mail.preheader, summary, disclaimer: IDEA_DISCLAIMER,
+      email: { text: mail.text, html: mail.html }, push: { title: push.title, body: push.body }, telegram: { text: tg.plain },
+    },
   };
 }
 
@@ -411,7 +432,7 @@ async function publishCore(id: string, who: IdeaAccess | null): Promise<string> 
     [id, today, ref],
   );
   if (!done.length) throw new IdeaError('Idea was already published', 409);
-  await recordEvent(Number(id), 'published', 'published', v.plan.horizon, ideaSummary(v.plan.symbol, v.plan.direction, v.plan.title, 'published', v.plan));
+  await recordEvent(Number(id), 'published', 'published', v.plan.horizon, ideaSummary(v.plan.symbol, v.plan.direction, v.plan.title, 'published', v.plan), { v: 1 });
   return id;
 }
 
@@ -517,7 +538,12 @@ export async function addUpdate(access: IdeaAccess, id: string, input: NewUpdate
     await sql(`UPDATE public.nt_trade_ideas SET status=$2, updated_at=now() WHERE id=$1`, [id, input.type === 'closed' ? 'closed_by_publisher' : 'cancelled']);
   }
   const label: Record<string, string> = { note: 'Update', stop_moved: `Stop moved to ${payload.stop}`, partial_booked: 'Partial booked', closed: 'Closed early', cancelled: 'Cancelled' };
-  await recordEvent(Number(id), `update:${updateId}`, input.type, idea.horizon, `${label[input.type]}: ${idea.symbol} ${idea.direction}, ${idea.title}.${body ? ` ${body.slice(0, 200)}` : ''}`);
+  const facts: AlertFacts = { v: 1 };
+  if (body) facts.note = body.slice(0, 1000);
+  if (payload.stop != null) facts.newStop = payload.stop;
+  if (payload.price != null) facts.price = payload.price;
+  if (payload.pct != null) facts.pct = payload.pct;
+  await recordEvent(Number(id), `update:${updateId}`, input.type, idea.horizon, `${label[input.type]}: ${idea.symbol} ${idea.direction}, ${idea.title}.${body ? ` ${body.slice(0, 200)}` : ''}`, facts);
   return updateId;
 }
 
@@ -525,12 +551,29 @@ export async function addUpdate(access: IdeaAccess, id: string, input: NewUpdate
 // Events, feed and alerts
 // ---------------------------------------------------------------------------------------------------
 
-/** Append an event once per (idea, key): re-running the tracker never duplicates it. */
-async function recordEvent(ideaId: number, eventKey: string, eventType: string, horizon: string, summary: string): Promise<void> {
-  await sql(
-    `INSERT INTO public.nt_idea_events (idea_id, event_key, event_type, horizon, summary) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (idea_id, event_key) DO NOTHING`,
-    [ideaId, eventKey, eventType, horizon, summary],
-  );
+let payloadColumnWarned = false;
+
+/**
+ * Append an event once per (idea, key): re-running the tracker never duplicates it (first write wins, so a re-run never
+ * rewrites a payload). `facts` is stored in `nt_idea_events.payload` for the alert builders. If the column does not
+ * exist yet (scripts/add-idea-event-payload.mjs has not run), fall back to the old insert so publishing and tracking
+ * keep working; alerts then use the summary-only layout.
+ */
+async function recordEvent(ideaId: number, eventKey: string, eventType: string, horizon: string, summary: string, facts: AlertFacts | null = null): Promise<void> {
+  try {
+    await sql(
+      `INSERT INTO public.nt_idea_events (idea_id, event_key, event_type, horizon, summary, payload) VALUES ($1,$2,$3,$4,$5,$6::jsonb) ON CONFLICT (idea_id, event_key) DO NOTHING`,
+      [ideaId, eventKey, eventType, horizon, summary, facts ? JSON.stringify(facts) : null],
+    );
+  } catch (error) {
+    const e = error as { code?: string; message?: string };
+    if (e?.code !== '42703' && !/column "payload"/i.test(e?.message ?? '')) throw error;
+    if (!payloadColumnWarned) { payloadColumnWarned = true; console.warn('[ideas] nt_idea_events.payload is missing; run scripts/add-idea-event-payload.mjs. Recording events without it.'); }
+    await sql(
+      `INSERT INTO public.nt_idea_events (idea_id, event_key, event_type, horizon, summary) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (idea_id, event_key) DO NOTHING`,
+      [ideaId, eventKey, eventType, horizon, summary],
+    );
+  }
 }
 
 export interface FeedItem { id: string; ideaId: string; type: string; summary: string; createdAt: string; unread: boolean }
@@ -668,7 +711,8 @@ async function storeOutcome(idea: any, s: ScoreResult, closure: ScoreClosure | n
 
 async function emitScoreEvents(idea: any, s: ScoreResult): Promise<number> {
   let n = 0;
-  for (const e of s.events) {
+  const facts = scoreEventFacts(s);
+  for (const [i, e] of s.events.entries()) {
     let key: string;
     let type: string;
     if (e.type === 'target_hit') { key = `target:${e.detail}`; type = 'target_hit'; }
@@ -678,11 +722,11 @@ async function emitScoreEvents(idea: any, s: ScoreResult): Promise<number> {
     const summary = e.type === 'target_hit'
       ? `${e.detail} reached: ${idea.symbol} ${idea.direction}, ${idea.title}.`
       : ideaSummary(idea.symbol, idea.direction, idea.title, type === 'target_hit' ? 'target_hit' : e.type);
-    await recordEvent(Number(idea.id), key, type, idea.horizon, summary);
+    await recordEvent(Number(idea.id), key, type, idea.horizon, summary, facts[i]);
     n++;
   }
   // Every target hit is announced per target; the ladder completing also ends the idea.
-  if (s.outcome === 'target_hit') await recordEvent(Number(idea.id), 'all_targets', 'target_hit', idea.horizon, ideaSummary(idea.symbol, idea.direction, idea.title, 'target_hit'));
+  if (s.outcome === 'target_hit') await recordEvent(Number(idea.id), 'all_targets', 'target_hit', idea.horizon, ideaSummary(idea.symbol, idea.direction, idea.title, 'target_hit'), allTargetsFacts(s));
   return n;
 }
 

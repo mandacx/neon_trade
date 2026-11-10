@@ -46,6 +46,33 @@ docs (`docs/trade-ideas.md`, `docs/earnings.md`, `docs/us-scanner.md`, `docs/oi-
 - **Cost control:** idea page = one symbol, one snapshot call (5 s per-instance cache in the provider); board = one batched
   snapshot call for all open symbols; both behind a dedicated limiter `ideas_live`.
 
+### Alert messages: email, Telegram, web push (decision record, 2026-11-10)
+
+```
+ recordEvent(ideaId, key, type, horizon, summary, facts)  --> nt_idea_events (summary = in-app feed text, payload = facts JSON)
+ deliverAlerts (cron) --> candidates() (eligibility SQL unchanged) + one read of the immutable plans (nt_trade_ideas, by id)
+     --> lib/ideaAlertModel.ts (pure: kinds, facts, formatting, escaping)
+     --> lib/ideaEmail.ts (subject / preheader / text / HTML)   lib/ideaMessages.ts (Telegram HTML + plain, push payload)
+     --> sendEmail / sendTelegramMessage(parse_mode HTML, plain retry) / web-push  --> nt_idea_deliveries (unchanged)
+```
+
+- **Data:** `nt_idea_events.payload` (nullable JSONB, `{ v: 1, ... }`) holds only the event's own facts (session date,
+  price hit, target label, targets hit so far, scored R, gap flag, new stop, booked price/pct, note). The plan (symbol,
+  side, zone, stop, targets, valid until, risk) is read from `nt_trade_ideas` at delivery: it is immutable once published,
+  so it cannot drift. `summary` is unchanged and stays the in-app feed text and the fallback.
+- **Fallback:** `payload IS NULL` (events recorded before the column) or a missing plan row renders the designer's
+  summary-only layout; an unknown `event_type` renders a neutral "Idea update".
+- **Builders are pure** (no `server-only`, no `@/` imports, explicit `.ts` extensions) so `scripts/test-idea-alerts.mjs`
+  checks every type on every channel. `lib/ideaChannels.ts` only fetches, calls the builders and sends.
+- **R shown:** per-target R from the plan (`riskReward`) on target and published alerts; the scorer's realised R (`s.r`,
+  equal-split ladder) on terminal events (all targets, stopped, expired), so an alert never disagrees with the Performance page.
+- **Telegram:** `parse_mode: 'HTML'` with every dynamic value escaped; on any 400 that is not "chat not found" it resends
+  once as plain text without the button, inside the same claimed delivery row.
+- **Push:** title `SYM side: event`, one line of numbers, then `IDEA_DISCLAIMER_MICRO`; tag `idea-<ideaId>-<eventId>`
+  (per event, so T2 no longer replaces T1). Payload shape `{ title, body, url, tag }` is the service-worker contract.
+- Rejected: parsing `summary` (fragile); recomputing facts at delivery from `nt_idea_outcomes` (that row is overwritten,
+  so it describes "now", not the event); snapshotting the whole plan into every payload (duplicates immutable data).
+
 ## Plans (decision record, 2026-11-10: Premium)
 
 - Plans are **DB rows** (`nt_plans`: code, name, features JSONB, sort_order, is_active), not code. Gates are feature codes
@@ -71,6 +98,10 @@ Do
 - Use `lib/pollDelay.ts` for any poller; pause when the tab is hidden; stop on 401/403/404; back off on 429.
 - Degrade to "price unavailable" instead of inventing or reusing stale numbers silently.
 - Record every change in `docs/CHANGES.md` (verified vs not verified).
+- Build alert text only in the pure builders (`lib/ideaAlertModel.ts`, `lib/ideaEmail.ts`, `lib/ideaMessages.ts`); truncate
+  raw text first, then escape every dynamic value (`escapeHtml`) for email HTML and Telegram HTML.
+- Take every disclaimer string from `lib/ideaDisclaimer.ts`; omit a missing number rather than print `null`/`NaN`/a dash.
+- Ship schema changes as idempotent, re-runnable scripts that the release step runs before the code that needs them.
 
 Don't
 - Don't change gating logic (`lib/ideas.ts` term SQL, `lib/ideasApi.ts`, layouts) to add a plan; feature codes are the contract.
@@ -81,3 +112,7 @@ Don't
 - Don't show money P&L or per-user quantities in the idea's live mark (R and % only).
 - Don't poll faster than `pollDelayMs` allows or in a hidden tab; don't add timers that outlive the component.
 - Don't change the immutability of published plans or the official scoring rules as part of display work.
+- Don't change alert eligibility, recipients, plan gating, the 3-day window or the delivery-row dedupe for presentation work.
+- Don't rewrite `nt_idea_events.summary` (it is the in-app feed text) or reword the disclaimer; don't hardcode disclaimer text.
+- Don't import `server-only`, `@/lib/db` or `@/` aliases into the alert builders; don't add emoji to email subjects or push.
+- Don't commit binary assets (push PNG icon/badge) without the owner supplying them.

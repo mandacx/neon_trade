@@ -95,7 +95,7 @@ Created by `scripts/add-trade-ideas-tables.mjs` (idempotent). All tables are `nt
 | `nt_trade_ideas` | the idea: symbol, direction, horizon, status, entry zone, `targets` JSONB ladder, stop, `valid_until`, `risk_rating`, optional `option_strategy` JSONB, `ref_price` (last close at publish), publish stamps. Money columns are `NUMERIC(18,6)`. |
 | `nt_idea_updates` | append-only timeline: note, stop moved, partial booked, closed early, cancelled. A DB trigger rejects UPDATE/DELETE. |
 | `nt_idea_outcomes` | **derived and rebuildable** result per idea (`lib/ideaScoring.ts`). Safe to TRUNCATE and rebuild (`/api/ideas/evaluate {all:true}` or `/api/cron/ideas?force=true`). |
-| `nt_idea_events` | append-only event feed (published, triggered, T1.., stopped, expired, updates). `UNIQUE (idea_id, event_key)`: re-running the tracker never duplicates an event. |
+| `nt_idea_events` | append-only event feed (published, triggered, T1.., stopped, expired, updates). `UNIQUE (idea_id, event_key)`: re-running the tracker never duplicates an event. `payload JSONB` (nullable, `{ v: 1, ... }`) holds the event's own facts for the alert builders (added 2026-11-10 by `scripts/add-idea-event-payload.mjs`; NULL on older events). |
 | `nt_idea_deliveries` | email delivery log, `UNIQUE (event_id, user_id, channel)`: exactly one alert per event per subscriber. |
 | `nt_idea_prefs` | email opt-in and the feed's read marker. |
 | `nt_idea_disclaimer_acks` | first-time acknowledgement: user, disclaimer version, timestamp. |
@@ -230,9 +230,16 @@ per-user fan-out and no way to get duplicates. Three opt-in channels, all in `li
 
 | Channel | Needs | Content |
 |---|---|---|
-| **Email** (Resend, `lib/email.ts`) | opted in, `EMAIL_*` set | summary, link, the styled disclaimer block |
-| **Telegram** (`lib/telegram.ts`) | opted in, chat linked in /profile, the plan's existing `telegram_alerts` gate, `TELEGRAM_BOT_TOKEN` | plain text: summary, link, the one-line disclaimer |
-| **Web push** (`web-push`, `public/sw.js`) | opted in and a registered browser, `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` | title, short summary, "For information only, not advice", click opens the idea |
+| **Email** (Resend, `lib/email.ts`) | opted in, `EMAIL_*` set | `lib/ideaEmail.ts`: subject `SYM side: event (R)`, preheader, table-based light HTML (banner with event group, headline and glyph; symbol, LONG/SHORT badge, term / horizon / risk; one "what happened" sentence; levels table with status words; result line; note; "View idea" button plus the raw link; quiet gray disclaimer block; manage-alerts link to `/ideas`), and a full plain-text part. Published adds the rationale excerpt and the option strategy name. |
+| **Telegram** (`lib/telegram.ts`) | opted in, chat linked in /profile, the plan's existing `telegram_alerts` gate, `TELEGRAM_BOT_TOKEN` | `buildTelegram` in `lib/ideaMessages.ts`: HTML parse mode (tags `b`, `i`, `pre`, `a` only, every value escaped): glyph + `SYM . headline`, identity line, title, sentence, monospace levels block, result line, note, link, italic one-line disclaimer, plus an inline "Open idea" button. A 400 (not "chat not found") is retried once as plain text inside the same delivery row. |
+| **Web push** (`web-push`, `public/sw.js`) | opted in and a registered browser, `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` | `buildPush`: title `SYM side: event`, one line of numbers, then `IDEA_DISCLAIMER_MICRO`; tag `idea-<ideaId>-<eventId>` (each event stacks, T2 does not replace T1); icon/badge are `public/idea-alert-icon.svg` / `idea-alert-badge.svg` (SVG support for notification icons is unverified; the notification shows without them); click opens the idea. |
+
+**How a message is built.** Facts of the event come from `nt_idea_events.payload` (written by `recordEvent` from the same
+scorer result), the plan from the immutable `nt_trade_ideas` row at delivery. A missing payload or plan, or an unknown
+`event_type`, gives a summary-only layout (banner/headline, summary, link, disclaimer). Missing numbers drop their clause;
+nothing prints `null` or a dash. All text is built in the pure modules `lib/ideaAlertModel.ts`, `lib/ideaEmail.ts`,
+`lib/ideaMessages.ts` (fixtures: `scripts/test-idea-alerts.mjs`); `lib/ideaChannels.ts` only fetches, builds and sends.
+R shown: per-target R from the plan on target / published alerts, the scorer's realised R (equal-split ladder) on terminal events.
 
 Each channel finds opted-in subscribers whose *effective* features (plan, minus revoked overrides, plus granted ones, plan
 not expired) include the event's term, within the last 3 days and with no delivery yet, **reserves** a
@@ -275,7 +282,7 @@ involves risk of loss including principal and past performance (including the de
 future results; trade only as your own adviser advises and do your own research. Shown as a designed callout (icon, title
 "For information only", bullets) in full at the bottom of every Trade Ideas page (there is no strip at the top; removed
 2026-11-09), in the acknowledgement screen and the publisher preview, as a one-line banner with "Read more" inside the
-Alerts menu, and as a styled footer in emails. A first-time
+Alerts menu, and as a quiet gray footer block in emails (`disclaimerHtmlQuiet`; the amber `disclaimerHtml` is unchanged). Telegram carries the `short` line; push carries `IDEA_DISCLAIMER_MICRO` ("For information only, not advice.", same file). A first-time
 reader must acknowledge it once (stored with timestamp and version; bumping the version asks everyone again). Edit the text
 in that one file only. **The app has no dark theme** (`app/globals.css`), so the callout uses fixed light colours with
 checked contrast; there is nothing theme-dependent to break.
@@ -284,10 +291,12 @@ checked contrast; there is nothing theme-dependent to break.
 
 ```bash
 node --env-file=.env.local scripts/add-trade-ideas-tables.mjs        # tables + triggers (idempotent)
+node --env-file=.env.local scripts/add-idea-event-payload.mjs        # alert payload column (idempotent; --dry-run reports only); run BEFORE deploying the alert formatting
 node --env-file=.env.local scripts/add-trade-ideas-plans.mjs --dry-run   # review the plans first
 node --env-file=.env.local scripts/add-trade-ideas-plans.mjs          # insert-only; add --active to list them on /upgrade
 node scripts/test-idea-scoring.mjs                                    # fixtures (no DB)
 node scripts/test-idea-push.mjs                                       # web-push request building (offline)
+node scripts/test-idea-alerts.mjs                                     # alert email / Telegram / push builders, every event type (no DB)
 ```
 
 1. Optional: tick/untick gates for the three plans at `/admin/plans`; assign users at `/admin/users`.

@@ -10,7 +10,7 @@ import { scoreIdea } from '../lib/ideaScoring.ts';
 import { computeStats, breakdownBy } from '../lib/ideaStats.ts';
 import { validatePlan, riskReward, validateScheduleTime } from '../lib/ideaTypes.ts';
 import { validateTaken, previewTaken, tradeResult, compareFollowed } from '../lib/ideaTakenMath.ts';
-import { telegramText, pushPayload } from '../lib/ideaMessages.ts';
+import { buildTelegram, buildPush } from '../lib/ideaMessages.ts';
 import { IDEA_DISCLAIMER } from '../lib/ideaDisclaimer.ts';
 import { liveMark } from '../lib/ideaLiveMath.ts';
 
@@ -322,15 +322,16 @@ t('followed vs not followed compares the same ideas', () => {
 
 // --- channel messages --------------------------------------------------------------
 t('telegram and push messages carry the disclaimer line and a link', () => {
-  const s = 'New idea: AAPL long, breakout.';
-  const tg = telegramText(s, 'https://stockstrendz.com/ideas/7');
-  assert.ok(tg.includes('https://stockstrendz.com/ideas/7'));
-  assert.ok(tg.includes(IDEA_DISCLAIMER.short));
-  const push = pushPayload(s, 7, 'published');
+  const input = { eventId: 9, ideaId: 7, eventType: 'published', eventKey: 'published', summary: 'New idea: AAPL long, breakout.', idea: null, facts: null, today: '2026-11-10' };
+  const tg = buildTelegram(input);
+  assert.ok(tg.plain.includes('https://stockstrendz.com/ideas/7') && tg.html.includes('https://stockstrendz.com/ideas/7'));
+  assert.ok(tg.plain.includes(IDEA_DISCLAIMER.short) && tg.html.includes(IDEA_DISCLAIMER.short));
+  const push = buildPush(input);
   assert.equal(push.url, '/ideas/7');
   assert.ok(/not advice/.test(push.body));
   assert.ok(JSON.stringify(push).length < 1000);
-  assert.ok(telegramText('x'.repeat(9000), 'l').length <= 4096);
+  const long = buildTelegram({ ...input, summary: 'x'.repeat(9000) });
+  assert.ok(long.plain.length <= 4096 && long.html.length <= 4096);
 });
 
 // --- provisional live mark (lib/ideaLiveMath.ts) ----------------------------------------

@@ -18,19 +18,30 @@ export interface SendMessageResult {
   description?: string;
 }
 
+export interface SendMessageOptions {
+  /** Only 'HTML' is used (Trade Ideas alerts). The caller must escape every dynamic value. */
+  parseMode?: 'HTML';
+  /** Telegram `reply_markup` (e.g. an inline URL button). */
+  replyMarkup?: unknown;
+}
+
 /**
- * Sends a plain-text message to a chat. Deliberately no `parse_mode` — some
- * tickers/symbol names can contain characters (e.g. `&`) that HTML/Markdown
- * parse modes would choke on unless escaped; plain text sidesteps that
- * entirely since nothing here needs rich formatting. Never throws — returns
+ * Sends a message to a chat. Plain text by default: no `parse_mode`, because some tickers/symbol names contain
+ * characters (e.g. `&`) that HTML/Markdown would choke on unless escaped. The Trade Ideas alerts opt in to
+ * `parseMode: 'HTML'` with every dynamic value escaped (lib/ideaAlertModel.ts `escapeHtml`) and an inline button.
+ * With no `opts` the request is exactly the plain one the other callers have always sent. Never throws: returns
  * {ok:false,...} on failure.
  */
-export async function sendTelegramMessage(chatId: string, text: string): Promise<SendMessageResult> {
+export async function sendTelegramMessage(chatId: string, text: string, opts?: SendMessageOptions): Promise<SendMessageResult> {
   try {
     const res = await fetch(`${TELEGRAM_API_BASE}/bot${botToken()}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, text, disable_web_page_preview: true }),
+      body: JSON.stringify({
+        chat_id: chatId, text, disable_web_page_preview: true,
+        ...(opts?.parseMode ? { parse_mode: opts.parseMode } : {}),
+        ...(opts?.replyMarkup ? { reply_markup: opts.replyMarkup } : {}),
+      }),
     });
     const json = await res.json();
     if (!res.ok || !json.ok) {

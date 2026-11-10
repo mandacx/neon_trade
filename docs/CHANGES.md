@@ -7,6 +7,60 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-11-10 (alerts) — Trade Ideas: structured email, Telegram and web push alerts
+
+Requested: the idea alerts were one-line summaries; give every event type a proper layout on every channel. Presentation
+only: who gets an alert, when, how many and the delivery-row dedupe are unchanged. Run id
+`20261110-1500-ideas-alert-formatting` (handoff: analyst, designer, architect, developer). **Not committed, migration not run.**
+
+**What changed**
+- New pure modules `lib/ideaAlertModel.ts` (12 event kinds + unknown, facts from the scorer, formatting, `escapeHtml`, level
+  rows, sentences), `lib/ideaEmail.ts` (subject, preheader, plain text, table-based HTML), and a rewritten `lib/ideaMessages.ts`
+  (`buildTelegram`: HTML + plain fallback + button; `buildPush`; `telegramText` / `pushPayload` removed).
+- `nt_idea_events.payload JSONB` (nullable): the event's own facts, written by `recordEvent` (`lib/ideas.ts`) from the same
+  `ScoreResult` that produced the event. The plan is read from the immutable `nt_trade_ideas` row at delivery (`loadIdeas` in
+  `lib/ideaChannels.ts`). Events without a payload (all existing ones) or without a plan row use the summary-only layout.
+  `recordEvent` falls back to the old 5-column insert on undefined-column errors, so a deploy before the migration does not break publishing.
+- Migration `scripts/add-idea-event-payload.mjs` (idempotent `ADD COLUMN IF NOT EXISTS`, `--dry-run`), also appended to
+  `scripts/add-trade-ideas-tables.mjs` as Phase 6. **Run it before deploying.**
+- `lib/ideaChannels.ts`: candidates SQL gets two extra SELECT columns (`e.event_key`, `to_jsonb(e) -> 'payload'`; FROM/WHERE/ORDER/LIMIT untouched);
+  email/Telegram/push call the builders. Telegram sends HTML with an inline "Open idea" button and, on a 400 that is not "chat not found",
+  one plain-text retry inside the same claimed delivery row. `lib/telegram.ts` `sendTelegramMessage(chatId, text, opts?)`: `parse_mode` /
+  `reply_markup` only when asked, so existing callers send the identical request.
+- Disclaimer (user-approved move): `IDEA_DISCLAIMER_MICRO = 'For information only, not advice.'` in `lib/ideaDisclaimer.ts`
+  (character-identical to the old push string; `IDEA_DISCLAIMER` shape, wording and version untouched) and `disclaimerHtmlQuiet()`
+  for the alert email (gray block). `disclaimerHtml()` is byte-for-byte unchanged (no remaining callers in the alert path).
+- Push: title `SYM side: event`, one line of numbers, then the micro disclaimer; tag is now `idea-<ideaId>-<eventId>` (was `idea-<id>-<type>`, so T2 replaced T1). New
+  hand-written SVGs `public/idea-alert-icon.svg` and `public/idea-alert-badge.svg` (monochrome) used by `public/sw.js` (payload carries `icon`/`badge`; defaults in the worker);
+  `/favicon.svg` unchanged. `sw.js` also sets `lang`, and only follows same-origin click/icon/badge paths (`safePath`: resolved against the worker origin, backslashes and control characters rejected, results starting with `//` rejected, and the origin re-checked on the resolved result, falls back to `/ideas`).
+- Publish page: "Alert preview" now shows the real email subject, preheader, push title/body, the in-app line and the email HTML in a sandboxed (`sandbox=""`) iframe. `previewIdea().alert` gained `preheader`, `email.html`, `push`, `telegram` (fields only added).
+- Tests: new `scripts/test-idea-alerts.mjs` (21 tests: every kind x channel, long and short, disclaimer wording, escaping, limits, numbers, push tags, scorer facts, R rules, fallback, vendor masking, and the `sw.js` click-URL guard `safePath`); `scripts/test-idea-scoring.mjs` and `scripts/test-idea-push.mjs` updated to the new builders.
+- Docs: `docs/trade-ideas.md` (Alerts, disclaimer, runbook, data table).
+
+**Decisions worth knowing (differences from the design sketch)**
+- R in terminal alerts is the scorer's realised R (`s.r`, equal-split ladder) so alerts agree with the Performance page: "All targets reached" shows e.g. +1.86R, not the last target's +2.57R; "Stopped out" shows -1.00R only when no target was booked and no gap.
+- "Entered" shows the session date, not a price (the scorer's entry price is the zone's worst edge, not a fill).
+- Update alerts (stop moved, partial booked, closed) show prices without Hit/Open marks (not stored). `not_triggered` marks only the entry zone.
+- Telegram level block capped at 8 rows (design said 6; a 5-target plan needs 7 to 8).
+- Telegram escapes with numeric/named HTML entities (`&amp; &lt; &gt; &quot; &#39;`).
+- An unknown `event_type` uses the summary-only layout (banner "Idea update") even when facts and a plan row exist.
+
+**Verified (ran)**
+- `node scripts/test-idea-alerts.mjs` 21 passed; `test-idea-scoring.mjs` 41, `test-idea-push.mjs` ok, and the other `scripts/test-*.mjs` (earnings-parse 31, oi-strategies, payoff 23, premium-plan 32, us-scanner 23) pass.
+- `npx tsc --noEmit` clean; eslint on the touched files: 0 errors (warnings are the existing `no-explicit-any` ones).
+
+**Not verified**
+- Nothing ran against the database: the migration (`--dry-run` included), the candidates SQL with `to_jsonb(e) -> 'payload'`, `loadIdeas`, `recordEvent` with the payload and its 42703 fallback.
+- No real send: Resend, Telegram (HTML tags, entity handling, the 400 plain retry, `<pre>` width on phones, the button) or a push in any browser.
+- SVG as a notification `icon`/`badge` is unverified in every client (some require raster images); the notification itself does not depend on it. Mail-client rendering (Gmail, Outlook, dark mode), glyph availability and screen-reader behaviour are unchecked. `npm run build` and the Playwright suite not run.
+
+**Follow-ups**
+- Owner: run `node --env-file=.env.local scripts/add-idea-event-payload.mjs` before the deploy; PNG icon (192) / badge (96) if SVG does not render; `EMAIL_FROM` display name (e.g. `StocksTrendz Trade Ideas`).
+- QA: real-client checks listed in the designer's section 11; first live sends are the sample.
+- Optional: `urgency: 'high'` for outcome pushes, one-click unsubscribe, dark-mode palette.
+
+---
+
 ## 2026-11-10 (Premium) — new PREMIUM plan: both Trade Ideas terms
 
 Requested: a new plan named Premium; admins assign it manually, no payment.

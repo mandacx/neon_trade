@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { generateRequestDetails, generateVAPIDKeys, setVapidDetails } from 'web-push';
-import { pushPayload } from '../lib/ideaMessages.ts';
+import { buildPush } from '../lib/ideaMessages.ts';
 
 const vapid = generateVAPIDKeys();
 setVapidDetails('mailto:test@example.com', vapid.publicKey, vapid.privateKey);
@@ -16,7 +16,7 @@ const sub = {
   endpoint: 'https://push.example.test/send/abc123',
   keys: { p256dh: ecdh.getPublicKey().toString('base64url'), auth: crypto.randomBytes(16).toString('base64url') },
 };
-const payload = JSON.stringify(pushPayload('New idea: AAPL long, breakout.', 7, 'published'));
+const payload = JSON.stringify(buildPush({ eventId: 9, ideaId: 7, eventType: 'published', eventKey: 'published', summary: 'New idea: AAPL long, breakout.', idea: null, facts: null, today: '2026-11-10' }));
 const req = generateRequestDetails(sub, payload, { TTL: 3600, urgency: 'normal' });
 
 assert.equal(req.method, 'POST');

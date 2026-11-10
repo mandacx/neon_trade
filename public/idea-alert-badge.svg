@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96" role="img" aria-label="Trade Ideas">
+  <!-- Monochrome, transparent background: platforms that accept a badge use only its shape (alpha). -->
+  <rect x="14" y="58" width="14" height="22" rx="3" fill="#FFFFFF"/>
+  <rect x="41" y="46" width="14" height="34" rx="3" fill="#FFFFFF"/>
+  <rect x="68" y="34" width="14" height="46" rx="3" fill="#FFFFFF"/>
+  <polyline points="12,50 36,30 52,40 78,14" fill="none" stroke="#FFFFFF" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <polyline points="62,13 79,13 79,30" fill="none" stroke="#FFFFFF" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
