@@ -74,6 +74,14 @@ export const LIMITERS: LimiterDef[] = [
     standard: 90,
     entitled: null,
   },
+  {
+    name: 'ideas_live',
+    label: 'Trade Ideas live marks',
+    description: 'Live price mark on an open idea (idea page poll and board batch). Plan-gated, so one tier.',
+    windowSeconds: 60,
+    standard: 60,
+    entitled: null,
+  },
 ];
 
 export const RATE_LIMITS_KEY = 'rate_limits';

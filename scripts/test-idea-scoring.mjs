@@ -12,6 +12,7 @@ import { validatePlan, riskReward, validateScheduleTime } from '../lib/ideaTypes
 import { validateTaken, previewTaken, tradeResult, compareFollowed } from '../lib/ideaTakenMath.ts';
 import { telegramText, pushPayload } from '../lib/ideaMessages.ts';
 import { IDEA_DISCLAIMER } from '../lib/ideaDisclaimer.ts';
+import { liveMark } from '../lib/ideaLiveMath.ts';
 
 let passed = 0;
 const t = (name, fn) => { try { fn(); passed++; } catch (e) { console.error(`FAIL: ${name}`); throw e; } };
@@ -330,6 +331,115 @@ t('telegram and push messages carry the disclaimer line and a link', () => {
   assert.ok(/not advice/.test(push.body));
   assert.ok(JSON.stringify(push).length < 1000);
   assert.ok(telegramText('x'.repeat(9000), 'l').length <= 4096);
+});
+
+// --- provisional live mark (lib/ideaLiveMath.ts) ----------------------------------------
+const short = { direction: 'short', entryLow: 100, entryHigh: 102, targets: [96, 92], stop: 106, publishedOn: '2026-01-05', validUntil: '2026-02-27' };
+const off = (r) => ({ outcome: r.outcome, enteredOn: r.enteredOn, entryPrice: r.entryPrice, targetsHit: r.targetsHit, evaluatedThrough: r.evaluatedThrough });
+const finiteOrNull = (o) => { for (const v of Object.values(o ?? {})) { if (typeof v === 'number') assert.ok(Number.isFinite(v)); else if (v && typeof v === 'object') finiteOrNull(v); } };
+
+t('live: R and % match the scorer (open long, after T1, open short)', () => {
+  const a = scoreIdea(long, [bar('2026-01-06', 103, 104, 101, 103), bar('2026-01-07', 103, 105, 102, 104)], null, '2026-01-07');
+  assert.equal(a.outcome, 'open');
+  const la = liveMark(long, off(a), 104);
+  near(la.r, a.r, 1e-9); near(la.pct, a.pctReturn, 1e-9);
+  assert.equal(la.state, 'in_trade'); assert.equal(la.entered, true);
+  const b = scoreIdea(long, [bar('2026-01-06', 103, 104, 101, 103), bar('2026-01-07', 103, 107, 102, 108)], null, '2026-01-07');
+  assert.equal(b.targetsHit, 1);
+  const lb = liveMark(long, off(b), 108);
+  near(lb.r, b.r, 1e-9); near(lb.pct, b.pctReturn, 1e-9);
+  const c = scoreIdea(short, [bar('2026-01-06', 100, 101, 99, 99), bar('2026-01-07', 99, 99.5, 97, 98)], null, '2026-01-07');
+  assert.equal(c.outcome, 'open');
+  const lc = liveMark(short, off(c), 98);
+  near(lc.r, c.r, 1e-9); near(lc.pct, c.pctReturn, 1e-9);
+  const d = scoreIdea(short, [bar('2026-01-06', 100, 101, 99, 99), bar('2026-01-07', 99, 99.5, 95, 95)], null, '2026-01-07');
+  assert.equal(d.targetsHit, 1);
+  const ld = liveMark(short, off(d), 95);
+  near(ld.r, d.r, 1e-9); near(ld.pct, d.pctReturn, 1e-9);
+});
+
+t('live: not entered gives no R (no outcome row, pending row)', () => {
+  const pend = { outcome: 'pending', enteredOn: null, entryPrice: null, targetsHit: 0, evaluatedThrough: null };
+  for (const o of [null, pend]) {
+    const hi = liveMark(long, o, 108);
+    assert.equal(hi.state, 'ran_past_target'); assert.equal(hi.r, null); assert.equal(hi.pct, null); assert.equal(hi.entered, false);
+    const above = liveMark(long, o, 105);
+    assert.equal(above.state, 'awaiting_entry'); assert.equal(above.zone.side, 'above');
+    near(above.zone.distancePct, (105 - 102) / 105 * 100, 1e-9);
+    const inz = liveMark(long, o, 101);
+    assert.equal(inz.state, 'in_zone'); assert.equal(inz.zone.distancePct, 0); assert.equal(inz.r, null);
+    const below = liveMark(long, o, 99);
+    assert.equal(below.zone.side, 'below'); near(below.zone.distancePct, (100 - 99) / 99 * 100, 1e-9);
+    const bs = liveMark(long, o, 97);
+    assert.equal(bs.state, 'beyond_stop'); assert.equal(bs.r, null);
+  }
+});
+
+t('live: a price past a target since the last scoring counts it; the official count is never lowered', () => {
+  const o0 = { outcome: 'open', enteredOn: '2026-01-06', entryPrice: 102, targetsHit: 0, evaluatedThrough: '2026-01-06' };
+  const x = liveMark(long, o0, 107);
+  assert.equal(x.targetsReached, 1);
+  near(x.r, 1 / 2 + 0.5 * (5 / 4), 1e-9);
+  const y = liveMark(long, { ...o0, targetsHit: 1 }, 104);
+  assert.equal(y.targetsReached, 1);
+  near(y.r, 0.5 * 1 + 0.5 * (2 / 4), 1e-9);
+});
+
+t('live: beyond the stop is not clamped', () => {
+  const o = { outcome: 'open', enteredOn: '2026-01-06', entryPrice: 102, targetsHit: 0, evaluatedThrough: '2026-01-06' };
+  const l = liveMark(long, o, 95);
+  assert.equal(l.state, 'beyond_stop'); near(l.r, (95 - 102) / 4, 1e-9);
+  const so = { outcome: 'open', enteredOn: '2026-01-06', entryPrice: 100, targetsHit: 0, evaluatedThrough: '2026-01-06' };
+  const s = liveMark(short, so, 109);
+  assert.equal(s.state, 'beyond_stop'); near(s.r, (100 - 109) / 6, 1e-9);
+});
+
+t('live: unavailable price and invalid plans never throw and carry no NaN', () => {
+  const o = { outcome: 'open', enteredOn: '2026-01-06', entryPrice: 102, targetsHit: 1, evaluatedThrough: '2026-01-06' };
+  for (const p of [null, 0, NaN, undefined]) {
+    const l = liveMark(long, o, p);
+    assert.equal(l.state, 'unavailable'); assert.equal(l.r, null); assert.equal(l.pct, null); assert.equal(l.price, null);
+    assert.equal(l.targetsReached, 1);
+    finiteOrNull(l);
+  }
+  const noRisk = liveMark({ ...long, stop: 102 }, o, 104);
+  assert.equal(noRisk.state, 'unavailable'); assert.equal(noRisk.r, null); finiteOrNull(noRisk);
+  const noTargets = liveMark({ ...long, targets: [] }, o, 104);
+  assert.equal(noTargets.state, 'unavailable'); assert.deepEqual(noTargets.targets, []); finiteOrNull(noTargets);
+});
+
+t('live: range hint only for a session after publish day and after the last scored session', () => {
+  const o = { outcome: 'open', enteredOn: '2026-01-06', entryPrice: 102, targetsHit: 0, evaluatedThrough: '2026-01-06' };
+  const range = { high: 107, low: 97, date: '2026-01-07' };
+  assert.deepEqual(liveMark(long, o, 100, range).rangeHint, { stop: true, targetsTouched: 1 });
+  assert.equal(liveMark(long, o, 100, { ...range, date: '2026-01-05' }).rangeHint, null);
+  assert.equal(liveMark(long, o, 100, { ...range, date: '2026-01-06' }).rangeHint, null);
+  assert.equal(liveMark(long, o, 100).rangeHint, null);
+  assert.equal(liveMark(long, o, 100, { high: null, low: null, date: '2026-01-07' }).rangeHint, null);
+  near(liveMark(long, o, 100, range).r, liveMark(long, o, 100).r, 1e-12); // the hint never changes R
+  const so = { outcome: 'open', enteredOn: '2026-01-06', entryPrice: 100, targetsHit: 0, evaluatedThrough: '2026-01-06' };
+  assert.deepEqual(liveMark(short, so, 99, { high: 107, low: 95, date: '2026-01-07' }).rangeHint, { stop: true, targetsTouched: 1 });
+});
+
+t('live: distances and signs (long and short)', () => {
+  const o = { outcome: 'open', enteredOn: '2026-01-06', entryPrice: 102, targetsHit: 0, evaluatedThrough: '2026-01-06' };
+  const l = liveMark(long, o, 104);
+  near(l.stop.distancePct, (98 - 104) / 104 * 100, 1e-9); assert.ok(l.stop.distancePct < 0);
+  near(l.stop.distanceR, 1.5, 1e-9);
+  near(l.targets[0].distancePct, (106 - 104) / 104 * 100, 1e-9); assert.equal(l.targets[0].reached, false);
+  const so = { outcome: 'open', enteredOn: '2026-01-06', entryPrice: 100, targetsHit: 0, evaluatedThrough: '2026-01-06' };
+  const s = liveMark(short, so, 98);
+  near(s.stop.distancePct, (106 - 98) / 98 * 100, 1e-9); assert.ok(s.stop.distancePct > 0);
+  near(s.stop.distanceR, (106 - 98) / 6, 1e-9);
+  near(s.targets[0].distancePct, (96 - 98) / 98 * 100, 1e-9); assert.ok(s.targets[0].distancePct < 0);
+  assert.equal(s.targets[0].reached, false);
+});
+
+t('live: a finished official outcome is never marked as entered; JSON has no vendor words', () => {
+  const done = { outcome: 'stopped', enteredOn: '2026-01-06', entryPrice: 102, targetsHit: 0, evaluatedThrough: '2026-01-07' };
+  assert.equal(liveMark(long, done, 104).entered, false);
+  const json = JSON.stringify(liveMark(long, { outcome: 'open', enteredOn: '2026-01-06', entryPrice: 102, targetsHit: 0, evaluatedThrough: '2026-01-06' }, 104, { high: 105, low: 99, date: '2026-01-07' }));
+  assert.ok(!/alpaca|tradier|iex|sip/i.test(json));
 });
 
 console.log(`ideas: ${passed} checks passed`);

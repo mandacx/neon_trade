@@ -20,6 +20,7 @@ import {
 import { scoreIdea, type ScoreBar, type ScoreClosure, type ScoreResult } from '@/lib/ideaScoring';
 import { computeStats, breakdownBy, type StatRow } from '@/lib/ideaStats';
 import { IDEA_DISCLAIMER, DISCLAIMER_VERSION, disclaimerText } from '@/lib/ideaDisclaimer';
+import type { LiveOfficial, LivePlan } from '@/lib/ideaLiveMath';
 import { etDateOf } from '@/lib/marketSession';
 import { getDailyBars } from '@/lib/dailyBars';
 
@@ -227,6 +228,37 @@ export async function getIdea(access: IdeaAccess, id: string): Promise<IdeaView 
   const ups = await sql(`SELECT id, update_type, body, payload, created_at, effective_on::text AS effective_on FROM public.nt_idea_updates WHERE idea_id = $1 ORDER BY created_at, id`, [id]);
   view.updates = (ups as any[]).map(u => ({ id: String(u.id), type: u.update_type, body: u.body, payload: u.payload ?? {}, createdAt: iso(u.created_at) as string, effectiveOn: u.effective_on }));
   return view;
+}
+
+/**
+ * Just what the provisional live mark needs (plan + stored official outcome), same gate as `getIdea`:
+ * null when missing or outside the viewer's terms (indistinguishable). Status is returned so the caller can
+ * refuse to mark a closed idea. No updates query.
+ */
+export interface LiveIdeaRow { id: string; symbol: string; status: string; plan: LivePlan; official: LiveOfficial | null }
+export async function getIdeaForLive(access: IdeaAccess, id: string): Promise<LiveIdeaRow | null> {
+  if (!/^\d{1,18}$/.test(id)) return null;
+  const rows = await sql(
+    `SELECT i.id, i.symbol, i.direction, i.status, i.entry_low::float8 AS entry_low, i.entry_high::float8 AS entry_high, i.targets,
+            i.stop::float8 AS stop, i.published_on::text AS published_on,
+            o.outcome AS o_outcome, o.entered_on::text AS o_entered_on, o.entry_price::float8 AS o_entry_price,
+            o.targets_hit AS o_targets_hit, o.evaluated_through::text AS o_through
+     FROM ${IDEA_FROM}
+     WHERE i.id = $1 AND i.horizon = ANY($2) AND i.status NOT IN ('draft','scheduled')`,
+    [id, horizonsFor(access)],
+  );
+  if (!rows.length) return null;
+  const r = rows[0] as any;
+  const targets: IdeaTarget[] = Array.isArray(r.targets) ? r.targets : [];
+  return {
+    id: String(r.id),
+    symbol: r.symbol,
+    status: r.status,
+    plan: { direction: r.direction, entryLow: r.entry_low, entryHigh: r.entry_high, targets: targets.map(t => Number(t.price)), stop: r.stop, publishedOn: r.published_on ?? '' },
+    official: r.o_outcome
+      ? { outcome: r.o_outcome, enteredOn: r.o_entered_on, entryPrice: num(r.o_entry_price), targetsHit: Number(r.o_targets_hit ?? 0), evaluatedThrough: r.o_through }
+      : null,
+  };
 }
 
 /** The publisher's own ideas (drafts included); admins see everyone's. */

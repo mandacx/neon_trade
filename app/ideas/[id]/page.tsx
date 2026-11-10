@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import IdeaChart from '@/components/ideas/IdeaChart';
+import LiveMark from '@/components/ideas/LiveMark';
 import TakeThis from '@/components/ideas/TakeThis';
 import {
   DirectionPill, HorizonPill, OutcomePill, RiskPill, Spinner, StatusPill, api, fmtDay, fmtPct, fmtPrice, fmtR, fmtWhen, inputClass, labelClass, rTone,
@@ -114,6 +115,8 @@ export default function IdeaPage() {
         <p className="text-[11px] text-gray-400 mt-2">Reward : risk is measured from the worst fill inside the entry zone ({idea.direction === 'short' ? 'zone low' : 'zone high'}) to each target, over the risk to the stop.</p>
       </div>
 
+      {OPEN_STATUSES.includes(idea.status) && <LiveMark idea={idea} />}
+
       {idea.status !== 'draft' && idea.status !== 'scheduled' && <TakeThis idea={idea} />}
 
       <div className="bg-white border border-gray-200 rounded-xl p-2 sm:p-3">
@@ -125,7 +128,7 @@ export default function IdeaPage() {
           <div className="flex flex-wrap items-center gap-2 mb-2">
             <h3 className="text-sm font-bold text-gray-900">Tracked result</h3>
             <OutcomePill outcome={o.outcome} />
-            <span className="text-[11px] text-gray-400">Scored mechanically from daily bars through {o.evaluatedThrough ? fmtDay(o.evaluatedThrough) : '—'}. Stop first if one bar touches both stop and a target.</span>
+            <span className="text-[11px] text-gray-400">Scored mechanically from daily bars through {o.evaluatedThrough ? fmtDay(o.evaluatedThrough) : '—'}. Stop first if one bar touches both stop and a target.{!closed ? ' Through the last completed session only; the live mark above is provisional.' : ''}</span>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-6 gap-3">
             <Stat label="Entered">{o.enteredOn ? `${fmtDay(o.enteredOn)} @ ${fmtPrice(o.entryPrice)}` : 'Not yet'}</Stat>

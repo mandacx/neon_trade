@@ -131,8 +131,39 @@ Mechanical, from **daily bars**, never self-reported. Every result is labelled `
 7. Stop-moved and partial-booked updates are commentary; they do not change the score. Cancelled before entry = `cancelled`
    (never traded).
 
-`asOf` is yesterday (US/Eastern): a partial bar never decides anything. Intraday ideas are also scored on daily bars, so
+`asOf` is yesterday (US/Eastern): a partial bar never decides anything; the provisional live mark below is separate and never stored. Intraday ideas are also scored on daily bars, so
 treat them as approximate (stated in the horizon description).
+
+### Live mark (provisional)
+
+On `/ideas/[id]` of an **open** idea (`live` / `triggered`), a "Live mark" card shows the published plan marked at the current
+price. It is computed on request by `lib/ideaLiveMath.ts` (pure; fixtures in `scripts/test-idea-scoring.mjs`) and served by
+`GET /api/ideas/[id]/live` (`lib/ideaLive.ts`). It is **not** the tracked result: never stored, never fed to `scoreIdea`, never counted
+in desk statistics, no alerts, independent of "I took this" (R and % only, no money).
+
+- **Price:** regular session = live price (basis `live`); otherwise the last regular close (basis `last_close`), via `getMarketState()` +
+  `buildQuote()`. Pre-market / after-hours moves are shown as a muted extra line and never used in R.
+- **Entered** comes only from the stored official outcome (`open` with an entry date). The live price never flips an idea to entered.
+- **Formulas** mirror the scorer: entry = worst fill in the zone, risk = |entry - stop|, equal split over targets. Targets booked per the
+  official outcome are kept; targets the live price is at or beyond also count (`max`). `R = booked + remaining x favourable(price) / risk`.
+  **No clamp at the stop** (a gap fills worse than the stop in the scorer, so clamping would flatter).
+
+| State | Meaning | R shown |
+|---|---|---|
+| `awaiting_entry` | not entered, price outside the zone (distance to the nearest zone edge shown) | no |
+| `in_zone` | not entered, price inside the zone (the tracker enters on a completed session) | no |
+| `ran_past_target` | not entered, price at or beyond target 1 | no |
+| `in_trade` | entered per the official outcome | yes |
+| `beyond_stop` | price beyond the stop (entered or not) | only if entered, unclamped |
+| `unavailable` | no price, or an invalid plan | no |
+
+- **Range hint:** if the snapshot's day high/low of a session after the publish day and after `evaluatedThrough` touched the stop or a
+  target, the card says the official score (completed bars, stop first) may differ. It never changes R.
+- **Polling:** on load, then `lib/pollDelay.ts` (regular 20 s, extended 60 s, closed: sleep to the next boundary, max 15 min); paused while
+  the tab is hidden, stops on 401/403/404 or when the idea closes, 60 s back-off on 429, plus a Refresh button.
+- **Gating:** the route reads the idea through the gated SQL first (`getIdeaForLive`), 404 for missing and out-of-plan alike. A closed idea
+  answers `200 { live: null, reason: 'closed' }`.
+- **Not built yet:** the board chip and the batched `GET /api/ideas/live` (see `docs/CHANGES.md`, 2026-11-10 live mark entry).
 
 ## Statistics (`lib/ideaStats.ts`)
 
@@ -150,7 +181,7 @@ are listed under coverage.
 | Route | Who | What |
 |---|---|---|
 | `/ideas` | any idea term | board: Open / Closed tabs, filters (horizon, direction, symbol), idea cards, locked-term upgrade strips, alert feed with email opt-in |
-| `/ideas/[id]` | any idea term | frozen plan, chart (daily candles with entry zone, targets and stop drawn; link to the full stock page), tracked result, rationale, option strategy, timeline; publishers get the append-only update form |
+| `/ideas/[id]` | any idea term | frozen plan, **live mark card for open ideas (provisional)**, chart (daily candles with entry zone, targets and stop drawn; link to the full stock page), tracked result, rationale, option strategy, timeline; publishers get the append-only update form |
 | `/ideas/mine` | any idea term | **My trades**: your own recorded trades (open ones marked to the latest price, closed ones at your exit), the desk's result beside yours, and followed vs not followed |
 | `/ideas/performance` | any idea term | desk stats, coverage banner, equity curve in R, breakdowns, closed-ideas table, metric definitions |
 | `/ideas/publish` | `publish_ideas` or admin | composer (live reward:risk readout), preview of what each plan tier gets plus the alert payload, drafts, publish now **or schedule**, own-ideas list, "Run tracker now". Lives under `/ideas`, not `/admin`, because analysts later will not be admins. |
@@ -161,7 +192,7 @@ widget cannot draw a published plan and would bypass the reader's plan gating.
 
 ## API
 
-All under `/api/ideas` (rate limiter `ideas`, 90/min, editable at `/admin/settings`). Responses are
+All under `/api/ideas` (rate limiter `ideas`, 90/min; the live mark has its own `ideas_live`, 60/min so polling cannot starve the rest; both editable at `/admin/settings`). Responses are
 `{ success, data | error, details? }`. Signed out: 401. Not entitled: 403 `{ error: 'Upgrade required', feature }`.
 
 | Method and path | Who | Notes |
@@ -171,6 +202,7 @@ All under `/api/ideas` (rate limiter `ideas`, 90/min, editable at `/admin/settin
 | `POST /api/ideas` | publisher | save a draft (`id` in the body updates it) |
 | `GET /api/ideas/[id]` | idea term | idea + timeline; 404 if missing or outside the plan |
 | `DELETE /api/ideas/[id]` | publisher | drafts only |
+| `GET /api/ideas/[id]/live` | idea term | provisional live mark of an open idea (limiter `ideas_live`); `data: { live, market, disclaimer }`; closed idea `live: null`; 404 if missing or outside the plan |
 | `POST /api/ideas/[id]/publish` | publisher | revalidates, requires price data, stamps `published_at/on` and `ref_price`, records the `published` event |
 | `POST /api/ideas/[id]/schedule` | publisher | `{at: ISO}`, 2 minutes to 90 days ahead; `DELETE` unschedules. See "Scheduled publishing" |
 | `GET/POST /api/ideas/[id]/taken` | idea term | GET: my record for this idea. POST `{qty, entryPrice, note?}` records it; `?dry_run=true` returns the preview and saves nothing |

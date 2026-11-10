@@ -15,7 +15,8 @@ export type IdeaGuard =
   | { ctx: CurrentUserContext; access: IdeaAccess; blocked: null }
   | { ctx: CurrentUserContext; access: IdeaAccess; blocked: NextResponse };
 
-export async function guardIdeas(opts: { publish?: boolean; rateLimited?: boolean } = {}): Promise<IdeaGuard> {
+export async function guardIdeas(opts: { publish?: boolean; rateLimited?: boolean; limiter?: string } = {}): Promise<IdeaGuard> {
+  const limiterName = opts.limiter ?? LIMITER;
   const ctx = await getCurrentUserContext();
   const access = ideaAccess(ctx);
   const deny = (status: number, body: Record<string, unknown>): IdeaGuard => ({ ctx, access, blocked: NextResponse.json({ success: false, ...body }, { status }) });
@@ -26,8 +27,8 @@ export async function guardIdeas(opts: { publish?: boolean; rateLimited?: boolea
     return deny(403, { error: 'Upgrade required', feature: FEATURE_IDEAS_SHORT_TERM, features: [FEATURE_IDEAS_SHORT_TERM, FEATURE_IDEAS_LONG_TERM] });
   }
   if (opts.rateLimited !== false) {
-    const { limit: cap, windowSeconds } = await resolveLimit(LIMITER, false);
-    const limit = await checkRateLimit(LIMITER, `user:${ctx.userId}`, cap, windowSeconds);
+    const { limit: cap, windowSeconds } = await resolveLimit(limiterName, false);
+    const limit = await checkRateLimit(limiterName, `user:${ctx.userId}`, cap, windowSeconds);
     if (!limit.allowed) {
       return {
         ctx, access,

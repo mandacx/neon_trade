@@ -7,6 +7,20 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-11-10 (later) — Trade Ideas: provisional live mark on the idea page (step 1; board not built)
+
+Requested: show how an open idea is doing right now, without touching the official tracked result.
+
+- **Files:** new `lib/ideaLiveMath.ts` (pure), `lib/ideaLive.ts` (server), `app/api/ideas/[id]/live/route.ts`, `components/ideas/LiveMark.tsx`; changed `lib/ideas.ts` (`getIdeaForLive`), `lib/ideasApi.ts` (`guardIdeas` optional `limiter`, default unchanged), `lib/rateLimitConfig.ts` (limiter `ideas_live`, 60/min), `app/ideas/[id]/page.tsx` (card after the plan card, amended "Tracked result" caption), `scripts/test-idea-scoring.mjs` (+8 checks), `docs/trade-ideas.md`, `CLAUDE.md` (one clause).
+- **Design:** a provisional price mark of the immutable plan, computed per request: state vs entry zone / stop / targets, and R and % only once the stored official outcome says `open` with an entry date. Never stored, never given to `scoreIdea`, not in desk stats, no alerts, independent of `nt_idea_taken`. Price = regular-session live price, otherwise the last regular close (`getMarketState` + `buildQuote`); ext move display only. No clamp at the stop. "Today's range touched ..." hint warns that the official score may differ. Gated SQL read runs before any market call; 404 for missing and out-of-plan alike; closed idea answers `live: null`. Poll via `pollDelayMs` (20 s / 60 s / closed sleep), paused when hidden, stops on 401/403/404, 60 s on 429. Own limiter so polling cannot starve the 90/min `ideas` limiter. Rejected: re-running `scoreIdea` with a partial bar; client-only last candle.
+- **Verified:** `node scripts/test-idea-scoring.mjs` prints `ideas: 41 checks passed` (33 existing + 8 live: parity with `scoreIdea` R/% for open long, after T1 and short; no R before entry; price past a target; no clamp; null/invalid inputs without NaN; range hint rules; distance signs; no vendor words). `npx tsc --noEmit` clean. eslint on the touched files: 0 errors (existing `any` warnings only).
+- **Also verified (QA, per qa.md):** `npm run build` succeeded and the vendor-masking grep on `.next/static` printed nothing.
+- **Review polish (same day):** `useLiveMark` now uses a per-run token (`gen`, bumped in the effect cleanup, which also resets the in-flight flag), so under React strict mode the remounted effect starts its own fetch and timer instead of waiting for Refresh; stale fetches touch no state or timers. One timer per mounted hook, hidden-tab pause, stop on 401/403/404 and 429 backoff unchanged. A plan with invalid risk now shows "—" instead of a price under "Price unavailable". Spacing fix in `lib/ideasApi.ts`. Re-run: scoring script, `tsc`, eslint (results in dev.md); the strict-mode behaviour itself was not exercised in a browser.
+- **NOT verified:** no browser run (card layout, poll ticks, hidden-tab pause, Refresh); the route was not called (no dev server, no DB); SQL in `getIdeaForLive` not run against Neon (columns copied from `IDEA_COLS` / `evaluateIdeas`: `published_on`, `o.*`); `buildQuote`/snapshot wiring checked by types only; whether the Trade Ideas tables script has been run in the live DB is still unverified.
+- **Follow-ups:** step 2 (board): `GET /api/ideas/live` (no id params, ids from a gated `listOpenForLive`, one `liveBlocksFor` call), `LiveChip` in `components/ideas/LiveMark.tsx`, Open-tab poll in `app/ideas/page.tsx`. Not built here.
+
+---
+
 ## 2026-11-10 — Watchlists: collapsible filters, scrolling table, flash on quote updates
 
 Requested: (1) collapsible filters module, (2) the watchlist table scrolls vertically instead of growing the page, (3) a visible effect when quotes refresh silently (indexes and other pages).
