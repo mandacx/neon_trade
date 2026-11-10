@@ -218,6 +218,8 @@ All under `/api/ideas` (rate limiter `ideas`, 90/min; the live mark has its own 
 | `GET/POST /api/ideas/feed` | idea term | in-app alerts; POST marks read |
 | `GET/POST /api/ideas/prefs` | idea term | `{emailAlerts, telegramAlerts, pushAlerts}` opt-ins plus what each channel needs (configured, linked, entitled, devices) |
 | `GET/POST /api/ideas/disclaimer` | idea term | text + acknowledgement status; POST stores the timestamped, versioned acknowledgement |
+| `GET/POST /api/email/unsubscribe` | public (signed link) | one-click unsubscribe from Trade Ideas emails; GET only redirects, POST writes (see "Unsubscribe") |
+| page `/unsubscribe` | public (signed link) | confirm page for the footer link; the GET never writes |
 | `POST /api/ideas/evaluate` | publisher | `{ideaId}` or `{all:true}` re-run the tracker now |
 | `GET /api/cron/ideas` | cron secret | publish due scheduled ideas, tracker, then email / Telegram / push delivery; `?force=true` rebuilds every outcome |
 
@@ -230,9 +232,9 @@ per-user fan-out and no way to get duplicates. Three opt-in channels, all in `li
 
 | Channel | Needs | Content |
 |---|---|---|
-| **Email** (Resend, `lib/email.ts`) | opted in, `EMAIL_*` set | `lib/ideaEmail.ts`: subject `SYM side: event (R)`, preheader, table-based light HTML (banner with event group, headline and glyph; symbol, LONG/SHORT badge, term / horizon / risk; one "what happened" sentence; levels table with status words; result line; note; "View idea" button plus the raw link; quiet gray disclaimer block; manage-alerts link to `/ideas`), and a full plain-text part. Published adds the rationale excerpt and the option strategy name. |
+| **Email** (Resend, `lib/email.ts`) | opted in, `EMAIL_*` set | `lib/ideaEmail.ts`: subject `SYM side: event (R)`, preheader, table-based light HTML (banner with event group, headline and glyph; symbol, LONG/SHORT badge, term / horizon / risk; one "what happened" sentence; levels table with status words; result line; note; "View idea" button plus the raw link; quiet gray disclaimer block; footer with an "Unsubscribe from Trade Ideas emails" link, a manage-alerts link to `/ideas`, the scope sentence, support contact and sender name), and a full plain-text part. Sent as `StocksTrendz Trade Ideas <address>`: the display name is built in code from the address part of `EMAIL_FROM` (`lib/emailFormat.ts` `formatFrom`), so the env display name no longer matters. With `IDEA_UNSUB_SECRET` set it also carries `List-Unsubscribe` and `List-Unsubscribe-Post: List-Unsubscribe=One-Click` headers. Published adds the rationale excerpt and the option strategy name. |
 | **Telegram** (`lib/telegram.ts`) | opted in, chat linked in /profile, the plan's existing `telegram_alerts` gate, `TELEGRAM_BOT_TOKEN` | `buildTelegram` in `lib/ideaMessages.ts`: HTML parse mode (tags `b`, `i`, `pre`, `a` only, every value escaped): glyph + `SYM . headline`, identity line, title, sentence, monospace levels block, result line, note, link, italic one-line disclaimer, plus an inline "Open idea" button. A 400 (not "chat not found") is retried once as plain text inside the same delivery row. |
-| **Web push** (`web-push`, `public/sw.js`) | opted in and a registered browser, `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` | `buildPush`: title `SYM side: event`, one line of numbers, then `IDEA_DISCLAIMER_MICRO`; tag `idea-<ideaId>-<eventId>` (each event stacks, T2 does not replace T1); icon/badge are `public/idea-alert-icon.svg` / `idea-alert-badge.svg` (SVG support for notification icons is unverified; the notification shows without them); click opens the idea. |
+| **Web push** (`web-push`, `public/sw.js`) | opted in and a registered browser, `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` | `buildPush`: title `SYM side: event`, one line of numbers, then `IDEA_DISCLAIMER_MICRO`; tag `idea-<ideaId>-<eventId>` (each event stacks, T2 does not replace T1); icon/badge are `public/idea-alert-icon.svg` / `idea-alert-badge.svg` (SVG support for notification icons is unverified; the notification shows without them); click opens the idea. Urgency (a transport hint, `pushUrgency` in `lib/ideaMessages.ts`): `high` for triggered, target, all targets and stopped; `normal` for the rest. |
 
 **How a message is built.** Facts of the event come from `nt_idea_events.payload` (written by `recordEvent` from the same
 scorer result), the plan from the immutable `nt_trade_ideas` row at delivery. A missing payload or plan, or an unknown
@@ -240,6 +242,22 @@ scorer result), the plan from the immutable `nt_trade_ideas` row at delivery. A 
 nothing prints `null` or a dash. All text is built in the pure modules `lib/ideaAlertModel.ts`, `lib/ideaEmail.ts`,
 `lib/ideaMessages.ts` (fixtures: `scripts/test-idea-alerts.mjs`); `lib/ideaChannels.ts` only fetches, builds and sends.
 R shown: per-target R from the plan on target / published alerts, the scorer's realised R (equal-split ladder) on terminal events.
+
+**Unsubscribe (email).** The footer link opens `/unsubscribe?t=<token>` (a public page outside the login gate). The token is a
+stateless HMAC (`lib/signedToken.ts`, key `IDEA_UNSUB_SECRET`, at least 32 characters; it carries the user id, no
+expiry, and only ever switches email alerts off). The GET of the page and of `/api/email/unsubscribe` never writes (link
+scanners prefetch links); the write is a POST: the page's button, or the mail client's one-click POST (RFC 8058). Scope:
+`nt_idea_prefs.email_alerts = false` only; Telegram, push and sign-in/account emails are untouched. After a successful
+unsubscribe the page offers a 15-minute **Undo** (a separate, purpose-bound token returned only in the POST response, never
+mailed); later, re-subscribe by ticking Email in the Alerts menu. Unknown and already-off users get the same answer, and every
+invalid token gets the same answer. **Fail closed:** with no (or a short) secret nothing is signed or verified, emails go out
+without the link and headers (sign-in fallback sentence in the footer) and the run logs one warning. Rotating the secret
+invalidates every link already mailed (they show the "link does not work" state with the manual steps). A forwarded email lets
+the forwardee unsubscribe the original recipient (accepted). Limiter `email_unsubscribe` (20/min; per user for a valid link, per
+IP otherwise; admin-editable at `/admin/settings`). Custom headers are passed to Resend's `headers` field (documented there as
+"Custom headers to add to the email"); `lib/email.ts` resends once without them if the provider answers 400/422, so an alert
+is never lost to a header problem. Whether Gmail shows its native Unsubscribe button and whether the header is covered by DKIM
+are owner checks (`docs/ideas-alert-checks.md`).
 
 Each channel finds opted-in subscribers whose *effective* features (plan, minus revoked overrides, plus granted ones, plan
 not expired) include the event's term, within the last 3 days and with no delivery yet, **reserves** a
@@ -285,7 +303,9 @@ future results; trade only as your own adviser advises and do your own research.
 Alerts menu, and as a quiet gray footer block in emails (`disclaimerHtmlQuiet`; the amber `disclaimerHtml` is unchanged). Telegram carries the `short` line; push carries `IDEA_DISCLAIMER_MICRO` ("For information only, not advice.", same file). A first-time
 reader must acknowledge it once (stored with timestamp and version; bumping the version asks everyone again). Edit the text
 in that one file only. **The app has no dark theme** (`app/globals.css`), so the callout uses fixed light colours with
-checked contrast; there is nothing theme-dependent to break.
+checked contrast; there is nothing theme-dependent to break. The email is light-only by decision (2026-11-10): `color-scheme: light`
+hints, a `bgcolor` plus inline background on every cell, and one exported palette (`EMAIL_PALETTE` in `lib/ideaEmail.ts`) whose
+contrast is asserted in `scripts/test-idea-alerts.mjs`. A dark palette is specified but not built (docs/CHANGES.md follow-ups).
 
 ## Runbook (in this order)
 
@@ -297,8 +317,11 @@ node --env-file=.env.local scripts/add-trade-ideas-plans.mjs          # insert-o
 node scripts/test-idea-scoring.mjs                                    # fixtures (no DB)
 node scripts/test-idea-push.mjs                                       # web-push request building (offline)
 node scripts/test-idea-alerts.mjs                                     # alert email / Telegram / push builders, every event type (no DB)
+node scripts/test-unsubscribe.mjs                                     # sender formatting, List-Unsubscribe headers, signed tokens, request parsing (no DB)
+node scripts/render-idea-alert-samples.mjs --screenshots              # offline samples (.html/.txt/.eml/Telegram/push) in .tmp/idea-alert-samples; never sends
 ```
 
+0. Set `IDEA_UNSUB_SECRET` (at least 32 characters; `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`) in Vercel Production and redeploy, and set the `EMAIL_FROM` address to `support@stockstrendz.com`. Then work through `docs/ideas-alert-checks.md` (real mail clients, Telegram and push on real devices) before telling subscribers.
 1. Optional: tick/untick gates for the three plans at `/admin/plans`; assign users at `/admin/users`.
 2. Give an analyst the `publish_ideas` override in `/admin/users/[id]` (admins can publish without it).
 3. Optional channels: Telegram needs `TELEGRAM_BOT_TOKEN` (already used by the scan alerts). Browser push needs a VAPID pair:

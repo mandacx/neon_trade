@@ -82,6 +82,14 @@ export const LIMITERS: LimiterDef[] = [
     standard: 60,
     entitled: null,
   },
+  {
+    name: 'email_unsubscribe',
+    label: 'Email unsubscribe',
+    description: 'Public one-click unsubscribe from Trade Ideas emails (link in the email and mail-client button). Counted per user for valid links, per IP otherwise.',
+    windowSeconds: 60,
+    standard: 20,
+    entitled: null,
+  },
 ];
 
 export const RATE_LIMITS_KEY = 'rate_limits';
@@ -128,7 +136,7 @@ export function validateRateLimits(input: unknown): { ok: true; values: RateLimi
  * longer exist), so adding a limiter in code doesn't make the saved set invalid and silently drop every
  * admin-edited value back to the defaults. The admin save path still validates strictly.
  */
-function withDefaultLimiters(saved: unknown): unknown {
+export function withDefaultLimiters(saved: unknown): unknown {
   if (!saved || typeof saved !== 'object') return saved;
   const src = saved as Record<string, unknown>;
   const out: Record<string, unknown> = {};
@@ -191,7 +199,7 @@ export interface RateLimitSettingsView {
 export async function getRateLimitSettings(): Promise<RateLimitSettingsView> {
   clearRateLimitCache();
   const saved = await getSetting<unknown>(RATE_LIMITS_KEY).catch(() => null);
-  const checked = saved ? validateRateLimits(saved.value) : null;
+  const checked = saved ? validateRateLimits(withDefaultLimiters(saved.value)) : null;
   const values = checked?.ok ? checked.values : defaultRateLimits();
   return {
     limiters: LIMITERS.map(l => ({

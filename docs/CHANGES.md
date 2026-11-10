@@ -7,6 +7,82 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-11-10 (alerts follow-ups) — Trade Ideas: sender name, one-click unsubscribe, push urgency, offline render
+
+Requested: the follow-ups listed after the alert formatting run: the email sender name, an unsubscribe path, dark-mode behaviour,
+push urgency and a way to check real clients. Who gets an alert, when, how often, subjects, preheaders, the disclaimer wording and
+the delivery-row dedupe are unchanged. Run id `20261110-1730-ideas-alert-followups`. **Not committed; no migration; nothing sent.**
+
+**What changed**
+- **Sender:** `lib/emailFormat.ts` `formatFrom` builds `StocksTrendz Trade Ideas <address>` from the address part of `EMAIL_FROM`
+  (`IDEA_SENDER_NAME` in `lib/site.ts`); `sendEmail` takes `fromName` and `headers`. Unparseable `EMAIL_FROM` is passed through unchanged.
+- **Unsubscribe:** new env `IDEA_UNSUB_SECRET` (>= 32 chars). `lib/signedToken.ts` (HMAC token, purpose inside the MAC),
+  `lib/ideaUnsubscribe.ts` (the only env read; unsubscribe token without expiry, separate 15-minute Undo token), public page
+  `/unsubscribe` (`app/unsubscribe/page.tsx`, `components/email/*`; GET verifies the signature only, never writes) and public
+  `/api/email/unsubscribe` (GET redirects; POST = RFC 8058 one-click, the page's form, or JSON incl. Undo), `turnOffIdeaEmails` /
+  `turnOnIdeaEmails` in `lib/ideas.ts` (only `nt_idea_prefs.email_alerts`), limiter `email_unsubscribe` (20/min), email footer
+  (link, scope sentence, manage link, support contact, sender) and `List-Unsubscribe` / `List-Unsubscribe-Post` headers.
+  No secret means no link and no headers (sign-in fallback sentence in the footer), email still sent, one warning per run.
+  The publisher preview shows the real footer with an invalid `?t=preview` token.
+- **Dark mode:** decision, light-only. The email's colours are now one exported palette (`FILL`, `TINT`, `INK` / `EMAIL_PALETTE`
+  in `lib/ideaEmail.ts`, same hex values as before) with a contrast fixture and a "no colour outside the palette" scan. The
+  contingency dark palette is specified in the designer's notes, not built.
+- **Push urgency:** `pushUrgency(kind)` in `lib/ideaMessages.ts`: `high` for triggered, target, all_targets, stopped; `normal` otherwise;
+  used by `deliverPush` (`TTL: 3600` unchanged; the payload and `public/sw.js` are unchanged).
+- **Real-client checks:** `scripts/render-idea-alert-samples.mjs` (pure builders only, `fetch` replaced with a throwing stub, never
+  sends; `.html`, `.txt`, `.eml`, Telegram, push JSON, `report.json`, optional Chromium screenshots at 600/360/320, light and
+  dark emulation, network blocked) writing to `.tmp/idea-alert-samples` (git-ignored, `/.tmp/` added to `.gitignore`);
+  shared fixtures moved to `scripts/fixtures/ideaAlertFixtures.mjs`. Owner checklist: `docs/ideas-alert-checks.md`.
+- **Small email CSS fix found by the render check:** at 320 px the published email's levels table overflowed by 10 px (4 columns);
+  added `@media (max-width:360px)` (3 px cell side padding, 12 px text) to the email's style block. Other widths unchanged.
+- Docs: `docs/trade-ideas.md` (Alerts, "Unsubscribe", API, Runbook, light-only note), `.env.example` (`IDEA_UNSUB_SECRET`, EMAIL_FROM note).
+
+**Verified (this session)**
+- Resend's send-email page, fetched with curl, lists a `headers` body field ("Custom headers to add to the email."). I did not find
+  `List-Unsubscribe` mentioned on that page, and did not send anything, so acceptance of these specific headers is unverified;
+  `sendEmail` therefore resends once without headers on a 400/422.
+- `node scripts/test-unsubscribe.mjs` (13), `test-idea-alerts.mjs` (28, incl. footer with and without URL, escaping, palette contrast
+  >= 4.5:1 for every pair, palette scan, urgency for all 13 kinds, disclaimer wording), `test-idea-push.mjs` (urgency header),
+  and every other `scripts/test-*.mjs`: all pass. `npx tsc --noEmit` clean; eslint on the changed files: 0 errors.
+- `npm run build` passes (with a dummy `DATABASE_URL`); `.next/static` has no vendor names and no `IDEA_UNSUB` or token code.
+- `node scripts/render-idea-alert-samples.mjs --screenshots`: 33 samples, 198 headless Chromium renders (600/360/320, light and
+  dark), 0 overflow, preheader hidden, unsubscribe link present or absent as expected.
+- Against `next start` with a dummy database: `GET /api/email/unsubscribe?t=...` answers 303 to `/unsubscribe?t=...`; `POST` with a bad token
+  answers 400 (`invalid`), a POST with no body 400.
+
+**Not verified**
+- The `/unsubscribe` page render and any database write (`turnOffIdeaEmails`, Undo, the rate-limit counter): the root layout
+  reads the user from the database on every page, so with no reachable database the page returned 500; no production or local
+  database was used. QA needs a non-production database for: valid token GET shows the confirm state with no write; one-click
+  POST twice answers `OK`; JSON Undo works within 15 minutes.
+- The `sendEmail` header-retry path (needs a mock of the provider; not run), Resend DKIM-signing of `List-Unsubscribe`, how Gmail,
+  Outlook or Apple Mail render the email or treat the header, Telegram `<pre>` width on a phone (widest row 48, `stopped` only),
+  push urgency effects, whether Vercel Web Analytics keeps query strings (if it does, the token is in the analytics URL).
+- Resend sender-domain verification (SPF/DKIM/DMARC), the Vercel `EMAIL_FROM` value and `IDEA_UNSUB_SECRET` being set: owner items.
+
+**Follow-ups**
+- Remove the header-retry in `lib/email.ts` once a real send confirms the headers are accepted.
+- Owner runs `docs/ideas-alert-checks.md`; narrow the Telegram block to 36 characters only if the phone check fails.
+- Build the dark palette only if Apple Mail dark mode feels glaring; PNG notification icons.
+- `CLAUDE.md` Email paragraph: proposed sentence for the owner to approve: "Trade Ideas alert emails are sent as `StocksTrendz Trade Ideas <address>` (address part of `EMAIL_FROM`) and carry a signed unsubscribe link and `List-Unsubscribe` headers when `IDEA_UNSUB_SECRET` is set (`lib/ideaUnsubscribe.ts`, `docs/trade-ideas.md` \"Unsubscribe\")."
+
+**Rework round 1 (QA FAIL, fixed)**
+- `lib/ideaEmail.ts`: the email `<style>` block had an unclosed `@media (max-width:480px)`; closed (both media rules are now balanced).
+- No-JS Undo said "You are unsubscribed": `undone` added to `RESULT_STATES` (`lib/unsubscribeRequest.ts`); the route redirects a form undo to
+  `/unsubscribe?s=undone`; the page shows the existing "emails are back on" copy. Two tests that asserted `undone` was not accepted
+  were updated to the new behaviour (`test-unsubscribe.mjs`, `test-unsubscribe-page.mjs`).
+- Admin rate-limit page: `getRateLimitSettings()` now validates `withDefaultLimiters(saved.value)` (exported), as `loadRateLimits()` already did, so a
+  saved `rate_limits` row keeps its values and the new `email_unsubscribe` limiter shows its default (this was the follow-up listed above; it is
+  no longer one). Runtime limits and the strict admin save path are unchanged. Whether a saved row exists in production: unverified.
+- No-JS error state: the result page has no token (by design, none in the URL), so a retry form is impossible; it now says "Try again: open the
+  unsubscribe link in your email once more". The JS "Try again" button is unchanged. This is not a form POST as the designer wrote.
+- Tests: new `scripts/test-rate-limit-settings.mjs` (5; the loader's settings stub can now return `globalThis.__TEST_SETTING`); page 17, route 19
+  (undo assertion strengthened to `s=undone`), unsubscribe 21, idea-alerts 29. All 14 `scripts/test-*.mjs` pass; `npx tsc --noEmit` and eslint on changed
+  files clean; render script `--screenshots`: 33 samples, 198 renders ok. Not re-run: `npm run build`, the browser JS flow, any database.
+- **Update at release:** the 'Not verified' items about the `/unsubscribe` page render and the `sendEmail` header-retry were later covered offline by QA (`scripts/test-unsubscribe-page.mjs`, `scripts/test-email-send.mjs`, stubbed DB and injected fetch); real database, Resend and mail-client behaviour remain unverified. Current counts: email-send 14, idea-alerts 29, rate-limit-settings 5, unsubscribe-page 17, unsubscribe-route 19, unsubscribe 21, earnings-parse 31, idea-scoring 41, payoff 23, premium-plan 32, us-scanner 23 (oi-strategies and idea-push report ok without a count). `npm run build` was run at release (see the run's release.md).
+
+---
+
 ## 2026-11-10 (alerts) — Trade Ideas: structured email, Telegram and web push alerts
 
 Requested: the idea alerts were one-line summaries; give every event type a proper layout on every channel. Presentation

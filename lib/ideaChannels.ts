@@ -12,11 +12,14 @@ import 'server-only';
 import { sendNotification, setVapidDetails } from 'web-push';
 import { sql } from '@/lib/db';
 import { sendEmail, emailConfigured } from '@/lib/email';
+import { listUnsubscribeHeaders } from '@/lib/emailFormat';
+import { ideaUnsubscribeLinks, unsubscribeConfigured } from '@/lib/ideaUnsubscribe';
+import { IDEA_SENDER_NAME } from '@/lib/site';
 import { isPermanentTelegramError, sendTelegramMessage } from '@/lib/telegram';
 import { etDateOf } from '@/lib/marketSession';
-import { parseFacts, toAlertIdea, type AlertIdea, type AlertInput } from '@/lib/ideaAlertModel';
+import { alertKind, parseFacts, toAlertIdea, type AlertIdea, type AlertInput } from '@/lib/ideaAlertModel';
 import { buildEmail } from '@/lib/ideaEmail';
-import { buildPush, buildTelegram } from '@/lib/ideaMessages';
+import { buildPush, buildTelegram, pushUrgency } from '@/lib/ideaMessages';
 
 export const telegramConfigured = () => !!process.env.TELEGRAM_BOT_TOKEN;
 export const pushConfigured = () => !!process.env.VAPID_PUBLIC_KEY && !!process.env.VAPID_PRIVATE_KEY;
@@ -143,12 +146,14 @@ async function deliverEmail(deadline: number): Promise<ChannelResult> {
   out.candidates = cands.length;
   const ideas = await loadIdeas(cands);
   const today = etDateOf(Date.now());
+  if (cands.length && !unsubscribeConfigured()) console.warn('[ideas] IDEA_UNSUB_SECRET not set: emails go out without an unsubscribe link');
   for (const c of cands) {
     if (Date.now() > deadline) break;
     const id = await claim(c, 'email');
     if (!id || !c.email) { if (id) await finish(id, false, 'no email address'); continue; }
-    const m = buildEmail(toInput(c, ideas, today));
-    const r = await sendEmail({ to: c.email, subject: m.subject, text: m.text, html: m.html });
+    const links = ideaUnsubscribeLinks(c.user_id); // null without the secret: no link, no headers
+    const m = buildEmail(toInput(c, ideas, today), { unsubscribeUrl: links?.page ?? null });
+    const r = await sendEmail({ to: c.email, subject: m.subject, text: m.text, html: m.html, fromName: IDEA_SENDER_NAME, headers: listUnsubscribeHeaders(links?.oneClick) });
     await finish(id, r.ok, r.ok ? null : r.error);
     if (r.ok) out.sent++; else out.failed++;
   }
@@ -195,11 +200,12 @@ async function deliverPush(deadline: number): Promise<ChannelResult> {
     if (!id) continue;
     const subs = await sql(`SELECT endpoint, p256dh, auth FROM public.nt_idea_push_subscriptions WHERE user_id = $1`, [c.user_id]);
     const body = JSON.stringify(buildPush(toInput(c, ideas, today)));
+    const urgency = pushUrgency(alertKind(c.event_type, c.event_key));
     let ok = 0;
     let lastError: string | null = null;
     for (const s of subs as any[]) {
       try {
-        await sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, body, { TTL: 3600, urgency: 'normal' });
+        await sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, body, { TTL: 3600, urgency });
         ok++;
         await sql(`UPDATE public.nt_idea_push_subscriptions SET last_ok_at = now() WHERE endpoint = $1`, [s.endpoint]);
       } catch (e: any) {

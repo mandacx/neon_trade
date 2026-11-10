@@ -73,6 +73,38 @@ docs (`docs/trade-ideas.md`, `docs/earnings.md`, `docs/us-scanner.md`, `docs/oi-
 - Rejected: parsing `summary` (fragile); recomputing facts at delivery from `nt_idea_outcomes` (that row is overwritten,
   so it describes "now", not the event); snapshotting the whole plan into every payload (duplicates immutable data).
 
+### Alert email sender, one-click unsubscribe, push urgency (decision record, 2026-11-10 follow-ups)
+
+```
+ deliverEmail --> ideaUnsubscribeLinks(userId) -> { page, oneClick } (lib/ideaUnsubscribe.ts, server-only; null if no secret)
+              --> buildEmail(input, { unsubscribeUrl })              (pure; footer link, or the sign-in fallback text)
+              --> sendEmail({ fromName, headers: List-Unsubscribe + List-Unsubscribe-Post })
+ mail client / user --> GET  /unsubscribe?t=…            (page: verifies the signature only, never writes)
+                    --> POST /api/email/unsubscribe?t=…  (RFC 8058 one-click, the page's form, or "undo")
+                          verify HMAC (lib/signedToken.ts, pure) -> limiter email_unsubscribe
+                          -> UPDATE nt_idea_prefs SET email_alerts = false WHERE user_id = $1 AND email_alerts
+```
+
+- **Sender:** `formatFrom()` (pure, `lib/emailFormat.ts`) builds `StocksTrendz Trade Ideas <address>` from the address
+  part of `EMAIL_FROM`; anything it cannot parse is sent as `EMAIL_FROM` unchanged. The env display name no longer matters
+  for idea alerts; the address (and its domain's verification in the mail provider) is still an owner setting.
+- **Token:** stateless HMAC-SHA256 (`IDEA_UNSUB_SECRET`, at least 32 chars), purpose-bound (`idea-email-unsub`; the undo
+  token is `idea-email-resub` with a 15-minute expiry and is only ever returned in the POST response, never mailed).
+  Unsubscribe tokens do not expire (they can only switch something off). **No secret, no link:** the email then carries the
+  "sign in, Alerts, untick Email" footer and no `List-Unsubscribe` headers.
+- **Scope:** only `nt_idea_prefs.email_alerts` (Trade Ideas emails). Telegram, push, account/auth emails untouched; no new
+  column, no migration. Unknown user and already-off user give the same answer (no enumeration).
+- **Public routes:** `/unsubscribe` and `/api/email/*` are outside the middleware matcher on purpose (no login).
+- **Push urgency:** `pushUrgency(kind)` (pure, `lib/ideaMessages.ts`): `high` for triggered, target, all_targets, stopped;
+  `normal` otherwise. TTL stays 3600. Urgency is a transport hint (`Urgency` header), not part of the payload.
+- **Dark mode:** the email stays light-only (`color-scheme: light`, `bgcolor` on every cell). The contingency dark palette
+  (designer, run 20261110-1730) is documented, not built. Every colour the builder uses comes from one exported palette
+  and a fixture asserts contrast of each text/background pair.
+- Rejected: reusing `CRON_SECRET` / `NEON_AUTH_COOKIE_SECRET` for links (couples rotation and blast radius); a DB token
+  table (state for something that only turns a flag off); GET that unsubscribes (link scanners prefetch); Undo with the
+  unsubscribe token (a stale or forwarded email could re-subscribe someone who left); skipping the email when the secret is
+  missing (would silence alerts).
+
 ## Plans (decision record, 2026-11-10: Premium)
 
 - Plans are **DB rows** (`nt_plans`: code, name, features JSONB, sort_order, is_active), not code. Gates are feature codes
@@ -102,6 +134,12 @@ Do
   raw text first, then escape every dynamic value (`escapeHtml`) for email HTML and Telegram HTML.
 - Take every disclaimer string from `lib/ideaDisclaimer.ts`; omit a missing number rather than print `null`/`NaN`/a dash.
 - Ship schema changes as idempotent, re-runnable scripts that the release step runs before the code that needs them.
+- Sign every link that changes state without a login (HMAC, purpose in the MAC, constant-time compare, fail closed when the
+  secret is missing); state changes only on POST, GET is always inert.
+- Keep pure builders pure: compute signed URLs in a server-only module and pass them in.
+- Give public endpoints a limiter in `LIMITERS`, keyed by the verified subject when there is one (not the IP: mail
+  providers' one-click POSTs share IPs).
+- Render email samples to a gitignored folder for owner review; never send mail from scripts or tests.
 
 Don't
 - Don't change gating logic (`lib/ideas.ts` term SQL, `lib/ideasApi.ts`, layouts) to add a plan; feature codes are the contract.
@@ -116,3 +154,8 @@ Don't
 - Don't rewrite `nt_idea_events.summary` (it is the in-app feed text) or reword the disclaimer; don't hardcode disclaimer text.
 - Don't import `server-only`, `@/lib/db` or `@/` aliases into the alert builders; don't add emoji to email subjects or push.
 - Don't commit binary assets (push PNG icon/badge) without the owner supplying them.
+- Don't emit an unsigned or guessable unsubscribe link, or `List-Unsubscribe` headers without a valid link.
+- Don't reveal on the unsubscribe page or API whether a user exists, their email, plan or id; don't add `/unsubscribe` or
+  `/api/email` to the middleware matcher.
+- Don't let the unsubscribe flag touch Telegram, push or account email; don't mail an Undo or re-subscribe link.
+- Don't ship the dark email palette without a real-client check; don't add a colour to the email outside the exported palette.

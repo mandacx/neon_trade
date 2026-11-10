@@ -11,46 +11,14 @@ import { riskReward } from '../lib/ideaTypes.ts';
 import {
   alertKind, allTargetsFacts, clampWords, escapeHtml, fmtDate, fmtPrice, fmtR, fmtRange, ideaLink, parseFacts, scoreEventFacts, toAlertIdea,
 } from '../lib/ideaAlertModel.ts';
-import { buildEmail } from '../lib/ideaEmail.ts';
-import { buildPush, buildTelegram } from '../lib/ideaMessages.ts';
+import { buildEmail, EMAIL_PALETTE, FOOTER_FALLBACK, FOOTER_SCOPE, FOOTER_WHY, UNSUB_LINK_TEXT } from '../lib/ideaEmail.ts';
+import { buildPush, buildTelegram, pushUrgency } from '../lib/ideaMessages.ts';
 import { IDEA_DISCLAIMER, IDEA_DISCLAIMER_MICRO, disclaimerHtml, disclaimerText } from '../lib/ideaDisclaimer.ts';
 
 let passed = 0;
 const t = (name, fn) => { try { fn(); passed++; } catch (e) { console.error(`FAIL: ${name}`); throw e; } };
 
-const TODAY = '2026-11-10';
-const LONG_ROW = { id: 42, symbol: 'AAPL', direction: 'long', horizon: 'swing', title: 'Breakout above 100', rationale: 'Base building for six weeks with rising volume into the breakout.', entry_low: 100, entry_high: 102, stop: 95, targets: [{ price: 110 }, { price: 120 }], valid_until: '2026-12-12', risk_rating: 'medium', option_strategy: { name: 'Bull call spread' } };
-const SHORT_ROW = { ...LONG_ROW, direction: 'short', title: 'Rejection at 102', entry_low: 100, entry_high: 102, stop: 107, targets: [{ price: 95 }, { price: 90 }], option_strategy: null };
-const LONG = toAlertIdea(LONG_ROW);
-const SHORT = toAlertIdea(SHORT_ROW);
-assert.ok(LONG && SHORT);
-
-const D = '2026-11-09';
-// [name, event_type, event_key, facts]
-const SPECS = (side) => {
-  const shortSide = side === 'short';
-  const px = shortSide ? { t1: 95, t2: 90, stop: 107, gap: 109.5 } : { t1: 110, t2: 120, stop: 95, gap: 93.4 };
-  return [
-    ['published', 'published', 'published', { v: 1 }],
-    ['triggered', 'triggered', 'triggered', { v: 1, date: D, price: shortSide ? 100 : 102 }],
-    ['target T1', 'target_hit', 'target:T1', { v: 1, target: 'T1', date: D, price: px.t1, targetsHit: 1, targetsTotal: 2 }],
-    ['target T2', 'target_hit', 'target:T2', { v: 1, target: 'T2', date: D, price: px.t2, targetsHit: 2, targetsTotal: 2 }],
-    ['all_targets', 'target_hit', 'all_targets', { v: 1, date: D, price: px.t2, targetsHit: 2, targetsTotal: 2, r: 1.8571 }],
-    ['stopped', 'stopped', 'stopped', { v: 1, date: D, price: px.stop, targetsHit: 0, targetsTotal: 2, r: -1 }],
-    ['stopped gap', 'stopped', 'stopped', { v: 1, date: D, price: px.gap, gapped: true, targetsHit: 1, targetsTotal: 2, r: -1.21 }],
-    ['expired', 'expired', 'expired', { v: 1, date: D, price: 101, targetsHit: 1, targetsTotal: 2, r: 0.57 }],
-    ['not_triggered', 'not_triggered', 'not_triggered', { v: 1, date: D }],
-    ['note', 'note', 'update:5', { v: 1, note: 'Holding above the 20-day average; volume is picking up into the close.' }],
-    ['stop_moved', 'stop_moved', 'update:6', { v: 1, newStop: shortSide ? 100 : 102, note: 'Moving to breakeven.' }],
-    ['partial_booked', 'partial_booked', 'update:7', { v: 1, pct: 50, price: shortSide ? 95.4 : 110.4 }],
-    ['closed', 'closed', 'update:8', { v: 1, note: 'Taking the risk off ahead of earnings.' }],
-    ['cancelled', 'cancelled', 'update:9', { v: 1, note: 'Thesis changed.' }],
-  ];
-};
-let eid = 100;
-const mk = (idea, type, key, facts, extra = {}) => ({ eventId: ++eid, ideaId: 42, eventType: type, eventKey: key, summary: 'Stopped: AAPL long, Breakout above 100.', idea, facts, today: TODAY, ...extra });
-const ALL = [];
-for (const idea of [LONG, SHORT]) for (const [name, type, key, facts] of SPECS(idea.direction)) ALL.push({ name: `${name} ${idea.direction}`, kind: name.split(' ')[0], input: mk(idea, type, key, facts) });
+import { ALL, D, LONG, LONG_ROW, SHORT, SHORT_ROW, SPECS, TODAY, mk } from './fixtures/ideaAlertFixtures.mjs';
 
 const PHRASE = {
   published: 'New idea', triggered: 'entered its zone', 'target': 'reached', all_targets: 'all targets reached', stopped: 'stopped out', expired: 'idea expired',
@@ -80,7 +48,7 @@ t('every kind on every channel: non-empty, symbol, side, headline, links', () =>
     assert.ok(e.html.includes('https://stockstrendz.com/ideas"'), `${name}: manage link`);
     assert.ok(e.html.includes(HEADLINE[key]), `${name}: banner headline ${HEADLINE[key]}`);
     assert.ok(e.text.startsWith(`${HEADLINE[key].toUpperCase()}  |  AAPL  ${input.idea.direction.toUpperCase()}`) || k === 'target', `${name}: text first line ${e.text.split('\n')[0]}`);
-    assert.ok(e.text.includes('Manage alerts: https://stockstrendz.com/ideas'), name);
+    assert.ok(e.text.includes('Manage alerts (sign in, then Alerts, then Email): https://stockstrendz.com/ideas'), name);
     const first = g.html.split('\n')[0];
     assert.ok(first.includes('AAPL') && first.includes(HEADLINE[key]), `${name}: telegram first line ${first}`);
     assert.equal(g.button.url, 'https://stockstrendz.com/ideas/42');
@@ -396,6 +364,103 @@ t('sw.js safePath: same-origin paths only (backslash, protocol-relative, absolut
   assert.equal(safePath('/ideas', '/x'), '/ideas');
   assert.equal(safePath('/ideas/42', '/x'), '/ideas/42');
   assert.equal(safePath('/ideas/42?a=1#b', '/x'), '/ideas/42?a=1#b');
+});
+
+// --- Run 20261110-1730 (ideas-alert-followups): footer, palette, urgency ---------------------------------------
+
+const UNSUB = 'https://stockstrendz.com/unsubscribe?t=SAMPLE.abc-_';
+const FALLBACKS = [mk(null, 'stopped', 'stopped', null), mk(LONG, 'stopped', 'stopped', null), mk(LONG, 'weird', 'x', { v: 1 })];
+const EVERY = [...ALL.map(a => a.input), ...FALLBACKS];
+
+t('footer with an unsubscribe URL: link, scope sentence, contact, sender, URL alone on a text line', () => {
+  for (const input of EVERY) {
+    const e = buildEmail(input, { unsubscribeUrl: UNSUB });
+    assert.ok(e.html.includes(`href="${UNSUB}"`) && e.html.includes(`>${UNSUB_LINK_TEXT}</a>`), 'link');
+    assert.ok(e.html.includes('>Manage alerts</a>') && e.html.includes('href="https://stockstrendz.com/ideas"'), 'manage');
+    assert.ok(e.html.includes('href="mailto:support@stockstrendz.com"') && e.html.includes('StocksTrendz Trade Ideas'), 'contact and sender');
+    assert.ok(e.html.includes(FOOTER_WHY) && e.html.includes(FOOTER_SCOPE), 'sentences');
+    assert.ok(!e.html.includes(FOOTER_FALLBACK), 'no fallback sentence');
+    assert.ok(e.text.split('\n').includes(UNSUB), 'text: URL alone on its own line');
+    assert.ok(e.text.includes(`${UNSUB_LINK_TEXT}:`) && e.text.includes('This turns off Trade Ideas email alerts only.'), 'text sentences');
+    assert.ok(e.text.includes('Questions? Contact support@stockstrendz.com') && e.text.trimEnd().endsWith('StocksTrendz Trade Ideas'), 'text tail');
+    assert.ok(!/display:\s*none/.test(e.html.slice(e.html.indexOf(FOOTER_WHY) - 400)), 'nothing hidden in the footer');
+  }
+});
+
+t('footer without a usable URL: sign-in fallback, no unsubscribe link, same subject and preheader', () => {
+  const bad = [undefined, null, '', 'http://evil.example/x', 'https://evil.example/unsubscribe?t=x', `${UNSUB}"onmouseover="x`, `${UNSUB} x`, `${UNSUB}<b>`, 'https://stockstrendz.com/unsubscribe?t=', 'https://stockstrendz.com/unsubscribe', 5];
+  for (const input of EVERY) {
+    const withUrl = buildEmail(input, { unsubscribeUrl: UNSUB });
+    for (const u of bad) {
+      const e = buildEmail(input, u === undefined ? undefined : { unsubscribeUrl: u });
+      assert.ok(!e.html.includes(UNSUB_LINK_TEXT) && !e.text.includes(UNSUB_LINK_TEXT) && !e.html.includes('/unsubscribe') && !e.text.includes('/unsubscribe'), `no link for ${String(u)}`);
+      assert.ok(e.html.includes(FOOTER_FALLBACK) && e.text.includes(FOOTER_FALLBACK), 'fallback sentence in html and text');
+      assert.ok(e.html.includes('>Manage alerts</a>') && e.html.includes('mailto:support@stockstrendz.com'));
+      assert.equal(e.subject, withUrl.subject); assert.equal(e.preheader, withUrl.preheader);
+    }
+  }
+  assert.equal(FOOTER_FALLBACK, 'To stop these emails, sign in, open Trade Ideas, choose Alerts and untick Email.');
+});
+
+t('footer escapes the URL in HTML', () => {
+  const e = buildEmail(EVERY[0], { unsubscribeUrl: 'https://stockstrendz.com/unsubscribe?t=a&b=1' });
+  assert.ok(e.html.includes('href="https://stockstrendz.com/unsubscribe?t=a&amp;b=1"'), 'ampersand escaped in href and text');
+  assert.ok(!e.html.includes('t=a&b=1'));
+});
+
+// WCAG relative luminance contrast
+const lum = (hex) => { const c = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255).map(v => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)); return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; };
+const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((m, n) => n - m); return (x + 0.05) / (y + 0.05); };
+
+t('palette contrast: every text/background pair the builder uses is at least 4.5:1', () => {
+  const { FILL, TINT, INK } = EMAIL_PALETTE;
+  const pairs = [];
+  for (const k of ['primary', 'body', 'footnote', 'secondary', 'muted', 'link']) pairs.push([`${k} on card`, INK[k], INK.card]);
+  pairs.push(['cta label', INK.white, INK.cta], ['quiet disclaimer', '#4B5563', '#F9FAFB']);
+  for (const tone of Object.keys(FILL)) {
+    pairs.push([`white on FILL.${tone}`, INK.white, FILL[tone]], [`FILL.${tone} chip on white`, FILL[tone], INK.card],
+      [`body on TINT.${tone}`, INK.body, TINT[tone]], [`secondary on TINT.${tone}`, INK.secondary, TINT[tone]]);
+  }
+  for (const [name, fg, bg] of pairs) assert.ok(ratio(fg, bg) >= 4.5, `${name}: ${ratio(fg, bg).toFixed(2)}`);
+  assert.ok(Math.abs(ratio('#000000', '#FFFFFF') - 21) < 0.01, 'helper sanity: black on white is 21');
+});
+
+t('palette scan: every hex colour in every generated email is in the exported palette or the quiet disclaimer', () => {
+  const { FILL, TINT, INK } = EMAIL_PALETTE;
+  const allowed = new Set([...Object.values(FILL), ...Object.values(TINT), ...Object.values(INK), '#F9FAFB', '#4B5563', '#E5E7EB'].map(h => h.toUpperCase()));
+  for (const input of EVERY) for (const opts of [{}, { unsubscribeUrl: UNSUB }]) {
+    const html = buildEmail(input, opts).html;
+    for (const m of html.matchAll(/#[0-9a-fA-F]{6}\b/g)) assert.ok(allowed.has(m[0].toUpperCase()), `colour ${m[0]} outside the palette`);
+  }
+});
+
+t('pushUrgency: high for triggered, target, all_targets, stopped; normal for the other nine (all 13 kinds)', () => {
+  const kinds = ['published', 'triggered', 'target', 'all_targets', 'stopped', 'expired', 'not_triggered', 'note', 'stop_moved', 'partial_booked', 'closed', 'cancelled', 'unknown'];
+  const high = new Set(['triggered', 'target', 'all_targets', 'stopped']);
+  assert.equal(kinds.length, 13);
+  for (const k of kinds) assert.equal(pushUrgency(k), high.has(k) ? 'high' : 'normal', k);
+  assert.equal(kinds.filter(k => pushUrgency(k) === 'normal').length, 9);
+  assert.equal(pushUrgency(alertKind('stopped', 'stopped')), 'high');
+  assert.equal(pushUrgency(alertKind('target_hit', 'target:T1')), 'high');
+  assert.equal(pushUrgency(alertKind('note', 'update:5')), 'normal');
+});
+
+t('disclaimer wording unchanged by the footer change', () => {
+  assert.equal(IDEA_DISCLAIMER.short, 'Ideas are for information and education only, not investment advice. Trading involves risk of loss.');
+  assert.equal(IDEA_DISCLAIMER_MICRO, 'For information only, not advice.');
+  for (const input of EVERY) for (const opts of [{}, { unsubscribeUrl: UNSUB }]) { assert.ok(buildEmail(input, opts).text.includes(disclaimerText())); }
+});
+
+
+// QA (run 20261110-1730): the <style> block of the email must be balanced CSS. Every { needs its }.
+t('email <style> block has balanced braces (every @media and rule is closed)', () => {
+  for (const input of EVERY) for (const opts of [{}, { unsubscribeUrl: UNSUB }]) {
+    const css = buildEmail(input, opts).html.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? '';
+    let depth = 0, minDepth = 0;
+    for (const c of css) { if (c === '{') depth++; else if (c === '}') { depth--; minDepth = Math.min(minDepth, depth); } }
+    assert.equal(depth, 0, `unclosed block in the email <style>: ${css}`);
+    assert.equal(minDepth, 0, 'no stray closing brace');
+  }
 });
 
 console.log(`ok: ${passed} idea-alert tests passed`);

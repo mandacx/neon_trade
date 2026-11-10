@@ -9,6 +9,7 @@
  * - Outcomes are derived by lib/ideaScoring.ts from daily bars and stored in `nt_idea_outcomes` (rebuildable).
  */
 import { sql } from '@/lib/db';
+import { SITE_URL } from '@/lib/site';
 import type { CurrentUserContext } from '@/lib/appUsers';
 import {
   FEATURE_IDEAS_LONG_TERM, FEATURE_IDEAS_SHORT_TERM, FEATURE_PUBLISH_IDEAS, hasFeature,
@@ -382,7 +383,7 @@ export async function previewIdea(access: IdeaAccess, raw: unknown): Promise<Ide
       risk_rating: plan.riskRating, option_strategy: plan.optionStrategy,
     }),
   };
-  const mail = buildEmail(alertInput);
+  const mail = buildEmail(alertInput, { unsubscribeUrl: `${SITE_URL}/unsubscribe?t=preview` });
   const push = buildPush(alertInput);
   const tg = buildTelegram(alertInput);
   return {
@@ -622,6 +623,20 @@ export async function setPrefs(userId: string, patch: Partial<IdeaPrefs>): Promi
     [userId, next.emailAlerts, next.telegramAlerts, next.pushAlerts],
   );
   return next;
+}
+
+/** One-click unsubscribe: 'done' when it was on, 'already' when off or no row (the same answer for an unknown user). */
+export async function turnOffIdeaEmails(userId: string): Promise<'done' | 'already'> {
+  const rows = await sql(
+    `UPDATE public.nt_idea_prefs SET email_alerts = false, updated_at = now() WHERE user_id = $1 AND email_alerts RETURNING user_id`,
+    [userId],
+  );
+  return rows.length ? 'done' : 'already';
+}
+
+/** Undo of the above (never inserts a row). */
+export async function turnOnIdeaEmails(userId: string): Promise<void> {
+  await sql(`UPDATE public.nt_idea_prefs SET email_alerts = true, updated_at = now() WHERE user_id = $1`, [userId]);
 }
 
 export async function getAck(userId: string): Promise<{ acknowledged: boolean; ackedAt: string | null }> {

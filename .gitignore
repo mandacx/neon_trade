@@ -43,3 +43,6 @@ next-env.d.ts
 
 # Agent pipeline handoff notes (per-run, local)
 .claude/handoff/
+
+# Local render output (scripts/render-idea-alert-samples.mjs)
+/.tmp/

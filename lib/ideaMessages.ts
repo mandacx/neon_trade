@@ -12,6 +12,7 @@ import {
   oneLine, pushLine, resultLine, footnoteOf, sideLabel, sideWord, targetLabelOf, whatHappened,
   type AlertInput, type LevelRow, type RowStatus,
 } from './ideaAlertModel.ts';
+import type { AlertKind } from './ideaAlertModel.ts';
 import { IDEA_DISCLAIMER, IDEA_DISCLAIMER_MICRO } from './ideaDisclaimer.ts';
 
 const TG_MAX = 4000; // Telegram allows 4096; keep headroom
@@ -152,4 +153,13 @@ export function buildPush(input: AlertInput): PushPayload {
     icon: IDEA_ALERT_ICON,
     badge: IDEA_ALERT_BADGE,
   };
+}
+
+/**
+ * Push urgency (a transport hint, not part of the payload): `high` for the events a trader acts on now (entered, target
+ * reached, all targets, stopped); `normal` for everything else, including end-of-day bookkeeping (expired, not triggered).
+ */
+const HIGH_URGENCY: ReadonlySet<AlertKind> = new Set<AlertKind>(['triggered', 'target', 'all_targets', 'stopped']);
+export function pushUrgency(kind: AlertKind): 'high' | 'normal' {
+  return HIGH_URGENCY.has(kind) ? 'high' : 'normal';
 }
