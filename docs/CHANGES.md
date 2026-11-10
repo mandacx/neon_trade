@@ -2589,3 +2589,10 @@ per-user behavior panel and delete user.
 - **Why:** the full disclaimer already closes every Trade Ideas page; repeating it in the channel-selection menu was noise. Kept on purpose: the alert preview on the publish page (it shows what the real alert/email carries) and the "I took this" confirmation (`TakeThis.tsx`, a modal that covers the page bottom).
 - **Verified:** `npx tsc --noEmit` clean; eslint 0 errors (2 pre-existing `any` warnings). **Not verified:** in a browser; the bot reply (needs deploy and a fresh link).
 - **Follow-up:** decide whether `TakeThis` should also drop its banner.
+
+## 2026-11-09 — Trade Ideas: no disclaimer anywhere on the publish page
+
+- **What changed:** `components/ideas/IdeasFrame.tsx` (the full disclaimer box at the page bottom is not rendered on `/ideas/publish*`), `app/ideas/publish/page.tsx` (removed the banner under the alert preview and the unused `IdeaDisclaimer` import).
+- **Why:** publishers write ideas, they are not the audience of the risk notice. A screenshot of the deployed publish page showed three copies (top strip, bottom of "Your ideas", the full box); the top strip and "Your ideas" box were already removed in the previous two commits but not yet deployed. The real alert/email still carries the disclaimer; only the publisher's preview of it is gone.
+- **Audit of other screens (grep of `IdeaDisclaimer` and disclaimer wording in app/ and components/):** Board, My trades, Performance and idea detail show exactly one (the frame's bottom box). `TakeThis.tsx` modal has its own banner over the page (left as is, see prior follow-up). The one-time acknowledgement modal is unchanged and still appears for publishers on first visit. Scanner has one footer line; site footer is home-only.
+- **Verified:** code read and grep only. `npx tsc --noEmit` clean. **Not verified:** the page in a browser.

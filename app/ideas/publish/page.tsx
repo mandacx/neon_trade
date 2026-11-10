@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { IDEA_HORIZONS, RISK_RATINGS, riskReward, type IdeaOptionStrategy } from '@/lib/ideaTypes';
 import {
-  DirectionPill, HorizonPill, IdeaDisclaimer, OutcomePill, Spinner, StatusPill, api, fmtDay, fmtPrice, fmtR, fmtWhen, inputClass, labelClass, rTone,
+  DirectionPill, HorizonPill, OutcomePill, Spinner, StatusPill, api, fmtDay, fmtPrice, fmtR, fmtWhen, inputClass, labelClass, rTone,
   type DisclaimerData,
 } from '@/components/ideas/ideaUi';
 import type { IdeaPreview, IdeaView } from '@/lib/ideas';
@@ -257,7 +257,6 @@ export default function PublishPage() {
                 <div className="font-semibold text-gray-800">{preview.alert.subject}</div>
                 <div className="text-gray-600 mt-0.5">{preview.alert.summary}</div>
               </div>
-              <div className="mt-2"><IdeaDisclaimer data={preview.alert.disclaimer} variant="banner" /></div>
             </div>
           </div>
         )}

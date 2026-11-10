@@ -95,7 +95,8 @@ export default function IdeasFrame({ canPublish, children }: { canPublish: boole
           </div>
 
           {children}
-          <div className="mt-6"><IdeaDisclaimer data={disclaimer} variant="full" /></div>
+          {/* Publishers write ideas, they don't read them as subscribers: no disclaimer on the publish page. */}
+          {!pathname.startsWith('/ideas/publish') && <div className="mt-6"><IdeaDisclaimer data={disclaimer} variant="full" /></div>}
         </div>
       </div>
 
