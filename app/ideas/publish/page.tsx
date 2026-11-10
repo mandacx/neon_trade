@@ -52,7 +52,6 @@ function fromIdea(i: IdeaView): Form {
 export default function PublishPage() {
   const [form, setForm] = useState<Form>(blank);
   const [managed, setManaged] = useState<IdeaView[] | null>(null);
-  const [disclaimer, setDisclaimer] = useState<DisclaimerData | null>(null);
   const [preview, setPreview] = useState<IdeaPreview | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
@@ -62,7 +61,7 @@ export default function PublishPage() {
 
   const loadManaged = useCallback(() => {
     api<{ items: IdeaView[]; disclaimer: DisclaimerData }>('/api/ideas/managed')
-      .then(d => { setManaged(d.items); setDisclaimer(d.disclaimer); })
+      .then(d => { setManaged(d.items); })
       .catch(e => { if (e.status === 403) setForbidden(true); else setErrors([e.message]); });
   }, []);
   useEffect(loadManaged, [loadManaged]);
@@ -306,7 +305,6 @@ export default function PublishPage() {
             </div>
           )}
         </div>
-        <IdeaDisclaimer data={disclaimer} variant="banner" />
       </div>
     </div>
   );

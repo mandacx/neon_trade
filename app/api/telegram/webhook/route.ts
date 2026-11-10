@@ -48,6 +48,19 @@ export async function POST(request: NextRequest) {
     await sendTelegramMessage(chatId, "This Telegram account is already linked to a different StocksTrendz account. Unlink it there first, or use a different Telegram account.");
     return NextResponse.json({ ok: true });
   }
-  await sendTelegramMessage(chatId, "✅ Linked! Pick a watchlist to get alerts for from your Profile page on StocksTrendz.");
+  await sendTelegramMessage(
+    chatId,
+    [
+      '✅ Linked! This Telegram is now connected to your StocksTrendz account.',
+      '',
+      "What you'll get here:",
+      '• Scan alerts for a watchlist: pick which one on your Profile page (stockstrendz.com/profile).',
+      '• Trade Ideas alerts (new ideas, target and stop hits, changes): open Trade Ideas, then Alerts, and tick Telegram. Available on plans that include Trade Ideas.',
+      '',
+      'Also on StocksTrendz: option price levels and charts, Quadrant Analysis, Earnings and Options OI trackers, the US Market Scanner and the Strategy Builder (some need a paid plan).',
+      '',
+      'To stop alerts, use Unlink Telegram on your Profile page.',
+    ].join('\n'),
+  );
   return NextResponse.json({ ok: true });
 }

@@ -24,6 +24,7 @@ export default function TelegramCard() {
   const [code, setCode] = useState<string | null>(null);
   const [deepLink, setDeepLink] = useState<string | null>(null);
   const [webLink, setWebLink] = useState<string | null>(null);
+  const [botUsername, setBotUsername] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const [waitingForLink, setWaitingForLink] = useState(false);
   const [watchlists, setWatchlists] = useState<WatchlistOption[] | null>(null);
@@ -87,6 +88,7 @@ export default function TelegramCard() {
     setCode(json.data.code);
     setDeepLink(json.data.deepLink);
     setWebLink(json.data.webLink);
+    setBotUsername(json.data.botUsername ?? null);
     startPolling();
   }
 
@@ -119,6 +121,7 @@ export default function TelegramCard() {
     setCode(null);
     setDeepLink(null);
     setWebLink(null);
+    setBotUsername(null);
     setSubscribed(false);
   }
 
@@ -144,7 +147,7 @@ export default function TelegramCard() {
 
       {!status?.linked && (
         <>
-          <p className="text-xs text-gray-500 mb-3">Get scan alerts pushed straight to Telegram for any watchlist, the moment they fire.</p>
+          <p className="text-xs text-gray-500 mb-3">Get scan alerts pushed straight to Telegram for any watchlist, the moment they fire. Trade Ideas alerts use the same link (switch them on from the Alerts menu on the Trade Ideas page).</p>
           {!code ? (
             <button
               onClick={generateCode}
@@ -164,14 +167,25 @@ export default function TelegramCard() {
               <p className="text-[11px] text-gray-400">Code: <span className="font-mono font-semibold text-gray-600">{code}</span></p>
               {waitingForLink && <p className="text-[11px] text-gray-400">Waiting for confirmation…</p>}
               <div className="pt-2 border-t border-gray-100">
-                <p className="text-[11px] text-gray-500">
-                  Using Telegram in a browser? Desktop apps often don&apos;t offer a web option for this link.{' '}
-                  <a href={webLink ?? '#'} target="_blank" rel="noopener noreferrer" className="font-semibold text-blue-600">
-                    Open Telegram Web
-                  </a>{' '}
-                  instead, then send this message to the bot:
-                </p>
-                <p className="text-[11px] font-mono font-semibold text-gray-600 mt-1">/start {code}</p>
+                <p className="text-[11px] font-semibold text-gray-600">Using Telegram in a browser? Link it by hand:</p>
+                <ol className="mt-1 space-y-1 text-[11px] text-gray-500 list-decimal list-inside leading-relaxed">
+                  <li>
+                    <a href={webLink ?? '#'} target="_blank" rel="noopener noreferrer" className="font-semibold text-blue-600">
+                      Open Telegram Web
+                    </a>{' '}
+                    and sign in.
+                  </li>
+                  <li>
+                    Open our bot{botUsername ? <> <span className="font-mono font-semibold text-gray-700">@{botUsername}</span></> : null}
+                    {botUsername ? <> (search for <span className="font-mono">@{botUsername}</span> or{' '}
+                    <a href={`https://t.me/${botUsername}`} target="_blank" rel="noopener noreferrer" className="font-semibold text-blue-600">open it here</a>)</> : null}.
+                    If you see a Start button, you can press it, but the next step is what links your account.
+                  </li>
+                  <li>
+                    Send this message to the bot: <span className="font-mono font-semibold text-gray-700">/start {code}</span>
+                  </li>
+                  <li>The bot replies &quot;Linked&quot; and this card updates by itself. The code works for 15 minutes.</li>
+                </ol>
               </div>
             </div>
           )}

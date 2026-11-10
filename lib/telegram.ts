@@ -54,9 +54,14 @@ export function generateLinkCode(): string {
   return Array.from(bytes, b => alphabet[b % alphabet.length]).join('');
 }
 
+/** The bot's public @username without the "@" (null when TELEGRAM_BOT_USERNAME is unset). Safe to show users. */
+export function telegramBotUsername(): string | null {
+  const name = (process.env.TELEGRAM_BOT_USERNAME ?? '').trim().replace(/^@/, '');
+  return name || null;
+}
+
 export function telegramDeepLink(code: string): string {
-  const username = process.env.TELEGRAM_BOT_USERNAME;
-  return `https://t.me/${username}?start=${code}`;
+  return `https://t.me/${telegramBotUsername()}?start=${code}`;
 }
 
 /**
@@ -67,8 +72,7 @@ export function telegramDeepLink(code: string): string {
  * chat in Telegram Web; the user still has to send `/start <code>` there.
  */
 export function telegramWebLink(): string {
-  const username = process.env.TELEGRAM_BOT_USERNAME;
-  return `https://web.telegram.org/k/#@${username}`;
+  return `https://web.telegram.org/k/#@${telegramBotUsername()}`;
 }
 
 const LINK_CODE_TTL_MS = 15 * 60 * 1000;

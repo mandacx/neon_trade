@@ -2575,3 +2575,17 @@ per-user behavior panel and delete user.
 - **Design:** signed-out visitors resolve to the Free plan's features, so they see only what Free includes (plus Stock Analysis and Guide). Stock Analysis and Guide are always shown: `stock_analysis` is defined but nothing enforces it, the stock page is open to all. Admins follow their own plan like everyone else (admin does not imply every feature; `ideas/layout` redirects an admin with no idea term the same way).
 - **Verified:** `npx tsc --noEmit` clean, eslint on both files. **Not verified:** the menus in a browser for each plan (Free, Pro, Short term, Long term, Platinum, signed out) and the nav width at 1280px.
 - **Follow-ups:** the Plans button is my addition (not requested); remove it if unwanted.
+
+## 2026-11-09 — Profile: Telegram web instructions name the bot
+
+- **What changed:** `lib/telegram.ts` (new `telegramBotUsername()`: trims, strips a leading `@`; the deep link and web link use it), `app/api/telegram/link/route.ts` (returns `botUsername`; answers 503 with a plain message when `TELEGRAM_BOT_USERNAME` is unset instead of building a `t.me/undefined` link), `components/profile/TelegramCard.tsx` (the browser path is now four numbered steps that show `@botname`, a link to open it, and the exact `/start CODE` message; intro mentions Trade Ideas alerts).
+- **Why:** the old text said "send this message to the bot" without ever naming it, so a web user could not find it. The bot's username is public, so showing it is safe.
+- **Verified:** `npx tsc --noEmit` clean, eslint on the three files. **Not verified:** the card in a browser with a real code, and the full link flow against the registered webhook (needs the deploy).
+- **Follow-up:** the bot's "Linked!" reply still only mentions picking a watchlist; it could also mention Trade Ideas alerts.
+
+## 2026-11-09 — Trade Ideas: disclaimer only at the page bottom; richer Telegram "Linked" reply
+
+- **What changed:** `components/ideas/IdeasFrame.tsx` (removed the disclaimer banner inside the Alerts menu), `app/ideas/publish/page.tsx` (removed the duplicate banner under "Your ideas" and the state that fed it), `app/api/telegram/webhook/route.ts` (the "Linked!" reply now says what the link gives: scan alerts for a watchlist, Trade Ideas alerts via Alerts > Telegram, a short list of site services, how to unlink).
+- **Why:** the full disclaimer already closes every Trade Ideas page; repeating it in the channel-selection menu was noise. Kept on purpose: the alert preview on the publish page (it shows what the real alert/email carries) and the "I took this" confirmation (`TakeThis.tsx`, a modal that covers the page bottom).
+- **Verified:** `npx tsc --noEmit` clean; eslint 0 errors (2 pre-existing `any` warnings). **Not verified:** in a browser; the bot reply (needs deploy and a fresh link).
+- **Follow-up:** decide whether `TakeThis` should also drop its banner.
