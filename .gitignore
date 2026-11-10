@@ -40,3 +40,6 @@ next-env.d.ts
 # playwright
 /test-results/
 /playwright-report/
+
+# Agent pipeline handoff notes (per-run, local)
+.claude/handoff/
