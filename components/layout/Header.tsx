@@ -23,6 +23,7 @@ const PLAN_TAGS: Record<string, { label: string; cls: string }> = {
   SHORT_TERM: { label: 'Short term', cls: 'bg-sky-500 text-white ring-sky-700' },
   LONG_TERM: { label: 'Long term', cls: 'bg-emerald-600 text-white ring-emerald-800' },
   PLATINUM: { label: 'Platinum', cls: 'bg-slate-800 text-slate-100 ring-slate-500' },
+  PREMIUM: { label: 'Premium', cls: 'bg-rose-600 text-white ring-rose-800' },
 };
 
 function planTag(planCode: string) {

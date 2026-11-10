@@ -17,7 +17,7 @@ interface BoardData {
 }
 
 const TERM_NAME = { short: 'short-term', long: 'long-term' } as const;
-const TERM_PLANS = { short: 'Short term or Platinum', long: 'Long term or Platinum' } as const;
+const TERM_PLANS = { short: 'Short term, Premium or Platinum', long: 'Long term, Premium or Platinum' } as const;
 const TERM_FEATURE = { short: 'ideas_short_term', long: 'ideas_long_term' } as const;
 
 function IdeaCard({ idea }: { idea: IdeaView }) {

@@ -362,6 +362,7 @@ export async function previewIdea(access: IdeaAccess, raw: unknown): Promise<Ide
     { tier: 'SHORT_TERM', label: 'Short term plan', features: [FEATURE_IDEAS_SHORT_TERM], sees: term === 'short', reason: term === 'short' ? null : 'Long-term ideas are not part of this plan' },
     { tier: 'LONG_TERM', label: 'Long term plan', features: [FEATURE_IDEAS_LONG_TERM], sees: term === 'long', reason: term === 'long' ? null : 'Short-term ideas are not part of this plan' },
     { tier: 'PLATINUM', label: 'Platinum plan', features: [FEATURE_IDEAS_SHORT_TERM, FEATURE_IDEAS_LONG_TERM], sees: true, reason: null },
+    { tier: 'PREMIUM', label: 'Premium plan', features: [FEATURE_IDEAS_SHORT_TERM, FEATURE_IDEAS_LONG_TERM], sees: true, reason: null },
     { tier: 'OTHER', label: 'Any other plan (without the ' + wantFeature + ' gate)', features: [], sees: false, reason: 'Not entitled: the idea is absent from their feed and API' },
   ];
   const rr = riskReward(plan);

@@ -61,6 +61,7 @@ export function planLabel(planCode: string): string {
   if (planCode === 'SHORT_TERM') return 'Short term';
   if (planCode === 'LONG_TERM') return 'Long term';
   if (planCode === 'PLATINUM') return 'Platinum';
+  if (planCode === 'PREMIUM') return 'Premium';
   return planCode.charAt(0).toUpperCase() + planCode.slice(1).toLowerCase();
 }
 

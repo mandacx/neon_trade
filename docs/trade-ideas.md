@@ -29,13 +29,16 @@ be a separate lifecycle that is never defaulted from an idea.
 
 ## Plans and gates
 
-Three new plans, in this order (sort order 30, 40, 50, after Pro Plus at 20):
+Three plans, in this order (sort order 30, 40, 50, after Pro Plus at 20), plus a fourth, Premium (sort 60), added 2026-11-10 by `scripts/add-premium-plan.mjs`:
 
 | Plan | Code | Idea access |
 |---|---|---|
 | **Short term** | `SHORT_TERM` | `ideas_short_term`: intraday + swing ideas |
 | **Long term** | `LONG_TERM` | `ideas_long_term`: positional + long-term ideas |
 | **Platinum** | `PLATINUM` | both |
+| **Premium** | `PREMIUM` (sort 60) | both, with a smaller tool set than Platinum |
+
+There is no billing: Premium is subscribed to by contacting support and assigned by an admin in `/admin/users`, like every plan. The script is insert-only and creates the plan inactive unless `--active` is given (inactive plans are hidden on `/upgrade`, admins can still assign them).
 
 **Options are deliberately not part of any plan definition.** Option strategies can already be attached to ideas
 (descriptive; the idea is scored on the underlying) and are visible to anyone who can read the idea. The planned
@@ -64,16 +67,16 @@ New feature codes (`lib/features.ts`, shown in `/admin/plans` as checkboxes like
 
 **Starting mix** (my choice, not a spec; edit freely in `/admin/plans`, nothing is hardcoded):
 
-| Gate | Short term | Long term | Platinum |
-|---|---|---|---|
-| `ideas_short_term` | on | off | on |
-| `ideas_long_term` | off | on | on |
-| `levels`, `quadrant`, `watchlists`, `earnings`, `us_market_scanner`, `stock_analysis` | on | on | on |
-| `scan_alerts_latest`, `scan_alerts_history`, `telegram_alerts` | on | off | on |
-| `oi_tracker` | off | on | on |
-| `quarterly_expiry_only` (restriction) | off | **on** (like "Self learners", code `LONG_INVESTORS`) | off |
-| `option_chain`, `strategy_builder`, options-for-ideas | off | off | off (later) |
-| `performance`, `crypto_levels` | off | off | off (Pro does not have `performance` live either) |
+| Gate | Short term | Long term | Platinum | Premium |
+|---|---|---|---|---|
+| `ideas_short_term` | on | off | on | on |
+| `ideas_long_term` | off | on | on | on |
+| `levels`, `quadrant`, `watchlists`, `earnings`, `us_market_scanner`, `stock_analysis` | on | on | on | only `levels`, `watchlists`, `stock_analysis` on |
+| `scan_alerts_latest`, `scan_alerts_history`, `telegram_alerts` | on | off | on | only `telegram_alerts` on |
+| `oi_tracker` | off | on | on | off |
+| `quarterly_expiry_only` (restriction) | off | **on** (like "Self learners", code `LONG_INVESTORS`) | off | off |
+| `option_chain`, `strategy_builder`, options-for-ideas | off | off | off (later) | off |
+| `performance`, `crypto_levels` | off | off | off (Pro does not have `performance` live either) | off |
 
 Plans are created **inactive** (`is_active = false`): admins can assign them from `/admin/users` and see them in
 `/admin/plans`, but they are not on the public `/upgrade` page until `is_active` is flipped. There is no billing in

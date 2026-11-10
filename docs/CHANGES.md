@@ -7,6 +7,30 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-11-10 (Premium) — new PREMIUM plan: both Trade Ideas terms
+
+Requested: a new plan named Premium; admins assign it manually, no payment.
+
+Files: `scripts/premium-plan-def.mjs` (new, pure data), `scripts/add-premium-plan.mjs` (new, insert-only),
+`scripts/test-premium-plan.mjs` (new), `lib/features.ts` (`planLabel`), `components/layout/Header.tsx` (`PLAN_TAGS`, rose),
+`lib/ideas.ts` (preview `tiers`, display only), `app/ideas/page.tsx` (`TERM_PLANS` copy), `app/guide/page.tsx` (Premium card,
+4-column grid), `docs/trade-ideas.md`, `CLAUDE.md` (plan list).
+
+Design: plans are DB rows and gates are feature codes, so no gating change. `PREMIUM`, sort 60, features `ideas_short_term`,
+`ideas_long_term`, `stock_analysis`, `levels`, `watchlists`, `telegram_alerts` (needed for Telegram idea alerts); no expiry
+restriction, no `publish_ideas`, none of the OI / scanner / option / earnings tools (my choice, editable at `/admin/plans`;
+PLATINUM's mix would be a one-line change before the script is run). The script is inactive by default like its sibling;
+run `--dry-run`, then with `--active` to list it on `/upgrade`. Rejected: reusing PLATINUM, billing/price fields.
+`PreviewTier.tier` is a plain `string` and the publish page only uses it as a React key, so the new tier needs no type change.
+
+Verified: `node scripts/test-premium-plan.mjs` (32 checks), `node scripts/test-idea-scoring.mjs` (41), `npx tsc --noEmit` (clean),
+eslint on edited files (0 errors, warnings only).
+NOT verified: the script was not run (needs DATABASE_URL; no write to Neon); live `nt_plans` state; Header tag colour, `/upgrade`
+card and guide layout in a browser; a test user on PREMIUM seeing both terms and receiving a Telegram alert.
+Follow-ups: price/billing; whether Premium should get PLATINUM's tools; options-for-ideas hook `canSeeOptionStrategy`.
+
+---
+
 ## 2026-11-10 (later) — Trade Ideas: provisional live mark on the idea page (step 1; board not built)
 
 Requested: show how an open idea is doing right now, without touching the official tracked result.

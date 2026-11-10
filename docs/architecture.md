@@ -46,9 +46,23 @@ docs (`docs/trade-ideas.md`, `docs/earnings.md`, `docs/us-scanner.md`, `docs/oi-
 - **Cost control:** idea page = one symbol, one snapshot call (5 s per-instance cache in the provider); board = one batched
   snapshot call for all open symbols; both behind a dedicated limiter `ideas_live`.
 
+## Plans (decision record, 2026-11-10: Premium)
+
+- Plans are **DB rows** (`nt_plans`: code, name, features JSONB, sort_order, is_active), not code. Gates are feature codes
+  from `lib/features.ts`; a plan works the moment it holds the right codes. Admins assign plans manually in `/admin/users`;
+  `/upgrade` lists only `is_active` plans with a mailto "Contact us" button. No billing, no price field.
+- New plans are created by an **insert-only, re-runnable script** (`scripts/add-*-plan(s).mjs`), never by code at runtime.
+  Display names live in three hardcoded places that must be updated with the row: `planLabel()` in `lib/features.ts`,
+  `PLAN_TAGS` in `components/layout/Header.tsx`, and (Trade Ideas only) the `tiers` preview list in `lib/ideas.ts` plus
+  the `TERM_PLANS` copy in `app/ideas/page.tsx`.
+- **PREMIUM** (sort 60, name "Premium"): both idea terms + minimal tools. Separate from `PLATINUM`, which is untouched.
+  Details: handoff `architect.md` of run 20261110-1100-ideas-premium-plan, `docs/trade-ideas.md` "Plans and gates".
+
 ## Do's and Don'ts
 
 Do
+- Add a plan by an insert-only script (`ON CONFLICT (code) DO NOTHING`), dry-run first; update `planLabel`, `PLAN_TAGS` and docs together.
+- Keep a new plan's features to the codes in `ALL_FEATURES`; never include `publish_ideas` in a subscriber plan.
 - Read through the facade on the server; send the client only neutral, vendor-free JSON.
 - Keep plan-gating in SQL and call the gated read before touching any market data for an idea.
 - Put maths in a pure `.ts` module with explicit `.ts` import extensions and fixtures in `scripts/`.
@@ -59,6 +73,8 @@ Do
 - Record every change in `docs/CHANGES.md` (verified vs not verified).
 
 Don't
+- Don't change gating logic (`lib/ideas.ts` term SQL, `lib/ideasApi.ts`, layouts) to add a plan; feature codes are the contract.
+- Don't write to the production DB from development work; plan scripts run at release by the owner.
 - Don't import `@/lib/marketdata` (or provider code) from client components; don't name vendors in routes, responses, UI text.
 - Don't write live marks to `nt_idea_outcomes`, statuses, events, alerts or desk stats; don't feed partial bars to `scoreIdea`.
 - Don't accept idea ids or symbols from the client on a batch route; derive them from the gated SQL read.

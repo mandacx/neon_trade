@@ -111,7 +111,7 @@ export default function GuidePage() {
           </section>
 
           <section id="trade-ideas" className="mt-5 bg-white rounded-xl border border-gray-200 p-5">
-            <h2 className="text-sm font-bold text-gray-900 mb-1">Trade ideas: Short term, Long term and Platinum</h2>
+            <h2 className="text-sm font-bold text-gray-900 mb-1">Trade ideas: Short term, Long term, Premium and Platinum</h2>
             <p className="text-xs text-gray-600 leading-relaxed">
               The <Link href="/ideas" className="text-blue-600 hover:underline font-semibold">Trade Ideas</Link> desk publishes
               structured calls: a symbol and direction, an <strong>entry zone</strong>, a ladder of <strong>targets</strong>, a
@@ -119,7 +119,7 @@ export default function GuidePage() {
               not a recommendation made for you personally, and nothing is traded on your behalf.
             </p>
 
-            <div className="grid sm:grid-cols-3 gap-3 mt-4">
+            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-4">
               <div className="rounded-lg border border-gray-200 p-3">
                 <h3 className="text-xs font-bold text-gray-900">Short term</h3>
                 <p className="text-[11px] text-gray-600 leading-relaxed mt-1">
@@ -132,6 +132,13 @@ export default function GuidePage() {
                 <p className="text-[11px] text-gray-600 leading-relaxed mt-1">
                   <strong>Positional</strong> (weeks to a few months) and <strong>long-term</strong> ideas (months to
                   years). For people who hold through the noise and check in less often.
+                </p>
+              </div>
+              <div className="rounded-lg border border-gray-200 p-3">
+                <h3 className="text-xs font-bold text-gray-900">Premium</h3>
+                <p className="text-[11px] text-gray-600 leading-relaxed mt-1">
+                  Both the short term and the long term ideas, plus charts, price levels, watchlists and Telegram
+                  alerts. Platinum adds the full analysis toolset.
                 </p>
               </div>
               <div className="rounded-lg border border-gray-200 p-3">
