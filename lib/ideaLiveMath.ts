@@ -11,9 +11,9 @@
  * targets. No clamping at the stop: a gap fills worse than the stop in the scorer, so clamping would flatter.
  * Dates are ET `YYYY-MM-DD` strings compared as strings (never parsed in local time).
  */
-import { entryPriceOf } from './ideaTypes.ts';
+import { entryPriceOf, type EntryBasis } from './ideaTypes.ts';
 
-export interface LivePlan { direction: string; entryLow: number; entryHigh: number; targets: number[]; stop: number; publishedOn: string }
+export interface LivePlan { direction: string; entryLow: number; entryHigh: number; targets: number[]; stop: number; publishedOn: string; /** How the tracker decides entry (default 'daily'). */ entryBasis?: EntryBasis }
 /** The stored official outcome (subset of IdeaOutcomeView). null = no outcome row yet. */
 export interface LiveOfficial { outcome: string; enteredOn: string | null; entryPrice: number | null; targetsHit: number; evaluatedThrough: string | null }
 /** Today's / the last session's day range; `date` is the ET session date. */
@@ -22,6 +22,8 @@ export type LiveState = 'awaiting_entry' | 'in_zone' | 'in_trade' | 'beyond_stop
 
 export interface LiveMark {
   state: LiveState;
+  /** How the official tracker decides entry: a completed 15-minute close in the zone ('m15') or a daily bar touching it ('daily'). */
+  entryBasis: EntryBasis;
   price: number | null;
   /** From the official outcome only; the live price never flips this. */
   entered: boolean;
@@ -72,7 +74,7 @@ export function liveMark(plan: LivePlan, official: LiveOfficial | null, price: n
   const invalid = !(risk > 0) || n === 0 || !finite(risk);
   if (invalid) {
     return {
-      state: 'unavailable', price: px, entered: false, r: null, pct: null, points: null, targetsReached: 0, targetsTotal: n,
+      state: 'unavailable', entryBasis: plan.entryBasis ?? 'daily', price: px, entered: false, r: null, pct: null, points: null, targetsReached: 0, targetsTotal: n,
       risk: finite(risk) ? risk : 0, entryPrice: finite(planEntry) ? planEntry : 0, zone: null,
       stop: { price: plan.stop, distancePct: null, distancePts: null, distanceR: null }, targets: [], rangeHint: null,
     };
@@ -134,7 +136,7 @@ export function liveMark(plan: LivePlan, official: LiveOfficial | null, price: n
   }
 
   return {
-    state, price: px, entered, r, pct, points, targetsReached, targetsTotal: n, risk, entryPrice: entry, zone,
+    state, entryBasis: plan.entryBasis ?? 'daily', price: px, entered, r, pct, points, targetsReached, targetsTotal: n, risk, entryPrice: entry, zone,
     stop: { price: plan.stop, distancePct: distPct(plan.stop), distancePts: distPts(plan.stop), distanceR: px != null ? (sign * (px - plan.stop)) / risk : null },
     targets: tgts.map((t, i) => ({ price: t, distancePct: distPct(t), distancePts: distPts(t), reached: i < targetsReached })),
     rangeHint,

@@ -47,13 +47,14 @@ export default defineRailway(() => {
     env: { CRON_SECRET: "${{market-catalog-cron.CRON_SECRET}}" },
   });
 
-  // Trade Ideas tracker (lib/ideas.ts, docs/trade-ideas.md): re-scores live ideas against the daily bars and sends
-  // opted-in email alerts. Idempotent and cheap, so it runs every 30 min around the clock (daily bars are final
-  // after the close; the route only ever uses complete sessions). Defined here, NOT yet applied.
+  // Trade Ideas tracker (lib/ideas.ts, docs/trade-ideas.md): re-scores live ideas and sends opted-in alerts. Ideas on the
+  // 15-minute entry basis enter when a completed 15-minute candle closes in the zone, so it runs at :02, :17, :32 and :47
+  // (two minutes after each candle closes) around the clock; scheduled publishing and the daily-bar scoring ride the same
+  // run. Idempotent and cheap (outside the session the 15-minute read returns nothing new). Defined here, NOT yet applied.
   const ideasCron = service("ideas-cron", {
     build: { buildEnvironment: "V3", builder: "DOCKERFILE", dockerfilePath: "Dockerfile" },
     replicas: { "us-west2": 1 },
-    deploy: { cronSchedule: "*/30 * * * *", restartPolicyType: "NEVER" },
+    deploy: { cronSchedule: "2,17,32,47 * * * *", restartPolicyType: "NEVER" },
     env: { CRON_SECRET: "${{market-catalog-cron.CRON_SECRET}}" },
   });
 

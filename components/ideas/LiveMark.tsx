@@ -110,7 +110,9 @@ function describe(m: LiveMarkData): string | null {
     case 'awaiting_entry':
       return m.zone ? `Not entered yet. Price is ${m.zone.distancePts.toFixed(2)} pts (${m.zone.distancePct.toFixed(1)}%) ${m.zone.side} the entry zone.` : 'Not entered yet.';
     case 'in_zone':
-      return 'Not entered yet. Price is inside the entry zone; the tracker enters on a completed session that touches it.';
+      return m.entryBasis === 'm15'
+        ? 'Not entered yet. Price is inside the entry zone; the idea enters when a 15-minute candle closes inside it (checked every 15 minutes).'
+        : 'Not entered yet. Price is inside the entry zone; the tracker enters on a completed session that touches it.';
     case 'ran_past_target':
       return 'Not entered yet. Price is already past target 1 without entering.';
     case 'beyond_stop':

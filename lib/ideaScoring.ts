@@ -21,9 +21,12 @@
  *
  * `asOf` is the last calendar date whose session is complete (callers pass yesterday, US/Eastern).
  */
-import { entryPriceOf } from './ideaTypes.ts';
+import { entryPriceOf, SCORE_BASIS, type EntryBasis } from './ideaTypes.ts';
 
 export interface ScoreBar { date: string; open: number; high: number; low: number; close: number }
+
+/** A COMPLETED regular-session 15-minute bar: `t` is its ISO start instant, `date` its ET session date. */
+export interface ScoreIntradayBar extends ScoreBar { t: string }
 
 export interface ScorePlan {
   direction: string; // 'long' | 'short'
@@ -33,14 +36,20 @@ export interface ScorePlan {
   stop: number;
   publishedOn: string; // ET date the idea went live
   validUntil: string;
+  /** ISO instant the idea went live; with the 'm15' basis only 15-minute bars that START at or after it can enter the idea. */
+  publishedAt?: string | null;
+  /** Default 'daily'. */
+  entryBasis?: EntryBasis;
 }
 
 /** A publisher action that ends the idea early: a 'closed' or 'cancelled' update, effective on that ET date. */
 export interface ScoreClosure { kind: 'closed' | 'cancelled'; effectiveOn: string }
 
-export interface ScoreEvent { type: 'triggered' | 'target_hit' | 'stopped' | 'expired' | 'closed_by_publisher' | 'not_triggered' | 'cancelled'; date: string; price: number | null; detail?: string }
+export interface ScoreEvent { type: 'triggered' | 'target_hit' | 'stopped' | 'expired' | 'closed_by_publisher' | 'not_triggered' | 'cancelled'; date: string; price: number | null; detail?: string; /** ISO instant of the bar that decided it (the 15-minute entry bar), when known. */ at?: string }
 
 export interface ScoreResult {
+  /** Which rule set produced this (`nt_idea_outcomes.basis`). */
+  basis: string;
   outcome: 'pending' | 'open' | 'target_hit' | 'stopped' | 'expired' | 'closed_by_publisher' | 'not_triggered' | 'cancelled';
   /** True when nothing later can change this result (every outcome except pending/open). */
   final: boolean;
@@ -71,7 +80,14 @@ function sessionsBetween(bars: ScoreBar[], from: string, to: string): number {
   return bars.filter(b => b.date > from && b.date <= to).length;
 }
 
-export function scoreIdea(plan: ScorePlan, bars: ScoreBar[], closure: ScoreClosure | null, asOf: string): ScoreResult {
+/**
+ * `intraday` (only read when `plan.entryBasis === 'm15'`): completed regular-session 15-minute bars from the publish time
+ * to now. The ENTRY is the first bar that closes inside the zone; the entry day's stop and targets are then judged on the
+ * 15-minute bars after the entry bar (the day's high and low include moves from before the entry), and later days on
+ * `bars` as before. Before entry, a bar that closes through the stop or at/past target 1 without a close in the zone ends
+ * the idea as `not_triggered`.
+ */
+export function scoreIdea(plan: ScorePlan, bars: ScoreBar[], closure: ScoreClosure | null, asOf: string, intraday: ScoreIntradayBar[] = []): ScoreResult {
   const long = plan.direction !== 'short';
   const sign = long ? 1 : -1;
   const entry = entryPriceOf(plan.direction, plan.entryLow, plan.entryHigh);
@@ -79,7 +95,9 @@ export function scoreIdea(plan: ScorePlan, bars: ScoreBar[], closure: ScoreClosu
   const n = plan.targets.length;
   const events: ScoreEvent[] = [];
 
+  const m15 = plan.entryBasis === 'm15';
   const base: ScoreResult = {
+    basis: SCORE_BASIS[m15 ? 'm15' : 'daily'],
     outcome: 'pending', final: false, enteredOn: null, entryPrice: null, exitOn: null, exitPrice: null,
     targetsHit: 0, targetsTotal: n, r: null, pctReturn: null, maePct: null, mfePct: null,
     daysToT1: null, daysHeld: null, events, evaluatedThrough: null,
@@ -90,7 +108,24 @@ export function scoreIdea(plan: ScorePlan, bars: ScoreBar[], closure: ScoreClosu
   let last = plan.validUntil < asOf ? plan.validUntil : asOf;
   if (closure && closure.effectiveOn < last) last = closure.effectiveOn;
   const window = bars.filter(b => b.date > plan.publishedOn && b.date <= last).sort((a, b) => (a.date < b.date ? -1 : 1));
-  const evaluatedThrough = window.length ? window[window.length - 1].date : null;
+
+  // 'm15' entry: the first completed 15-minute bar that closes inside the zone (or the idea ending before one did).
+  type Step = ScoreBar & { i?: boolean; /** ISO instant the 15-minute bar closed (a fill happens at the close). */ at?: string };
+  const closeAt = (t: string) => new Date(Date.parse(t) + 15 * 60_000).toISOString();
+  let entryBar: ScoreIntradayBar | null = null;
+  let ibars: ScoreIntradayBar[] = [];
+  if (m15) {
+    const lastI = closure && closure.effectiveOn < plan.validUntil ? closure.effectiveOn : plan.validUntil;
+    const from = plan.publishedAt ? Date.parse(plan.publishedAt) : NaN;
+    ibars = intraday
+      .filter(b => b.date <= lastI && Number.isFinite(b.close) && (Number.isNaN(from) ? b.date > plan.publishedOn : Date.parse(b.t) >= from))
+      .sort((a, b) => (a.t < b.t ? -1 : 1));
+  }
+  const evaluatedThrough = ((): string | null => {
+    const d = window.length ? window[window.length - 1].date : null;
+    const i = ibars.length ? ibars[ibars.length - 1].date : null;
+    return d && i ? (d > i ? d : i) : d ?? i;
+  })();
 
   let entered = false;
   let enteredOn: string | null = null;
@@ -105,7 +140,28 @@ export function scoreIdea(plan: ScorePlan, bars: ScoreBar[], closure: ScoreClosu
 
   const favourable = (px: number) => sign * (px - entry);
 
-  for (const b of window) {
+  let list: Step[] = window;
+  if (m15) {
+    for (const b of ibars) {
+      if (b.close >= plan.entryLow && b.close <= plan.entryHigh) { entryBar = b; break; }
+      const ranToTarget = long ? b.close >= plan.targets[0] : b.close <= plan.targets[0];
+      const hitStop = long ? b.close <= plan.stop : b.close >= plan.stop;
+      if (ranToTarget) { neverEntered = { date: b.date, why: 'closed at or past the first target without a close inside the entry zone' }; break; }
+      if (hitStop) { neverEntered = { date: b.date, why: 'closed through the stop without a close inside the entry zone' }; break; }
+    }
+    list = [];
+    if (entryBar) {
+      const eb: ScoreIntradayBar = entryBar;
+      entered = true;
+      enteredOn = eb.date;
+      events.push({ type: 'triggered', date: eb.date, price: entry, at: closeAt(eb.t), detail: '15-minute close in the entry zone' });
+      // After the entry bar: the same day's later 15-minute bars, then complete daily bars for the following days.
+      const after: Step[] = ibars.filter(b => b.date === eb.date && b.t > eb.t).map(b => ({ date: b.date, open: b.open, high: b.high, low: b.low, close: b.close, i: true, at: closeAt(b.t) }));
+      list = [...after, ...window.filter(b => b.date > eb.date)];
+    }
+  }
+
+  for (const b of list) {
     if (!entered) {
       const touches = b.low <= plan.entryHigh && b.high >= plan.entryLow;
       if (!touches) {
@@ -128,10 +184,10 @@ export function scoreIdea(plan: ScorePlan, bars: ScoreBar[], closure: ScoreClosu
     // Stop first, including on the entry bar. After the entry bar a gap through the stop fills at the open.
     const stopTouched = long ? b.low <= plan.stop : b.high >= plan.stop;
     if (stopTouched) {
-      const gap = b.date !== enteredOn && (long ? b.open < plan.stop : b.open > plan.stop);
+      const gap = (b.date !== enteredOn || b.i === true) && (long ? b.open < plan.stop : b.open > plan.stop);
       const px = gap ? b.open : plan.stop;
       exit = { date: b.date, price: px, kind: 'stopped' };
-      events.push({ type: 'stopped', date: b.date, price: px, detail: gap ? 'gapped through the stop' : undefined });
+      events.push({ type: 'stopped', date: b.date, price: px, detail: gap ? 'gapped through the stop' : undefined, ...(b.at ? { at: b.at } : {}) });
       break;
     }
     // Targets in ladder order; several may fall on one bar.
@@ -141,7 +197,7 @@ export function scoreIdea(plan: ScorePlan, bars: ScoreBar[], closure: ScoreClosu
       bookedPct += (favourable(px) / entry) * 100 / n;
       targetsHit++;
       if (targetsHit === 1) t1Date = b.date;
-      events.push({ type: 'target_hit', date: b.date, price: px, detail: `T${targetsHit}` });
+      events.push({ type: 'target_hit', date: b.date, price: px, detail: `T${targetsHit}`, ...(b.at ? { at: b.at } : {}) });
     }
     if (targetsHit === n) { exit = { date: b.date, price: plan.targets[n - 1], kind: 'target_hit' }; break; }
   }
@@ -163,9 +219,11 @@ export function scoreIdea(plan: ScorePlan, bars: ScoreBar[], closure: ScoreClosu
   const mae = Number.isFinite(minLow) ? Math.max(0, long ? ((entry - minLow) / entry) * 100 : ((maxHigh - entry) / entry) * 100) : null;
   const mfe = Number.isFinite(maxHigh) ? Math.max(0, long ? ((maxHigh - entry) / entry) * 100 : ((entry - minLow) / entry) * 100) : null;
   const common = { enteredOn, entryPrice: entry, targetsHit, targetsTotal: n, maePct: mae == null ? null : round(mae, 2), mfePct: mfe == null ? null : round(mfe, 2), evaluatedThrough };
-  const daysToT1 = t1Date && enteredOn ? sessionsBetween(window, enteredOn, t1Date) : null;
+  // Trading days after the entry day (m15: the entry day is the anchor; it has no daily row in `list`).
+  const dayList: ScoreBar[] = m15 && enteredOn ? [{ date: enteredOn, open: 0, high: 0, low: 0, close: 0 }, ...window.filter(b => b.date > enteredOn!)] : window;
+  const daysToT1 = t1Date && enteredOn ? sessionsBetween(dayList, enteredOn, t1Date) : null;
   const remaining = (n - targetsHit) / n;
-  const held = (to: string) => (enteredOn ? sessionsBetween(window, enteredOn, to) : null);
+  const held = (to: string) => (enteredOn ? sessionsBetween(dayList, enteredOn, to) : null);
 
   const done = (outcome: ScoreResult['outcome'], date: string, px: number): ScoreResult => {
     const r = booked + remaining * (favourable(px) / risk);
@@ -175,7 +233,11 @@ export function scoreIdea(plan: ScorePlan, bars: ScoreBar[], closure: ScoreClosu
 
   if (exit) return done(exit.kind, exit.date, exit.price);
 
-  const lastBar = window[window.length - 1];
+  const lastStep: Step | undefined = list.length ? list[list.length - 1]
+    : entryBar ? { date: entryBar.date, open: entryBar.open, high: entryBar.high, low: entryBar.low, close: entryBar.close, i: true }
+    : window[window.length - 1];
+  // A 15-minute step is marked at that day's official close when the complete daily bar exists.
+  const lastBar = lastStep && lastStep.i ? { ...lastStep, close: bars.find(x => x.date === lastStep.date)?.close ?? lastStep.close } : lastStep;
   // Publisher closed it: exit at the close of the last session on or before the effective date, once that session is complete.
   if (closure && asOf >= closure.effectiveOn && lastBar) {
     events.push({ type: 'closed_by_publisher', date: lastBar.date, price: lastBar.close });
@@ -192,7 +254,7 @@ export function scoreIdea(plan: ScorePlan, bars: ScoreBar[], closure: ScoreClosu
   const pct = bookedPct + remaining * ((favourable(mark) / entry) * 100);
   return {
     ...base, ...common, outcome: 'open', final: false, exitOn: null, exitPrice: null,
-    r: round(r), pctReturn: round(pct, 2), daysToT1, daysHeld: lastBar && enteredOn ? sessionsBetween(window, enteredOn, lastBar.date) : null, events,
+    r: round(r), pctReturn: round(pct, 2), daysToT1, daysHeld: lastBar && enteredOn ? sessionsBetween(dayList, enteredOn, lastBar.date) : null, events,
   };
 }
 

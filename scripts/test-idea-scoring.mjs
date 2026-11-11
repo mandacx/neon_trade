@@ -13,6 +13,7 @@ import { validateTaken, previewTaken, tradeResult, compareFollowed } from '../li
 import { buildTelegram, buildPush } from '../lib/ideaMessages.ts';
 import { IDEA_DISCLAIMER } from '../lib/ideaDisclaimer.ts';
 import { liveMark, pointsFromR } from '../lib/ideaLiveMath.ts';
+import { occSymbol, midOf, positionValue, expiryProfile, summarizeOption, intrinsicPrices } from '../lib/ideaOptionMath.ts';
 
 let passed = 0;
 const t = (name, fn) => { try { fn(); passed++; } catch (e) { console.error(`FAIL: ${name}`); throw e; } };
@@ -472,6 +473,256 @@ t('live: a finished official outcome is never marked as entered; JSON has no ven
   assert.equal(liveMark(long, done, 104).entered, false);
   const json = JSON.stringify(liveMark(long, { outcome: 'open', enteredOn: '2026-01-06', entryPrice: 102, targetsHit: 0, evaluatedThrough: '2026-01-06' }, 104, { high: 105, low: 99, date: '2026-01-07' }));
   assert.ok(!/alpaca|tradier|iex|sip/i.test(json));
+});
+
+
+// ---------------------------------------------------------------------------------------------------
+// 15-minute entry basis ('m15'): entered when a COMPLETED 15-minute bar CLOSES inside the zone
+// ---------------------------------------------------------------------------------------------------
+const M = { ...long, entryBasis: 'm15', publishedAt: '2026-01-05T15:00:00Z' };           // long 100-102, stop 98, T 106/110
+const MS = { direction: 'short', entryLow: 100, entryHigh: 102, targets: [96, 92], stop: 104, publishedOn: '2026-01-05', validUntil: '2026-02-27', entryBasis: 'm15', publishedAt: '2026-01-05T15:00:00Z' };
+const ib = (date, hhmm, o, h, l, c) => ({ date, t: `${date}T${hhmm}:00Z`, open: o, high: h, low: l, close: c });
+
+t('m15: label and default basis', () => {
+  assert.equal(scoreIdea(M, [], null, ASOF, []).basis, 'm15_entry_daily_stop_first');
+  assert.equal(scoreIdea(long, [], null, ASOF).basis, 'daily_bars_stop_first');
+});
+
+t('m15: a wick into the zone that closes outside does NOT enter (the daily rule would)', () => {
+  const day = '2026-01-06';
+  const wick = [ib(day, '15:00', 104, 104.5, 101, 103.5)]; // low 101 is inside 100-102, close 103.5 is not
+  const r = scoreIdea(M, [bar(day, 104, 104.5, 101, 103.5)], null, '2026-01-06', wick);
+  assert.equal(r.outcome, 'pending');
+  assert.equal(r.enteredOn, null);
+  assert.equal(scoreIdea({ ...M, entryBasis: 'daily' }, [bar(day, 104, 104.5, 101, 103.5)], null, '2026-01-06').outcome, 'open'); // same data, daily rule enters
+});
+
+t('m15: a close inside the zone enters at once, same session, entry = worst fill, event carries the bar time', () => {
+  const day = '2026-01-06';
+  const bars = [ib(day, '15:00', 104, 105, 103, 103.5), ib(day, '15:15', 103.5, 103.8, 100.5, 101)];
+  const r = scoreIdea(M, [], null, '2026-01-05', bars); // asOf = yesterday: no daily bar exists yet
+  assert.equal(r.outcome, 'open');
+  assert.equal(r.final, false);
+  assert.equal(r.enteredOn, day);
+  assert.equal(r.entryPrice, 102);
+  const ev = r.events.find(e => e.type === 'triggered');
+  assert.equal(Date.parse(ev.at), Date.parse(`${day}T15:30:00Z`)); // the 15:15 candle closes at 15:30: that is when the fill happens
+  assert.equal(r.evaluatedThrough, day);
+  near(r.r, (101 - 102) / 4, 1e-9, 'no bar after the entry bar yet: marked at the entry bar close (101) against the worst-fill entry (102)');
+});
+
+t('m15: moves BEFORE the entry bar (and inside it) never stop or target the position', () => {
+  const day = '2026-01-06';
+  const bars = [ib(day, '15:00', 100, 107, 97, 103.5), ib(day, '15:15', 103, 103.5, 96, 101)]; // spike to 107, dip to 96, then closes in the zone
+  const r = scoreIdea(M, [bar(day, 100, 107, 96, 101)], null, '2026-01-05', bars);
+  assert.equal(r.outcome, 'open');
+  assert.equal(r.targetsHit, 0);
+  assert.equal(r.mfePct, null);
+});
+
+t('m15: after entry the same day, 15-minute bars decide the stop (stop first) and fill at the stop', () => {
+  const day = '2026-01-06';
+  const bars = [ib(day, '15:00', 103, 103.5, 102.5, 101), ib(day, '15:15', 101, 107, 97.5, 100)]; // next bar tags T1 and the stop
+  const r = scoreIdea(M, [], null, '2026-01-05', bars);
+  assert.equal(r.outcome, 'stopped');
+  near(r.r, -1, 1e-9);
+  assert.equal(r.exitPrice, 98);
+  assert.equal(Date.parse(r.events.find(e => e.type === 'stopped').at), Date.parse(`${day}T15:30:00Z`)); // intraday exits carry the closing time of their bar
+});
+
+t('m15: a 15-minute bar that opens through the stop fills at the open (gap)', () => {
+  const day = '2026-01-06';
+  const bars = [ib(day, '15:00', 103, 103.5, 100.5, 101), ib(day, '15:15', 96, 97, 95, 96.5)];
+  const r = scoreIdea(M, [], null, '2026-01-05', bars);
+  assert.equal(r.outcome, 'stopped');
+  assert.equal(r.exitPrice, 96);
+  near(r.r, (96 - 102) / 4, 1e-9);
+});
+
+t('m15: targets on the entry day come from 15-minute bars; later days from daily bars', () => {
+  const d1 = '2026-01-06', d2 = '2026-01-07';
+  const i = [ib(d1, '15:00', 103, 103.5, 100.5, 101), ib(d1, '15:15', 101, 106.5, 100.8, 105)]; // T1 hit on the entry day
+  // The entry day's daily bar has low 97 (before the entry) and must not be used; day 2 hits T2.
+  const r = scoreIdea(M, [bar(d1, 100, 107, 97, 105), bar(d2, 105, 111, 104, 110)], null, d2, i);
+  assert.equal(r.outcome, 'target_hit');
+  assert.equal(r.targetsHit, 2);
+  near(r.r, 1.5, 1e-9);
+  assert.equal(r.enteredOn, d1);
+  assert.equal(r.exitOn, d2);
+  assert.equal(r.daysHeld, 1);
+  assert.equal(r.daysToT1, 0);
+});
+
+t('m15: bars that started before publishing are ignored', () => {
+  const day = '2026-01-05'; // published at 15:00Z
+  const r = scoreIdea(M, [], null, '2026-01-04', [ib(day, '14:45', 101, 101.5, 100.5, 101), ib(day, '15:30', 104, 104.5, 103, 104)]);
+  assert.equal(r.outcome, 'pending');
+  const r2 = scoreIdea(M, [], null, '2026-01-04', [ib(day, '14:45', 101, 101.5, 100.5, 101), ib(day, '15:30', 104, 104.5, 100.5, 101.5)]);
+  assert.equal(r2.enteredOn, day); // a bar after the publish time that closes in the zone enters on the publish day
+});
+
+t('m15: closing at or past target 1 (or through the stop) without a close in the zone = never entered', () => {
+  const a = scoreIdea(M, [], null, '2026-01-06', [ib('2026-01-06', '15:00', 107, 108, 106.5, 107.5)]);
+  assert.equal(a.outcome, 'not_triggered');
+  const b = scoreIdea(M, [], null, '2026-01-06', [ib('2026-01-06', '15:00', 99, 99.5, 97, 97.5)]);
+  assert.equal(b.outcome, 'not_triggered');
+});
+
+t('m15: valid-until passing without a close in the zone = not_triggered; a publisher cancel before entry = cancelled', () => {
+  const quiet = [ib('2026-01-06', '15:00', 104, 105, 103, 104)];
+  assert.equal(scoreIdea({ ...M, validUntil: '2026-01-06' }, [bar('2026-01-06', 104, 105, 103, 104)], null, '2026-01-06', quiet).outcome, 'not_triggered');
+  assert.equal(scoreIdea(M, [], { kind: 'cancelled', effectiveOn: '2026-01-06' }, '2026-01-06', quiet).outcome, 'cancelled');
+});
+
+t("m15: entered on the last valid day marks to that day's official close when the daily bar exists", () => {
+  const day = '2026-01-06';
+  const i = [ib(day, '15:00', 103, 103.5, 100.5, 101), ib(day, '15:15', 101, 104, 100.8, 104)];
+  const r = scoreIdea({ ...M, validUntil: day }, [bar(day, 100, 104.5, 100, 104.2)], null, day, i);
+  assert.equal(r.outcome, 'expired');
+  assert.equal(r.exitPrice, 104.2);
+});
+
+t('m15: short mirrors long (entry = zone low, stop above, gap above the stop fills at the open)', () => {
+  const day = '2026-01-06';
+  const enter = [ib(day, '15:00', 98, 99, 97, 98.5), ib(day, '15:15', 99, 101.5, 98.8, 101)]; // closes 101 inside 100-102
+  const e = scoreIdea(MS, [], null, '2026-01-05', enter);
+  assert.equal(e.outcome, 'open');
+  assert.equal(e.entryPrice, 100);
+  const stopped = scoreIdea(MS, [], null, '2026-01-05', [...enter, ib(day, '15:30', 101, 104.5, 100.5, 104)]);
+  assert.equal(stopped.outcome, 'stopped');
+  near(stopped.r, -1, 1e-9);
+  const gap = scoreIdea(MS, [], null, '2026-01-05', [...enter, ib(day, '15:30', 105, 106, 104.5, 105.5)]);
+  assert.equal(gap.exitPrice, 105);
+  const win = scoreIdea(MS, [], null, '2026-01-05', [...enter, ib(day, '15:30', 101, 101.5, 95.5, 96), ib(day, '15:45', 96, 96.5, 91.5, 92)]);
+  assert.equal(win.outcome, 'target_hit');
+  near(win.r, 1.5, 1e-9, 'T1 at 96 = 1R, T2 at 92 = 2R');
+  // a short that closes at or below target 1 without ever closing in the zone never entered; one that closes above the stop likewise
+  assert.equal(scoreIdea(MS, [], null, '2026-01-06', [ib(day, '15:00', 96, 97, 95, 95.5)]).outcome, 'not_triggered');
+  assert.equal(scoreIdea(MS, [], null, '2026-01-06', [ib(day, '15:00', 105, 106, 104.5, 105)]).outcome, 'not_triggered');
+});
+
+t('m15: the idea in the field (ISRG short 440-445, stop 468): 450 = waiting, a 15-minute close of 444.95 enters', () => {
+  const isrg = { direction: 'short', entryLow: 440, entryHigh: 445, targets: [425, 410], stop: 468, publishedOn: '2026-11-10', validUntil: '2026-12-10', entryBasis: 'm15', publishedAt: '2026-11-10T16:16:38Z' };
+  const day = '2026-11-11';
+  const w = scoreIdea(isrg, [], null, '2026-11-10', [ib(day, '14:30', 450, 451, 448, 449)]);
+  assert.equal(w.outcome, 'pending');
+  const e = scoreIdea(isrg, [], null, '2026-11-10', [ib(day, '14:30', 450, 451, 448, 449), ib(day, '15:15', 445.5, 445.6, 444.5, 444.95)]);
+  assert.equal(e.outcome, 'open');
+  assert.equal(e.entryPrice, 440);
+});
+
+t('m15: the daily path is untouched when no basis is given (extra intraday bars are ignored)', () => {
+  const day = '2026-01-06';
+  const r = scoreIdea(long, [bar(day, 103, 104, 101, 103)], null, day, [ib(day, '15:00', 150, 151, 149, 150)]);
+  assert.equal(r.outcome, 'open');
+  assert.equal(r.enteredOn, day);
+});
+
+
+// ---------------------------------------------------------------------------------------------------
+// Option strategy P&L (lib/ideaOptionMath.ts): estimates from entry / target / exit prices, separate from the idea's R
+// ---------------------------------------------------------------------------------------------------
+// The idea in the field: ISRG bear call spread, buy the 450 call and sell the 420 call (a net CREDIT), expiring 2026-12-18.
+const BCS = [{ side: 'buy', type: 'call', strike: 450, qty: 1 }, { side: 'sell', type: 'call', strike: 420, qty: 1 }];
+const pt = (kind, key, at, prices, extra = {}) => ({ kind, key, at, underlying: null, prices, basis: 'quote_mid', ...extra });
+
+t('options: OCC symbol and mid', () => {
+  assert.equal(occSymbol('isrg', '2026-12-18', 'call', 450), 'ISRG261218C00450000');
+  assert.equal(occSymbol('SPY', '2026-12-18', 'put', 412.5), 'SPY261218P00412500');
+  assert.equal(midOf(17.97, 19.41), 18.69);
+  assert.equal(midOf(0, 1), null);       // no bid: not a usable quote
+  assert.equal(midOf(2, 1), null);       // crossed
+  assert.equal(midOf(null, 1), null);
+});
+
+t('options: bear call spread = credit; value, max profit / loss and estimated capital', () => {
+  const v0 = positionValue(BCS, [18.69, 37.4]);              // +100 x 18.69 (long 450c) - 100 x 37.4 (short 420c)
+  near(v0, -1871, 1e-6);
+  const prof = expiryProfile(BCS, v0);
+  near(prof.maxProfit, 1871, 1e-6, 'keep the credit if both calls expire worthless');
+  near(prof.maxLoss, -(3000 - 1871), 1e-6, 'a 30-wide spread minus the credit');
+  assert.equal(prof.unboundedLoss, false);
+  assert.equal(prof.unboundedProfit, false);
+  near(prof.capital.value, 1129, 1e-6);
+  assert.equal(prof.capital.floor, false);
+});
+
+t('options: P&L on closing is value now minus entry value; a falling stock profits a bear call spread', () => {
+  const pts = [
+    pt('entry', 'entry', '2026-11-11T15:30:00Z', [18.69, 37.4]),
+    pt('target', 'target:T1', '2026-11-12T20:00:00Z', [9, 25]),   // info only
+    pt('mark', 'latest', '2026-11-12T20:00:00Z', [12, 31]),
+  ];
+  const s = summarizeOption(BCS, pts, true);
+  assert.equal(s.status, 'open');
+  assert.equal(s.kind, 'credit');
+  assert.equal(s.v0, -1871);
+  // marked: long 450c 12 -> +1200, short 420c 31 -> -3100: value -1900; pnl = -1900 - (-1871) = -29
+  near(s.latest.pnl, -29, 1e-6);
+  near(s.targets[0].pnl, 271, 1e-6);                            // 900 - 2500 = -1600 value; -1600 + 1871
+  assert.equal(s.current.key, 'latest');
+  assert.equal(s.exit, null);
+});
+
+t('options: a closed strategy shows the exit, and the target marks stay information only', () => {
+  const pts = [
+    pt('entry', 'entry', '2026-11-11T15:30:00Z', [18.69, 37.4]),
+    pt('target', 'target:T1', '2026-11-12T20:00:00Z', [8, 20]),
+    pt('exit', 'exit', '2026-11-13T20:00:00Z', [3, 12], { basis: 'quote_mid_late' }),
+  ];
+  const s = summarizeOption(BCS, pts, true);
+  assert.equal(s.status, 'closed');
+  // exit value = +300 - 1200 = -900; pnl = -900 + 1871 = +971; return on estimated capital 971 / 1129
+  near(s.exit.pnl, 971, 1e-6);
+  near(s.exit.returnPct, 86.0, 0.05);
+  assert.equal(s.current.key, 'exit');
+  assert.equal(s.targets.length, 1);
+  assert.equal(s.targets[0].kind, 'target');
+});
+
+t('options: not entered -> pending; entered but no usable entry price -> unpriced; a missing leg price leaves P&L null (never a guess)', () => {
+  assert.equal(summarizeOption(BCS, [], false).status, 'pending');
+  assert.equal(summarizeOption(BCS, [], true).status, 'unpriced');
+  assert.equal(summarizeOption(BCS, [pt('entry', 'entry', '2026-11-11T15:30:00Z', [18.69, null])], true).status, 'unpriced');
+  const s = summarizeOption(BCS, [pt('entry', 'entry', '2026-11-11T15:30:00Z', [18.69, 37.4]), pt('mark', 'latest', '2026-11-12T15:30:00Z', [null, 30])], true);
+  assert.equal(s.latest.pnl, null);
+  assert.equal(s.latest.returnPct, null);
+});
+
+t('options: expiry settles at intrinsic value of the stock price', () => {
+  assert.deepEqual(intrinsicPrices(BCS, 410), [0, 0]);          // below both strikes: both worthless
+  assert.deepEqual(intrinsicPrices(BCS, 435), [0, 15]);
+  assert.deepEqual(intrinsicPrices(BCS, 470), [20, 50]);
+  const v = positionValue(BCS, intrinsicPrices(BCS, 470));       // 450c worth 20, 420c worth 50: spread at its 30 max width
+  near(v - positionValue(BCS, [18.69, 37.4]), -3000 + 1871, 1e-6);
+});
+
+t('options: debit spread, long call, naked short call (unlimited loss is a flagged floor), short put, iron condor', () => {
+  const bull = [{ side: 'buy', type: 'call', strike: 100, qty: 1 }, { side: 'sell', type: 'call', strike: 110, qty: 1 }];
+  const pb = expiryProfile(bull, positionValue(bull, [4, 1]));  // pay 300 net
+  near(pb.maxLoss, -300); near(pb.maxProfit, 700); near(pb.capital.value, 300);
+  const longCall = [{ side: 'buy', type: 'call', strike: 100, qty: 2 }];
+  const pl = expiryProfile(longCall, positionValue(longCall, [3]));
+  near(pl.maxLoss, -600); assert.equal(pl.unboundedProfit, true); assert.equal(pl.unboundedLoss, false);
+  const naked = [{ side: 'sell', type: 'call', strike: 100, qty: 1 }];
+  const pn = expiryProfile(naked, positionValue(naked, [3]));
+  assert.equal(pn.unboundedLoss, true); assert.equal(pn.capital.floor, true); near(pn.maxProfit, 300);
+  const shortPut = [{ side: 'sell', type: 'put', strike: 100, qty: 1 }];
+  const ps = expiryProfile(shortPut, positionValue(shortPut, [2]));
+  near(ps.maxProfit, 200); near(ps.maxLoss, -(10000 - 200)); assert.equal(ps.unboundedLoss, false);
+  const condor = [
+    { side: 'buy', type: 'put', strike: 90, qty: 1 }, { side: 'sell', type: 'put', strike: 95, qty: 1 },
+    { side: 'sell', type: 'call', strike: 105, qty: 1 }, { side: 'buy', type: 'call', strike: 110, qty: 1 },
+  ];
+  const pc = expiryProfile(condor, positionValue(condor, [0.5, 1.5, 1.5, 0.5]));  // credit 200
+  near(pc.maxProfit, 200); near(pc.maxLoss, -300); near(pc.capital.value, 300);
+});
+
+t('options: rejects missing or invalid prices instead of guessing', () => {
+  assert.equal(positionValue(BCS, [18.69]), null);
+  assert.equal(positionValue(BCS, [18.69, -1]), null);
+  assert.equal(positionValue([], []), null);
+  assert.equal(expiryProfile([], 0), null);
 });
 
 console.log(`ideas: ${passed} checks passed`);

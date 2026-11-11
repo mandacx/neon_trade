@@ -15,17 +15,18 @@ import {
   FEATURE_IDEAS_LONG_TERM, FEATURE_IDEAS_SHORT_TERM, FEATURE_PUBLISH_IDEAS, hasFeature,
 } from '@/lib/features';
 import {
-  CLOSED_STATUSES, CLOSING_UPDATE_TYPES, OPEN_STATUSES, horizonTerm, horizonsOfTerm, riskReward, validatePlan, validateScheduleTime,
+  CLOSED_STATUSES, CLOSING_UPDATE_TYPES, OPEN_STATUSES, entryBasisOf, horizonTerm, horizonsOfTerm, riskReward, validatePlan, validateScheduleTime,
   type IdeaOptionStrategy, type IdeaPlanInput, type IdeaTarget, type IdeaTerm,
 } from '@/lib/ideaTypes';
-import { scoreIdea, type ScoreBar, type ScoreClosure, type ScoreResult } from '@/lib/ideaScoring';
+import { scoreIdea, type ScoreBar, type ScoreClosure, type ScoreIntradayBar, type ScoreResult } from '@/lib/ideaScoring';
+import { getCompleted15mBars } from '@/lib/ideaIntraday';
 import { computeStats, breakdownBy, type StatRow } from '@/lib/ideaStats';
 import { IDEA_DISCLAIMER, DISCLAIMER_VERSION } from '@/lib/ideaDisclaimer';
 import { allTargetsFacts, scoreEventFacts, toAlertIdea, type AlertFacts, type AlertInput } from '@/lib/ideaAlertModel';
 import { buildEmail } from '@/lib/ideaEmail';
 import { buildPush, buildTelegram } from '@/lib/ideaMessages';
 import type { LiveOfficial, LivePlan } from '@/lib/ideaLiveMath';
-import { etDateOf } from '@/lib/marketSession';
+import { etDateOf, etInstantMs } from '@/lib/marketSession';
 import { getDailyBars } from '@/lib/dailyBars';
 
 // ---------------------------------------------------------------------------------------------------
@@ -251,7 +252,7 @@ function toLiveRow(r: any): LiveIdeaRow {
     id: String(r.id),
     symbol: r.symbol,
     status: r.status,
-    plan: { direction: r.direction, entryLow: r.entry_low, entryHigh: r.entry_high, targets: targets.map(t => Number(t.price)), stop: r.stop, publishedOn: r.published_on ?? '' },
+    plan: { direction: r.direction, entryLow: r.entry_low, entryHigh: r.entry_high, targets: targets.map(t => Number(t.price)), stop: r.stop, publishedOn: r.published_on ?? '', entryBasis: entryBasisOf(r.published_on) },
     official: r.o_outcome
       ? { outcome: r.o_outcome, enteredOn: r.o_entered_on, entryPrice: num(r.o_entry_price), targetsHit: Number(r.o_targets_hit ?? 0), evaluatedThrough: r.o_through }
       : null,
@@ -680,9 +681,10 @@ const EVENT_KEY: Record<string, string> = { triggered: 'triggered', stopped: 'st
 export interface EvaluateResult { evaluated: number; finished: number; events: number; skipped: number; errors: number }
 
 /**
- * Re-score ideas against daily bars and store the outcome (derived and rebuildable: pass `all` to rebuild every
- * published idea, finished ones included). Non-fatal per idea. `asOf` is yesterday (US/Eastern): the last
- * complete session, so a partial bar never decides anything.
+ * Re-score ideas and store the outcome (derived and rebuildable: pass `all` to rebuild every published idea,
+ * finished ones included). Non-fatal per idea. `asOf` is yesterday (US/Eastern): the last complete session, so a
+ * partial DAILY bar never decides anything. Ideas on the 15-minute entry basis (`entryBasisOf`) also read the COMPLETED
+ * 15-minute bars up to now: the entry (and the entry day's stop and targets) are decided intraday, later days on daily bars.
  */
 export async function evaluateIdeas(opts: { all?: boolean; ideaId?: string; deadline?: number } = {}): Promise<EvaluateResult> {
   const res: EvaluateResult = { evaluated: 0, finished: 0, events: 0, skipped: 0, errors: 0 };
@@ -692,7 +694,8 @@ export async function evaluateIdeas(opts: { all?: boolean; ideaId?: string; dead
   if (opts.ideaId) { args.push(opts.ideaId); where += ` AND i.id = $1`; }
   else if (!opts.all) where += ` AND i.status IN ('live','triggered')`;
   const ideas = await sql(`SELECT i.id, i.symbol, i.direction, i.horizon, i.title, i.status, i.entry_low::float8 AS entry_low, i.entry_high::float8 AS entry_high,
-    i.targets, i.stop::float8 AS stop, i.published_on::text AS published_on, i.valid_until::text AS valid_until FROM public.nt_trade_ideas i WHERE ${where} ORDER BY i.id`, args);
+    i.targets, i.stop::float8 AS stop, i.published_on::text AS published_on, i.published_at, i.valid_until::text AS valid_until, o.entered_on::text AS o_entered_on
+    FROM public.nt_trade_ideas i LEFT JOIN public.nt_idea_outcomes o ON o.idea_id = i.id WHERE ${where} ORDER BY i.id`, args);
 
   for (const idea of ideas as any[]) {
     if (opts.deadline && Date.now() > opts.deadline) { res.skipped++; continue; }
@@ -707,9 +710,24 @@ export async function evaluateIdeas(opts: { all?: boolean; ideaId?: string; dead
         bars = got.bars.filter(b => b.date <= asOf);
       }
       const targets = (Array.isArray(idea.targets) ? idea.targets : []).map((t: IdeaTarget) => Number(t.price));
+      const entryBasis = entryBasisOf(idea.published_on);
+      const publishedAt = idea.published_at ? new Date(idea.published_at).toISOString() : null;
+      let intraday: ScoreIntradayBar[] = [];
+      if (entryBasis === 'm15' && publishedAt) {
+        // From the publish time; once an entry day is stored (and we are not rebuilding) only that day onwards is needed.
+        const fromMs = !opts.all && idea.o_entered_on ? Math.max(Date.parse(publishedAt), etInstantMs(idea.o_entered_on, '04:00')) : Date.parse(publishedAt);
+        const capMs = Math.min(Date.now(), etInstantMs(idea.valid_until, '23:59'));
+        try {
+          intraday = await getCompleted15mBars(idea.symbol, new Date(fromMs).toISOString(), capMs);
+        } catch (error) {
+          res.errors++; // never read a failed feed as "no entry yet"
+          console.error('[ideas] 15-minute bars failed', idea.id, error instanceof Error ? error.message : error);
+          continue;
+        }
+      }
       const score = scoreIdea(
-        { direction: idea.direction, entryLow: idea.entry_low, entryHigh: idea.entry_high, targets, stop: idea.stop, publishedOn: idea.published_on, validUntil: idea.valid_until },
-        bars, closure, asOf,
+        { direction: idea.direction, entryLow: idea.entry_low, entryHigh: idea.entry_high, targets, stop: idea.stop, publishedOn: idea.published_on, validUntil: idea.valid_until, publishedAt, entryBasis },
+        bars, closure, asOf, intraday,
       );
       await storeOutcome(idea, score, closure);
       res.evaluated++;
@@ -725,13 +743,13 @@ export async function evaluateIdeas(opts: { all?: boolean; ideaId?: string; dead
 
 async function storeOutcome(idea: any, s: ScoreResult, closure: ScoreClosure | null): Promise<void> {
   await sql(
-    `INSERT INTO public.nt_idea_outcomes (idea_id, outcome, entered_on, entry_price, exit_on, exit_price, targets_hit, targets_total, r_multiple, pct_return, mae_pct, mfe_pct, days_to_t1, days_held, events, evaluated_through, updated_at)
-     VALUES ($1,$2,$3::date,$4,$5::date,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16::date,now())
-     ON CONFLICT (idea_id) DO UPDATE SET outcome=EXCLUDED.outcome, entered_on=EXCLUDED.entered_on, entry_price=EXCLUDED.entry_price, exit_on=EXCLUDED.exit_on,
+    `INSERT INTO public.nt_idea_outcomes (idea_id, outcome, entered_on, entry_price, exit_on, exit_price, targets_hit, targets_total, r_multiple, pct_return, mae_pct, mfe_pct, days_to_t1, days_held, events, evaluated_through, basis, updated_at)
+     VALUES ($1,$2,$3::date,$4,$5::date,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16::date,$17,now())
+     ON CONFLICT (idea_id) DO UPDATE SET basis=EXCLUDED.basis, outcome=EXCLUDED.outcome, entered_on=EXCLUDED.entered_on, entry_price=EXCLUDED.entry_price, exit_on=EXCLUDED.exit_on,
        exit_price=EXCLUDED.exit_price, targets_hit=EXCLUDED.targets_hit, targets_total=EXCLUDED.targets_total, r_multiple=EXCLUDED.r_multiple,
        pct_return=EXCLUDED.pct_return, mae_pct=EXCLUDED.mae_pct, mfe_pct=EXCLUDED.mfe_pct, days_to_t1=EXCLUDED.days_to_t1, days_held=EXCLUDED.days_held,
        events=EXCLUDED.events, evaluated_through=EXCLUDED.evaluated_through, updated_at=now()`,
-    [idea.id, s.outcome, s.enteredOn, s.entryPrice, s.exitOn, s.exitPrice, s.targetsHit, s.targetsTotal, s.r, s.pctReturn, s.maePct, s.mfePct, s.daysToT1, s.daysHeld, JSON.stringify(s.events), s.evaluatedThrough],
+    [idea.id, s.outcome, s.enteredOn, s.entryPrice, s.exitOn, s.exitPrice, s.targetsHit, s.targetsTotal, s.r, s.pctReturn, s.maePct, s.mfePct, s.daysToT1, s.daysHeld, JSON.stringify(s.events), s.evaluatedThrough, s.basis],
   );
   // A publisher's early close is shown at once; the result replaces it when the session completes.
   const status = closure && !s.final ? (closure.kind === 'closed' ? 'closed_by_publisher' : 'cancelled') : STATUS_OF_OUTCOME[s.outcome] ?? idea.status;

@@ -95,6 +95,7 @@ Created by `scripts/add-trade-ideas-tables.mjs` (idempotent). All tables are `nt
 | `nt_trade_ideas` | the idea: symbol, direction, horizon, status, entry zone, `targets` JSONB ladder, stop, `valid_until`, `risk_rating`, optional `option_strategy` JSONB, `ref_price` (last close at publish), publish stamps. Money columns are `NUMERIC(18,6)`. |
 | `nt_idea_updates` | append-only timeline: note, stop moved, partial booked, closed early, cancelled. A DB trigger rejects UPDATE/DELETE. |
 | `nt_idea_outcomes` | **derived and rebuildable** result per idea (`lib/ideaScoring.ts`). Safe to TRUNCATE and rebuild (`/api/ideas/evaluate {all:true}` or `/api/cron/ideas?force=true`). |
+| `nt_idea_option_marks` | **derived and rebuildable** price points of an idea's option strategy: `entry`, `target:T1..` (information only), `exit`, `latest`; one row per `(idea_id, event_key)`, legs as JSONB with per-share estimate prices and how each was priced. Created by `scripts/add-idea-option-marks.mjs` (idempotent). See "Option strategy tracking". |
 | `nt_idea_events` | append-only event feed (published, triggered, T1.., stopped, expired, updates). `UNIQUE (idea_id, event_key)`: re-running the tracker never duplicates an event. `payload JSONB` (nullable, `{ v: 1, ... }`) holds the event's own facts for the alert builders (added 2026-11-10 by `scripts/add-idea-event-payload.mjs`; NULL on older events). |
 | `nt_idea_deliveries` | email delivery log, `UNIQUE (event_id, user_id, channel)`: exactly one alert per event per subscriber. |
 | `nt_idea_prefs` | email opt-in and the feed's read marker. |
@@ -116,8 +117,10 @@ ratings, directions.
 
 ## Scoring (`lib/ideaScoring.ts`)
 
-Mechanical, from **daily bars**, never self-reported. Every result is labelled `daily_bars_stop_first`. Fixtures:
-`node scripts/test-idea-scoring.mjs`.
+Mechanical, never self-reported. Fixtures: `node scripts/test-idea-scoring.mjs`. Two entry bases, stored in `nt_idea_outcomes.basis`:
+
+- `daily_bars_stop_first`: ideas published **before 2026-11-10** (`M15_ENTRY_FROM` in `lib/ideaTypes.ts`). Everything below on daily bars.
+- `m15_entry_daily_stop_first`: ideas published **on or after 2026-11-10**. See "15-minute entry" below; rules 3 to 7 apply unchanged.
 
 1. Only sessions **after** the publish date count (the publish day's bar may pre-date the idea).
 2. **Entry:** a bar whose range overlaps the entry zone. Entry price is the **worst fill in the zone** (long: zone high,
@@ -154,7 +157,7 @@ in desk statistics, no alerts, independent of "I took this" (R and % only, no mo
 | State | Meaning | R shown |
 |---|---|---|
 | `awaiting_entry` | not entered, price outside the zone (distance to the nearest zone edge shown) | no |
-| `in_zone` | not entered, price inside the zone (the tracker enters on a completed session) | no |
+| `in_zone` | not entered, price inside the zone (15-minute basis: the idea enters when a completed 15-minute candle closes inside it, checked every 15 minutes; daily basis: on a completed session that touches it) | no |
 | `ran_past_target` | not entered, price at or beyond target 1 | no |
 | `in_trade` | entered per the official outcome | yes |
 | `beyond_stop` | price beyond the stop (entered or not) | only if entered, unclamped |
@@ -168,6 +171,28 @@ in desk statistics, no alerts, independent of "I took this" (R and % only, no mo
   answers `200 { live: null, reason: 'closed' }`.
 - **Points:** `points` is the per-share P&L in price points, blended like R (never before entry); distances to zone / stop / targets also come in points. Closed results convert with `pointsFromR` (R x risk per share).
 - **Board chip** (built 2026-11-11): `GET /api/ideas/live` (limiter `ideas_live`) returns the marks of every open idea in the viewer's plan keyed by id; `components/ideas/LiveChip.tsx` shows CMP, day %, and P&L in points / R / % once entered, or the distance to the entry zone. Open tab only; same polling rules.
+
+### 15-minute entry (`lib/ideaScoring.ts`, `lib/ideaIntraday.ts`)
+
+Requested 2026-11-11: do not wait for the daily bar; an idea is entered when the price is in the zone at the end of a 15-minute candle.
+
+- **Entry:** the first **completed regular-session 15-minute bar that starts at or after the publish time and closes inside the entry zone** (`entryLow <= close <= entryHigh`). A wick into the zone that closes outside does not enter. Same rule for shorts. The entry price stays the **worst fill in the zone** (long: zone high, short: zone low) so R is never flattered; the `triggered` event carries `at`, the close time of the entry bar.
+- **Never entered:** before entry, a bar that closes at or beyond target 1, or through the stop, without a close in the zone ends the idea as `not_triggered`. Valid-until passing without an entry is `not_triggered`; a publisher cancel before entry is `cancelled`.
+- **After entry:** the entry day's stop and targets are judged on the 15-minute bars **after** the entry bar (stop first within a bar; a 15-minute bar opening through the stop fills at its open). The entry day's daily high/low are not used (they include moves before the entry). Later days use complete daily bars as before (a gap fills at the open). Exit events carry `at` when they come from 15-minute bars.
+- **Data:** `getCompleted15mBars` reads the 15-minute bars from the facade, keeps only bars whose 15 minutes have elapsed and that fall inside the regular session of a trading day (the calendar gives holidays and early closes). A failed read counts as an error for that idea and is retried; it is never read as "no entry yet". Intraday bars are single-venue (IEX): closes are real-time, highs and lows can miss other venues' prints.
+- **Cadence:** `ideas-cron` runs at :02, :17, :32 and :47 (two minutes after each candle closes). Once an entry day is stored, only that day onwards is fetched (unless the outcome is rebuilt with `?force=true`).
+- **Live mark:** `entered` still comes only from the stored official outcome, so the card can lag the real entry by up to ~17 minutes; its in-zone text states the 15-minute rule.
+
+## Option strategy tracking (`lib/ideaOptionMath.ts`, `lib/ideaOptions.ts`)
+
+An idea's optional strategy (legs, expiry) is tracked against its **option prices** as an **estimate**, separate from the idea's R, never fed to `scoreIdea` and **never counted in desk statistics**.
+
+- **Opens** when the stock enters (the official `triggered` event). **Target marks** (`target:T1..`) are information only. **Closes** with the idea (stop, last target, valid-until, publisher close) or when the options expire, whichever is first: expiry settles at intrinsic value of the stock's close on the expiry date. The strategy is not split across the target ladder.
+- **Fill price = mid** of the live bid/ask. Basis labels shown with every number: `quote_mid` (read within ~20 min of the moment), `quote_mid_late` (read later the same day: quote history of a past moment is not available), `replay_last_trade` (past days: the last option trade at or before the moment from the bars, which are sparse and can be stale; the plan refuses same-day option bars), `last_trade` (no usable bid/ask), `expiry_intrinsic`. A leg with no price leaves that moment unpriced and is retried next run; nothing is invented.
+- **P&L** = value now minus entry value, `value = sum(sign x qty x 100 x price)`; net credit when the entry value is negative. **Estimated capital** = the larger of the max loss at expiry and the debit paid (a floor when the loss is unlimited); **return** is P&L over that, labelled "return on estimated capital". It is **not** a broker margin requirement (Reg T / SPAN / portfolio margin depend on the account).
+- **Tracker:** `trackOptionStrategies` runs at the end of `/api/cron/ideas` (after the alerts, own deadline; a failure there is not a tracker failure). Entry / target / exit rows are written once; `latest` is refreshed during the regular session. Closed ideas missing an exit row are retried for 7 days. Without `nt_idea_option_marks` it reports `unavailable` and does nothing.
+- **Reader:** `GET /api/ideas/[id]` returns `optionTrack` (`trackable`, `summary`, `notes`) for ideas with a strategy, read after the plan-gated idea read; `components/ideas/OptionStrategyCard.tsx` shows credit/debit, P&L now or at close, return on estimated capital, estimated capital, max profit/loss, the target marks and the leg prices used. A strategy without an expiry cannot be tracked and says so.
+- **Not built:** option P&L in desk statistics, on the board chip, in alerts, or in "I took this"; Greeks/IV history; a model-based replay when there is no trade; a broker-margin estimate.
 
 ## Statistics (`lib/ideaStats.ts`)
 
@@ -204,7 +229,7 @@ All under `/api/ideas` (rate limiter `ideas`, 90/min; the live mark has its own 
 | `GET /api/ideas?tab=open\|closed\|all&horizon=&direction=&symbol=&limit=&offset=` | idea term | list + counts + `locked` counts + `disclaimer` |
 | `POST /api/ideas?dry_run=true` | publisher | validates and returns exactly what each tier receives, warnings (no price data, zone far from last close) and the alert payload; saves nothing |
 | `POST /api/ideas` | publisher | save a draft (`id` in the body updates it) |
-| `GET /api/ideas/[id]` | idea term | idea + timeline; 404 if missing or outside the plan |
+| `GET /api/ideas/[id]` | idea term | idea + timeline + `optionTrack` (estimated option P&L, see "Option strategy tracking"); 404 if missing or outside the plan |
 | `DELETE /api/ideas/[id]` | publisher | drafts only |
 | `GET /api/ideas/live` | idea term | live marks of all open ideas in the viewer's plan (board chips), keyed by idea id; limiter `ideas_live` |
 | `GET /api/ideas/[id]/live` | idea term | provisional live mark of an open idea (limiter `ideas_live`); `data: { live, market, disclaimer }`; closed idea `live: null`; 404 if missing or outside the plan |
@@ -313,6 +338,7 @@ contrast is asserted in `scripts/test-idea-alerts.mjs`. A dark palette is specif
 
 ```bash
 node --env-file=.env.local scripts/add-trade-ideas-tables.mjs        # tables + triggers (idempotent)
+node --env-file=.env.local scripts/add-idea-option-marks.mjs         # option strategy tracking table (idempotent); without it the option P&L card says "not tracked yet"
 node --env-file=.env.local scripts/add-idea-event-payload.mjs        # alert payload column (idempotent; --dry-run reports only); run BEFORE deploying the alert formatting
 node --env-file=.env.local scripts/add-trade-ideas-plans.mjs --dry-run   # review the plans first
 node --env-file=.env.local scripts/add-trade-ideas-plans.mjs          # insert-only; add --active to list them on /upgrade
@@ -329,7 +355,7 @@ node scripts/render-idea-alert-samples.mjs --screenshots              # offline 
 3. Optional channels: Telegram needs `TELEGRAM_BOT_TOKEN` (already used by the scan alerts). Browser push needs a VAPID pair:
    `npx web-push generate-vapid-keys`, then set `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` (a `mailto:` address) in Vercel.
    Until set, those switches in the Alerts menu say so and nothing is sent.
-4. Schedule the tracker: `railway/.railway/railway.ts` defines `ideas-cron` (every 30 min, `railway/ideas-cron/Dockerfile`)
+4. Schedule the tracker: `railway/.railway/railway.ts` defines `ideas-cron` (at :02, :17, :32, :47 so each 15-minute candle has closed, `railway/ideas-cron/Dockerfile`)
    but it is **not applied**: from `railway/` run `railway config plan`, then `railway config apply --yes` (see CLAUDE.md
    for the Windows PowerShell note). Until then, "Run tracker now" on `/ideas/publish` and `GET /api/cron/ideas` work.
 
@@ -341,7 +367,7 @@ channels; idea series and model portfolios; comments/Q&A; billing; an audit log 
 admin audit when added); report/abuse and an account-deletion path that stops fan-out (channel delivery already skips users
 without the plan feature); a delayed free feed; subscription history; automatic retry of failed alerts; editing the
 quantity or price of an "I took this" record (remove and re-add); per-minute scheduled publishing (it follows the tracker's
-30-minute tick). A sector breakdown needs a real sector source on ideas.
+15-minute tick). A sector breakdown needs a real sector source on ideas.
 
 ## Status
 

@@ -107,6 +107,18 @@ export const MAX_TARGETS = 5;
 export const MAX_OPTION_LEGS = 4;
 export const MAX_RATIONALE = 8000;
 
+/**
+ * How an idea's ENTRY is decided (docs/trade-ideas.md, "Scoring"). 'm15': entered when a completed regular-session
+ * 15-minute bar closes inside the entry zone (decided intraday). 'daily': a completed daily bar's range overlaps the zone
+ * (decided after the close). Ideas published on or after this ET date use 'm15'; earlier ones keep 'daily' so nothing
+ * already scored is rewritten.
+ */
+export const M15_ENTRY_FROM = '2026-11-10';
+export type EntryBasis = 'daily' | 'm15';
+export const entryBasisOf = (publishedOn: string | null | undefined): EntryBasis => (publishedOn && publishedOn >= M15_ENTRY_FROM ? 'm15' : 'daily');
+/** The `nt_idea_outcomes.basis` label for each entry basis. Both score stop and targets stop-first. */
+export const SCORE_BASIS: Record<EntryBasis, string> = { daily: 'daily_bars_stop_first', m15: 'm15_entry_daily_stop_first' };
+
 /** Reference entry price used for risk and R: the worst fill in the zone for the trader (conservative). */
 export const entryPriceOf = (direction: string, entryLow: number, entryHigh: number) => (direction === 'short' ? entryLow : entryHigh);
 

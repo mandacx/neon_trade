@@ -7,6 +7,47 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-11-11 (15-minute entry + option P&L) — Trade Ideas: enter on a completed 15-minute close in the zone; estimated option-strategy P&L
+
+Requested: an idea should not wait for the daily bar to be "entered": it is entered when the price is in the zone at the end of a 15-minute candle (shorts included).
+Then: track the idea's option strategy for P&L and margin-style return, with a replay of past moments. Answers given: option position opens with the underlying; the option
+mark at each target is information only; fills are estimates at the **mid**; option P&L is a separate result, not in desk stats. The three entry questions (entry price, which
+ideas, entry-day stop/targets) were not answered; the recommended defaults were used and are listed below.
+
+**What changed**
+- `lib/ideaTypes.ts`: `M15_ENTRY_FROM = '2026-11-10'`, `entryBasisOf(publishedOn)`, `SCORE_BASIS` labels.
+- `lib/ideaScoring.ts`: `scoreIdea(plan, bars, closure, asOf, intraday = [])`. With `plan.entryBasis === 'm15'`: entry = first completed regular-session 15-minute bar (starting at or after `publishedAt`) that closes inside the zone; never-entered = a close through the stop or at/past T1 without a close in the zone; the entry day's stop/targets from the 15-minute bars after the entry bar (gap fills at the bar's open), later days from daily bars. The daily path is unchanged (same code, same fixtures). `ScoreResult.basis`, `ScoreEvent.at` (bar close time) added.
+- `lib/ideaIntraday.ts` (new): `getCompleted15mBars` (completed bars only, regular session per the exchange calendar; throws on a feed failure).
+- `lib/ideas.ts`: `evaluateIdeas` reads published_at and the stored entry day, fetches 15-minute bars for 'm15' ideas (a failed read counts as an error and skips that idea), stores `basis`; `toLiveRow` passes `entryBasis`.
+- `lib/ideaLiveMath.ts`, `components/ideas/LiveMark.tsx`: the live mark carries `entryBasis`; the in-zone text states the 15-minute rule.
+- `railway/.railway/railway.ts`: `ideas-cron` schedule `*/30 * * * *` -> `2,17,32,47 * * * *` (**not applied**).
+- `lib/ideaOptionMath.ts` (new, pure): value / P&L / expiry payoff / estimated capital / summary; `lib/ideaOptions.ts` (new, server): pricing (live mid; same-day late mid; past-day last trade; expiry intrinsic), `trackOptionStrategies` (run at the end of `/api/cron/ideas`), `getOptionTrack`; `scripts/add-idea-option-marks.mjs` (new table `nt_idea_option_marks`, **not run**); `GET /api/ideas/[id]` returns `optionTrack`; `components/ideas/OptionStrategyCard.tsx` replaces the static option box on `/ideas/[id]`; the Tracked result caption names the 15-minute rule.
+- `app/api/cron/ideas/route.ts`, `docs/trade-ideas.md` ("15-minute entry", "Option strategy tracking", data model, API, runbook), `CLAUDE.md` (ideas-cron line, Trade Ideas bullet).
+- `scripts/test-idea-scoring.mjs`: +14 checks for the 15-minute rule (long and short, wick vs close, entry-bar moves ignored, gap, next-day daily bars, publish-time filter, never-entered, expiry, the ISRG case) and +8 for option maths (the real ISRG bear call spread, credit/debit, unlimited loss, condor, missing prices).
+
+**Design notes / assumed defaults (not answered by the requester; change if wrong)**
+- Entry price stays the **worst fill in the zone** (short: zone low). **Consequence seen on real data:** the ISRG short (zone 440-445) entered at a bar close of about 444.77, but is scored from 440, so its open R reads about -0.33 when the stock is 449.3, where entering at the bar close would read about -0.16. Conservative by design, but larger than the information we now have; switching the m15 entry price to the entry bar's close is a one-line change in `scoreIdea` (it also changes risk and R scale).
+- Applies to ideas published **on or after 2026-11-10** (only one idea exists, so nothing finished is rewritten).
+- Stop/targets on 15-minute bars only on the entry day; later days stay on daily (consolidated) bars.
+- Option position closes whole at the idea's final exit or at option expiry; no per-target partial closes. Fills are mid (not the bid/ask-conservative alternative that was also offered). The earlier stated "never flatter R" is kept for the stock's R; the option result is separate.
+- "Margin" = return on **estimated capital** (max loss or debit), not broker margin.
+- The first tracker run after deploy will enter the existing ISRG idea **retroactively** (the 11:15 ET candle on 2026-11-11) and record a `triggered` event, which sends the entry alert to opted-in subscribers.
+
+**Verified (this session)**
+- `node scripts/test-idea-scoring.mjs`: 65 checks pass (the 43 existing, unchanged, plus 22 new). `npx tsc --noEmit` clean. eslint on the touched directories: warnings only (existing `any` style). `npm run build` passes (real `.env.local`); `grep` of `.next/static` for vendor names prints nothing.
+- Live, read-only: Alpaca option snapshots for ISRG 2026-12-18 450C/420C return `latestQuote` bid/ask (450C 17.97 / 19.41), greeks and IV; option 15-minute bars for the 420C are very sparse (3 bars in 4 days), which is why replay is only a labelled fallback.
+- Live, read-only: the real ISRG 15-minute IEX bars since publish, run through `scoreIdea` with the idea's plan, give outcome `open`, entered 2026-11-11, `triggered` at 16:15Z (11:15 ET), basis `m15_entry_daily_stop_first`. The ISRG idea (id 1, short 440-445, stop 468, T 405/385/360, valid to 2026-11-13, bear call spread 450C bought / 420C sold, expiry 2026-12-18) was read from the database; nothing was written.
+
+**Not verified**
+- Nothing was written to the database: `nt_idea_option_marks` does not exist yet, `evaluateIdeas` / `trackOptionStrategies` were not run against it, and `ideas-cron` is not applied, so none of the scheduled behaviour has run. The pages (option card, live-mark text, Tracked result caption) were not opened in a browser.
+- `getCompleted15mBars` itself (the facade call and the calendar-based session filter, early closes, DST) was not run; the check above used a raw request with an equivalent filter.
+- `replayPrices` (past-day option bars) and the same-day "late mid" path were not exercised; option snapshot quotes outside market hours (staleness) are unknown; the 20-minute live window is a judgment.
+- Whether Alpaca's option snapshot `latestQuote` is always present for illiquid strikes (the 420C response was cut off in the probe).
+
+**Follow-ups**: run `scripts/add-idea-option-marks.mjs`, then `railway config plan` / `apply` for `ideas-cron`; decide the m15 entry price (worst fill vs the entry bar's close); decide whether to alert subscribers about the retroactive ISRG entry; option P&L on the board chip and in alerts; a model-based (Black-Scholes) estimate when a leg has no trade; per-target partial closes if wanted.
+
+---
+
 ## 2026-11-11 — Trade Ideas: chart interval + crosshair readout, CMP and P&L in points / R on the board and idea page
 
 Requested: the idea page's chart had no crosshair info bar and no interval choice (saved like the stock chart), and the idea

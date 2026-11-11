@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import IdeaChart from '@/components/ideas/IdeaChart';
 import LiveMark from '@/components/ideas/LiveMark';
+import OptionStrategyCard from '@/components/ideas/OptionStrategyCard';
 import TakeThis from '@/components/ideas/TakeThis';
 import {
   DirectionPill, HorizonPill, OutcomePill, RiskPill, Spinner, StatusPill, api, fmtDay, fmtPct, fmtPrice, fmtR, fmtWhen, inputClass, labelClass, rTone,
@@ -14,6 +15,7 @@ import { fmtPts } from '@/components/ideas/LiveChip';
 import { pointsFromR } from '@/lib/ideaLiveMath';
 import { Pill } from '@/components/ideas/ideaUi';
 import type { IdeaView } from '@/lib/ideas';
+import type { OptionTrack } from '@/lib/ideaOptions';
 
 function Stat({ label, children }: { label: string; children: React.ReactNode }) {
   return <div><div className="text-[10px] uppercase text-gray-400 font-semibold">{label}</div><div className="text-sm font-semibold text-gray-900">{children}</div></div>;
@@ -69,12 +71,13 @@ function UpdateForm({ idea, onDone }: { idea: IdeaView; onDone: () => void }) {
 export default function IdeaPage() {
   const { id } = useParams<{ id: string }>();
   const [idea, setIdea] = useState<IdeaView | null>(null);
+  const [optionTrack, setOptionTrack] = useState<OptionTrack | null>(null);
   const [canPublish, setCanPublish] = useState(false);
   const [error, setError] = useState<{ status?: number; message: string } | null>(null);
 
   const load = useCallback(() => {
-    api<{ idea: IdeaView; canPublish: boolean }>(`/api/ideas/${id}`)
-      .then(d => { setIdea(d.idea); setCanPublish(d.canPublish); setError(null); })
+    api<{ idea: IdeaView; canPublish: boolean; optionTrack?: OptionTrack | null }>(`/api/ideas/${id}`)
+      .then(d => { setIdea(d.idea); setOptionTrack(d.optionTrack ?? null); setCanPublish(d.canPublish); setError(null); })
       .catch(e => setError({ status: e.status, message: e instanceof Error ? e.message : 'Could not load the idea' }));
   }, [id]);
   useEffect(load, [load]);
@@ -142,7 +145,9 @@ export default function IdeaPage() {
           <div className="flex flex-wrap items-center gap-2 mb-2">
             <h3 className="text-sm font-bold text-gray-900">Tracked result</h3>
             <OutcomePill outcome={o.outcome} />
-            <span className="text-[11px] text-gray-400">Scored mechanically from daily bars through {o.evaluatedThrough ? fmtDay(o.evaluatedThrough) : '—'}. Stop first if one bar touches both stop and a target.{!closed ? ' Through the last completed session only; the live mark above is provisional.' : ''}</span>
+            <span className="text-[11px] text-gray-400">{o.basis === 'm15_entry_daily_stop_first'
+              ? <>Scored mechanically through {o.evaluatedThrough ? fmtDay(o.evaluatedThrough) : '—'}. Entry: a completed 15-minute candle closes inside the entry zone. Stop and targets: 15-minute candles on the entry day, daily bars after. Stop first if one bar touches both.{!closed ? ' The live mark above is provisional.' : ''}</>
+              : <>Scored mechanically from daily bars through {o.evaluatedThrough ? fmtDay(o.evaluatedThrough) : '—'}. Stop first if one bar touches both stop and a target.{!closed ? ' Through the last completed session only; the live mark above is provisional.' : ''}</>}</span>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-7 gap-3">
             <Stat label="Entered">{o.enteredOn ? `${fmtDay(o.enteredOn)} @ ${fmtPrice(o.entryPrice)}` : 'Not yet'}</Stat>
@@ -163,17 +168,7 @@ export default function IdeaPage() {
         </div>
       )}
 
-      {idea.optionStrategy && (
-        <div className="bg-white border border-gray-200 rounded-xl p-4">
-          <h3 className="text-sm font-bold text-gray-900 mb-1">Option strategy: {idea.optionStrategy.name}</h3>
-          <p className="text-[11px] text-gray-400 mb-2">Shown for reference. The idea is tracked on the underlying stock&apos;s price above, not on option prices.</p>
-          {idea.optionStrategy.expiry && <p className="text-xs text-gray-600 mb-1">Expiry {fmtDay(idea.optionStrategy.expiry)}</p>}
-          <ul className="text-sm text-gray-800 space-y-0.5">
-            {idea.optionStrategy.legs.map((l, i) => <li key={i}><span className={l.side === 'buy' ? 'text-green-700 font-semibold' : 'text-red-700 font-semibold'}>{l.side === 'buy' ? 'Buy' : 'Sell'}</span> {l.qty} × {idea.symbol} {l.strike} {l.type}</li>)}
-          </ul>
-          {idea.optionStrategy.note && <p className="text-xs text-gray-600 mt-1.5">{idea.optionStrategy.note}</p>}
-        </div>
-      )}
+      {idea.optionStrategy && <OptionStrategyCard idea={idea} track={optionTrack} />}
 
       <div className="bg-white border border-gray-200 rounded-xl p-4">
         <h3 className="text-sm font-bold text-gray-900 mb-2">Timeline</h3>
