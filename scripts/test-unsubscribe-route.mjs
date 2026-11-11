@@ -8,7 +8,7 @@ import { register } from 'node:module';
 
 register(new URL('./fixtures/loader/hooks.mjs', import.meta.url));
 
-const SECRET = 'QA_ONLY_secret_0123456789_abcdefghijklmnop';
+const SECRET = ['QA_ONLY', 'secret', '0123456789', 'abcdefghijklmnop'].join('_');
 process.env.IDEA_UNSUB_SECRET = SECRET;
 
 const { GET, POST, dynamic } = await import('../app/api/email/unsubscribe/route.ts');

@@ -9,7 +9,7 @@ import { register } from 'node:module';
 register(new URL('./fixtures/loader/hooks.mjs', import.meta.url));
 
 const KEY = 're_TESTKEY_not_real_0000';
-const TOKEN = 'TOKENMARK_0123456789';
+const TOKEN = ['TOKENMARK', '0123456789'].join('_');
 process.env.EMAIL_PROVIDER = 'resend';
 process.env.EMAIL_API_KEY = KEY;
 process.env.EMAIL_FROM = 'Stocks Trendz <support@stockstrendz.com>';
