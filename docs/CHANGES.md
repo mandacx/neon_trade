@@ -7,6 +7,42 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-11-11 — Trade Ideas: chart interval + crosshair readout, CMP and P&L in points / R on the board and idea page
+
+Requested: the idea page's chart had no crosshair info bar and no interval choice (saved like the stock chart), and the idea
+views did not show the current price or, once entered, the profit or loss in points and R. **Not committed; no migration.**
+
+**What changed**
+- `components/ideas/IdeaChart.tsx`: interval buttons (1m 5m 15m 30m 1H 1D, same labels as the stock chart), a crosshair readout above the
+  chart (date or time in exchange time, O H L C, change and %, volume; shows the latest bar when the pointer is off the data) and a volume
+  histogram. The interval is the stock chart's own saved setting: `useChartPrefs()` / pref `chart.settings` (`interval` only), so it follows
+  the account (browser when signed out) and **is shared with the stock page**: change it in either place. Intraday uses epoch-second times
+  with the `lib/chartTime.ts` America/New_York axis labels; windows are fixed recent ranges (4/8/15/30/45 calendar days for 1m/5m/15m/30m/1H),
+  no scroll-back loading. The first request waits for the saved interval (`ready`).
+- `lib/ideaLiveMath.ts`: `points` (per-share P&L, blended exactly like R: booked targets + the remainder at the price; null unless the official
+  outcome says entered), `distancePts` on the zone / stop / targets, and `pointsFromR(r, entry, stop)` for closed results (R x risk per share).
+- `lib/ideas.ts`: `listOpenForLive` (same plan gate as `getIdeaForLive`, open ideas only, capped 200); `getIdeaForLive` shares its SQL columns/mapping.
+- **New `GET /api/ideas/live`** (`app/api/ideas/live/route.ts`, limiter `ideas_live`): the board's batched live marks, keyed by idea id, one snapshot request;
+  `lib/ideaLive.ts` blocks now also carry `day` (regular-session change, display only).
+- `components/ideas/LiveChip.tsx` (+ `useBoardLive`): board card strip with CMP, day %, and either "If entered: +x.xx pts, +x.xxR, +x.x%, targets" (entered per the
+  official outcome) or the distance to the entry zone in points and %. Polls like the idea page (20 s regular / 60 s extended / sleeps when closed, paused when hidden, stops on 401/403/404, 60 s on 429), Open tab only.
+  Closed cards show points beside R and an entered / exited / days held line.
+- `components/ideas/LiveMark.tsx`: P&L (points) cell, points beside the stop and target distances, today's change, "since publish" price move (labelled as price movement, not the idea's P&L).
+- `app/ideas/[id]/page.tsx`: points and % per target, risk per share (pts, % of entry, = 1R), days since publish / days left, Points in the Tracked result.
+- Tests: `scripts/test-idea-scoring.mjs` +2 (points long/short/blend/after T1, null before entry, distances, `pointsFromR`).
+
+**Design notes.** The "no R / no P&L before the tracker says entered" rule is unchanged: a not-entered idea shows distance to the zone instead of a hypothetical P&L.
+Points are per share (the platform never assumes a quantity). The board's R for an open idea in the 5th cell is still the official (completed-bar) value; the chip is the provisional live one, labelled as such.
+
+**Verified (this session)**: `node scripts/test-idea-scoring.mjs` 43 checks pass; `test-idea-alerts` and `test-idea-push` pass; `npx tsc --noEmit` clean; eslint on the touched
+paths 0 errors (existing warnings); `npm run build` passes with a dummy `DATABASE_URL`; vendor-masking grep of `.next/static` empty.
+**Not verified**: any of it in a browser or against the database (idea pages need sign-in and a plan; the new route was not called); the crosshair readout, interval switch and saved
+setting at runtime; intraday bars for symbols with sparse data; whether `lightweight-charts` accepts `undefined` to reset the tick/time formatters when going back to 1D (typechecks; behaviour unverified).
+
+**Follow-ups**: scroll-back loading for intraday on the idea chart; per-quantity P&L in money is still only in "I took this"; a board-level sort by live R.
+
+---
+
 ## 2026-11-10 (alerts follow-ups) — Trade Ideas: sender name, one-click unsubscribe, push urgency, offline render
 
 Requested: the follow-ups listed after the alert formatting run: the email sender name, an unsubscribe path, dark-mode behaviour,

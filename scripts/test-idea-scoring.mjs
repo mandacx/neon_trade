@@ -12,7 +12,7 @@ import { validatePlan, riskReward, validateScheduleTime } from '../lib/ideaTypes
 import { validateTaken, previewTaken, tradeResult, compareFollowed } from '../lib/ideaTakenMath.ts';
 import { buildTelegram, buildPush } from '../lib/ideaMessages.ts';
 import { IDEA_DISCLAIMER } from '../lib/ideaDisclaimer.ts';
-import { liveMark } from '../lib/ideaLiveMath.ts';
+import { liveMark, pointsFromR } from '../lib/ideaLiveMath.ts';
 
 let passed = 0;
 const t = (name, fn) => { try { fn(); passed++; } catch (e) { console.error(`FAIL: ${name}`); throw e; } };
@@ -357,6 +357,37 @@ t('live: R and % match the scorer (open long, after T1, open short)', () => {
   assert.equal(d.targetsHit, 1);
   const ld = liveMark(short, off(d), 95);
   near(ld.r, d.r, 1e-9); near(ld.pct, d.pctReturn, 1e-9);
+});
+
+t('live: points are the blended per-share P&L (long and short), consistent with R, null before entry', () => {
+  // long, entry 102 (zone high), stop 98 (risk 4), targets 106 / 110
+  const o = { outcome: 'open', enteredOn: '2026-01-06', entryPrice: 102, targetsHit: 0, evaluatedThrough: '2026-01-06' };
+  near(liveMark(long, o, 104).points, 2, 1e-9);            // 104 - 102
+  near(liveMark(long, o, 104).r, 0.5, 1e-9);               // 2 / 4
+  near(liveMark(long, o, 100).points, -2, 1e-9);           // under water
+  const hit1 = { ...o, targetsHit: 1 };
+  near(liveMark(long, hit1, 108).points, 0.5 * 4 + 0.5 * 6, 1e-9); // T1 booked (4 pts on half) + half at 108 (6 pts)
+  near(liveMark(long, hit1, 108).points / 4, liveMark(long, hit1, 108).r, 1e-9);
+  const so = { outcome: 'open', enteredOn: '2026-01-06', entryPrice: 100, targetsHit: 0, evaluatedThrough: '2026-01-06' };
+  near(liveMark(short, so, 98).points, 2, 1e-9);           // short gains when price falls
+  near(liveMark(short, so, 103).points, -3, 1e-9);
+  assert.equal(liveMark(long, null, 104).points, null);    // not entered: no P&L
+  assert.equal(liveMark(long, o, null).points, null);
+  assert.equal(liveMark(long, { ...o, outcome: 'target_hit' }, 104).points, null);
+  finiteOrNull(liveMark(long, o, 104));
+  // distances in points
+  const l = liveMark(long, o, 104);
+  near(l.stop.distancePts, -6, 1e-9); near(l.targets[0].distancePts, 2, 1e-9);
+  const away = liveMark(long, null, 110); assert.equal(away.zone.side, 'above'); near(away.zone.distancePts, 8, 1e-9);
+  const inzone = liveMark(long, null, 101); assert.equal(inzone.zone.distancePts, 0);
+});
+
+t('pointsFromR: closed result in points = R x risk per share; null on missing input', () => {
+  near(pointsFromR(1.5, 102, 98), 6, 1e-9);
+  near(pointsFromR(-1, 102, 98), -4, 1e-9);
+  assert.equal(pointsFromR(null, 102, 98), null);
+  assert.equal(pointsFromR(1, null, 98), null);
+  assert.equal(pointsFromR(NaN, 102, 98), null);
 });
 
 t('live: not entered gives no R (no outcome row, pending row)', () => {

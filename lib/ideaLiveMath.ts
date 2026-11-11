@@ -29,6 +29,8 @@ export interface LiveMark {
   r: number | null;
   /** % of entry, same blending as the scorer. */
   pct: number | null;
+  /** Per-share profit or loss in price points, blended like `r` (booked targets + the remainder at the price). null unless entered and a price exists. */
+  points: number | null;
   /** max(official targets hit, leading targets the price is at or beyond). */
   targetsReached: number;
   targetsTotal: number;
@@ -37,16 +39,22 @@ export interface LiveMark {
   /** Worst fill in the zone (the official entry price when entered). */
   entryPrice: number;
   /** distancePct >= 0: % of price needed to reach the nearest zone edge; 0 inside. null without a price. */
-  zone: { side: 'above' | 'inside' | 'below'; distancePct: number } | null;
+  zone: { side: 'above' | 'inside' | 'below'; distancePct: number; distancePts: number } | null;
   /** distancePct = (stop - price) / price * 100 (signed, raw). distanceR = (price - stop) * sign / risk (positive = still on the safe side). */
-  stop: { price: number; distancePct: number | null; distanceR: number | null };
+  stop: { price: number; distancePct: number | null; distancePts: number | null; distanceR: number | null };
   /** distancePct = (target - price) / price * 100 (signed, raw). */
-  targets: Array<{ price: number; distancePct: number | null; reached: boolean }>;
+  targets: Array<{ price: number; distancePct: number | null; distancePts: number | null; reached: boolean }>;
   rangeHint: { stop: boolean; targetsTouched: number } | null;
 }
 
 const round = (n: number, d = 4) => Math.round(n * 10 ** d) / 10 ** d;
 const finite = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
+
+/** Points (per share) of a scored R: r x |entry - stop|. null when either is missing. Used for closed ideas, whose stored result is in R. */
+export function pointsFromR(r: number | null | undefined, entryPrice: number | null | undefined, stop: number | null | undefined): number | null {
+  if (!finite(r) || !finite(entryPrice) || !finite(stop)) return null;
+  return round(r * Math.abs(entryPrice - stop), 4);
+}
 
 /** Total function: never throws and never returns NaN/Infinity (null instead). */
 export function liveMark(plan: LivePlan, official: LiveOfficial | null, price: number | null, range?: LiveRange | null): LiveMark {
@@ -64,9 +72,9 @@ export function liveMark(plan: LivePlan, official: LiveOfficial | null, price: n
   const invalid = !(risk > 0) || n === 0 || !finite(risk);
   if (invalid) {
     return {
-      state: 'unavailable', price: px, entered: false, r: null, pct: null, targetsReached: 0, targetsTotal: n,
+      state: 'unavailable', price: px, entered: false, r: null, pct: null, points: null, targetsReached: 0, targetsTotal: n,
       risk: finite(risk) ? risk : 0, entryPrice: finite(planEntry) ? planEntry : 0, zone: null,
-      stop: { price: plan.stop, distancePct: null, distanceR: null }, targets: [], rangeHint: null,
+      stop: { price: plan.stop, distancePct: null, distancePts: null, distanceR: null }, targets: [], rangeHint: null,
     };
   }
 
@@ -78,10 +86,12 @@ export function liveMark(plan: LivePlan, official: LiveOfficial | null, price: n
 
   const favourable = (p: number) => sign * (p - entry);
   const distPct = (level: number) => (px != null ? (level - px) / px * 100 : null);
+  const distPts = (level: number) => (px != null ? round(level - px) : null);
 
   let state: LiveState;
   let r: number | null = null;
   let pct: number | null = null;
+  let points: number | null = null;
   let zone: LiveMark['zone'] = null;
 
   if (px == null) {
@@ -89,19 +99,22 @@ export function liveMark(plan: LivePlan, official: LiveOfficial | null, price: n
   } else if (entered) {
     let booked = 0;
     let bookedPct = 0;
+    let bookedPts = 0;
     for (let i = 0; i < targetsReached; i++) {
+      bookedPts += favourable(tgts[i]) / n;
       booked += favourable(tgts[i]) / risk / n;
       bookedPct += (favourable(tgts[i]) / entry) * 100 / n;
     }
     const remaining = (n - targetsReached) / n;
     r = round(booked + remaining * (favourable(px) / risk));
     pct = round(bookedPct + remaining * ((favourable(px) / entry) * 100), 2);
+    points = round(bookedPts + remaining * favourable(px));
     state = (long ? px <= plan.stop : px >= plan.stop) ? 'beyond_stop' : 'in_trade';
   } else {
     const inside = px >= plan.entryLow && px <= plan.entryHigh;
-    if (inside) zone = { side: 'inside', distancePct: 0 };
-    else if (px > plan.entryHigh) zone = { side: 'above', distancePct: (px - plan.entryHigh) / px * 100 };
-    else zone = { side: 'below', distancePct: (plan.entryLow - px) / px * 100 };
+    if (inside) zone = { side: 'inside', distancePct: 0, distancePts: 0 };
+    else if (px > plan.entryHigh) zone = { side: 'above', distancePct: (px - plan.entryHigh) / px * 100, distancePts: round(px - plan.entryHigh) };
+    else zone = { side: 'below', distancePct: (plan.entryLow - px) / px * 100, distancePts: round(plan.entryLow - px) };
     if (inside) state = 'in_zone';
     else if (long ? px <= plan.stop : px >= plan.stop) state = 'beyond_stop';
     else if (hits(tgts[0], px)) state = 'ran_past_target';
@@ -121,9 +134,9 @@ export function liveMark(plan: LivePlan, official: LiveOfficial | null, price: n
   }
 
   return {
-    state, price: px, entered, r, pct, targetsReached, targetsTotal: n, risk, entryPrice: entry, zone,
-    stop: { price: plan.stop, distancePct: distPct(plan.stop), distanceR: px != null ? (sign * (px - plan.stop)) / risk : null },
-    targets: tgts.map((t, i) => ({ price: t, distancePct: distPct(t), reached: i < targetsReached })),
+    state, price: px, entered, r, pct, points, targetsReached, targetsTotal: n, risk, entryPrice: entry, zone,
+    stop: { price: plan.stop, distancePct: distPct(plan.stop), distancePts: distPts(plan.stop), distanceR: px != null ? (sign * (px - plan.stop)) / risk : null },
+    targets: tgts.map((t, i) => ({ price: t, distancePct: distPct(t), distancePts: distPts(t), reached: i < targetsReached })),
     rangeHint,
   };
 }

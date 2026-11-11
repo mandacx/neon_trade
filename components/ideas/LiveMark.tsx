@@ -10,6 +10,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, fmtPct, fmtPrice, fmtR, fmtWhen, rTone, Pill } from '@/components/ideas/ideaUi';
 import type { DisclaimerData } from '@/components/ideas/ideaUi';
 import { pollDelayMs, type MarketClock } from '@/lib/pollDelay';
+import { fmtPts } from '@/components/ideas/LiveChip';
 import type { LiveMark as LiveMarkData } from '@/lib/ideaLiveMath';
 import type { IdeaView } from '@/lib/ideas';
 
@@ -18,6 +19,7 @@ interface LiveBlockJson {
   basis: 'live' | 'last_close' | null;
   session: 'pre' | 'regular' | 'post' | 'closed';
   asOf: string;
+  day?: { change: number | null; changePercent: number | null };
   ext: { label: string; price: number; changePercent: number | null } | null;
 }
 interface LiveResponse { live: LiveBlockJson | null; reason?: string; market?: MarketClock; disclaimer?: DisclaimerData }
@@ -106,7 +108,7 @@ const rText = (n: number | null | undefined) => (n == null ? '—' : `${n > 0 ? 
 function describe(m: LiveMarkData): string | null {
   switch (m.state) {
     case 'awaiting_entry':
-      return m.zone ? `Not entered yet. Price is ${m.zone.distancePct.toFixed(1)}% ${m.zone.side} the entry zone.` : 'Not entered yet.';
+      return m.zone ? `Not entered yet. Price is ${m.zone.distancePts.toFixed(2)} pts (${m.zone.distancePct.toFixed(1)}%) ${m.zone.side} the entry zone.` : 'Not entered yet.';
     case 'in_zone':
       return 'Not entered yet. Price is inside the entry zone; the tracker enters on a completed session that touches it.';
     case 'ran_past_target':
@@ -143,9 +145,15 @@ export default function LiveMark({ idea }: { idea: IdeaView }) {
           <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
             <span className="text-2xl font-bold text-gray-900">{m.price == null || m.state === 'unavailable' ? '—' : fmtPrice(m.price)}</span>
             <span className="text-xs font-semibold text-gray-600">{basisText}{block && m.price != null ? ` · ${SESSION_TEXT[block.session] ?? block.session}` : ''}</span>
+            {block?.day?.changePercent != null && m.price != null && <span className={`text-xs font-semibold ${rTone(block.day.changePercent)}`}>{fmtPts(block.day.change)} ({fmtPct(block.day.changePercent, 2)}) today</span>}
             {block && <span className="text-[11px] text-gray-400">as of {fmtWhen(block.asOf)}</span>}
             {failed && <span className="text-[11px] text-amber-700">Could not refresh; showing the last reading.</span>}
           </div>
+          {idea.refPrice != null && m.price != null && m.state !== 'unavailable' && (
+            <p className="text-[11px] text-gray-500">
+              Since publish: <span className={`font-semibold ${rTone(m.price - idea.refPrice)}`}>{fmtPts(m.price - idea.refPrice)} pts ({fmtPct((m.price - idea.refPrice) / idea.refPrice * 100, 2)})</span> from the last close at publish ({fmtPrice(idea.refPrice)}). Price movement only, in either direction; not the idea&apos;s profit or loss.
+            </p>
+          )}
           {block?.ext && (
             <p className="text-[11px] text-gray-500">{block.ext.label} {fmtPrice(block.ext.price)}{block.ext.changePercent != null ? ` (${pctText(block.ext.changePercent, 2)})` : ''} from the regular close. Shown for context; not used in the R below.</p>
           )}
@@ -154,22 +162,23 @@ export default function LiveMark({ idea }: { idea: IdeaView }) {
           {note && <p className="text-sm text-gray-800">{note}</p>}
 
           {m.entered && m.state !== 'unavailable' && (
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-6 gap-3">
+              <Cell label="P&L (points)"><span className={rTone(m.points)}>{fmtPts(m.points)} pts</span> <span className="text-[10px] text-gray-400 font-normal">per share</span></Cell>
               <Cell label="R at this price"><span className={rTone(m.r)}>{fmtR(m.r)}</span></Cell>
               <Cell label="Return"><span className={rTone(m.pct)}>{fmtPct(m.pct, 2)}</span></Cell>
               <Cell label="Targets reached">{m.targetsReached} of {m.targetsTotal}</Cell>
-              <Cell label="To stop">{pctText(m.stop.distancePct)} <span className="text-[10px] text-gray-400 font-normal">{m.stop.distanceR == null ? '' : `${rText(m.stop.distanceR)} of room`}</span></Cell>
+              <Cell label="To stop">{pctText(m.stop.distancePct)} <span className="text-[10px] text-gray-400 font-normal">{m.stop.distancePts == null ? '' : `${fmtPts(m.stop.distancePts)} pts`}</span> <span className="text-[10px] text-gray-400 font-normal">{m.stop.distanceR == null ? '' : `${rText(m.stop.distanceR)} of room`}</span></Cell>
               <Cell label={nextTarget ? `To target ${nextIdx + 1}` : 'Targets'}>
-                {nextTarget ? <>{pctText(nextTarget.distancePct)} <span className="text-[10px] text-gray-400 font-normal">{fmtPrice(nextTarget.price)}</span></> : 'All reached'}
+                {nextTarget ? <>{pctText(nextTarget.distancePct)} <span className="text-[10px] text-gray-400 font-normal">{nextTarget.distancePts == null ? '' : `${fmtPts(nextTarget.distancePts)} pts · `}{fmtPrice(nextTarget.price)}</span></> : 'All reached'}
               </Cell>
             </div>
           )}
 
           {m.state !== 'unavailable' && (
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-gray-600">
-              <span><span className="text-red-700 font-semibold">Stop {fmtPrice(m.stop.price)}</span> ({pctText(m.stop.distancePct)})</span>
+              <span><span className="text-red-700 font-semibold">Stop {fmtPrice(m.stop.price)}</span> ({pctText(m.stop.distancePct)}{m.stop.distancePts != null ? `, ${fmtPts(m.stop.distancePts)} pts` : ''})</span>
               {m.targets.map((t, i) => (
-                <span key={i}><span className="text-green-700 font-semibold">{t.reached ? '✓ ' : ''}T{i + 1} {fmtPrice(t.price)}</span> ({pctText(t.distancePct)})</span>
+                <span key={i}><span className="text-green-700 font-semibold">{t.reached ? '✓ ' : ''}T{i + 1} {fmtPrice(t.price)}</span> ({pctText(t.distancePct)}{t.distancePts != null ? `, ${fmtPts(t.distancePts)} pts` : ''})</span>
               ))}
             </div>
           )}

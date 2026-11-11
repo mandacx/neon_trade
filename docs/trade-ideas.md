@@ -166,7 +166,8 @@ in desk statistics, no alerts, independent of "I took this" (R and % only, no mo
   the tab is hidden, stops on 401/403/404 or when the idea closes, 60 s back-off on 429, plus a Refresh button.
 - **Gating:** the route reads the idea through the gated SQL first (`getIdeaForLive`), 404 for missing and out-of-plan alike. A closed idea
   answers `200 { live: null, reason: 'closed' }`.
-- **Not built yet:** the board chip and the batched `GET /api/ideas/live` (see `docs/CHANGES.md`, 2026-11-10 live mark entry).
+- **Points:** `points` is the per-share P&L in price points, blended like R (never before entry); distances to zone / stop / targets also come in points. Closed results convert with `pointsFromR` (R x risk per share).
+- **Board chip** (built 2026-11-11): `GET /api/ideas/live` (limiter `ideas_live`) returns the marks of every open idea in the viewer's plan keyed by id; `components/ideas/LiveChip.tsx` shows CMP, day %, and P&L in points / R / % once entered, or the distance to the entry zone. Open tab only; same polling rules.
 
 ## Statistics (`lib/ideaStats.ts`)
 
@@ -184,7 +185,7 @@ are listed under coverage.
 | Route | Who | What |
 |---|---|---|
 | `/ideas` | any idea term | board: Open / Closed tabs, filters (horizon, direction, symbol), idea cards, locked-term upgrade strips, alert feed with email opt-in |
-| `/ideas/[id]` | any idea term | frozen plan, **live mark card for open ideas (provisional)**, chart (daily candles with entry zone, targets and stop drawn; link to the full stock page), tracked result, rationale, option strategy, timeline; publishers get the append-only update form |
+| `/ideas/[id]` | any idea term | frozen plan, **live mark card for open ideas (provisional)**, chart (candles with entry zone, targets and stop drawn, interval buttons and a crosshair OHLC/volume readout; the interval is the stock chart's saved `chart.settings`; link to the full stock page), tracked result, rationale, option strategy, timeline; publishers get the append-only update form |
 | `/ideas/mine` | any idea term | **My trades**: your own recorded trades (open ones marked to the latest price, closed ones at your exit), the desk's result beside yours, and followed vs not followed |
 | `/ideas/performance` | any idea term | desk stats, coverage banner, equity curve in R, breakdowns, closed-ideas table, metric definitions |
 | `/ideas/publish` | `publish_ideas` or admin | composer (live reward:risk readout), preview of what each plan tier gets plus the alert payload, drafts, publish now **or schedule**, own-ideas list, "Run tracker now". Lives under `/ideas`, not `/admin`, because analysts later will not be admins. |
@@ -205,6 +206,7 @@ All under `/api/ideas` (rate limiter `ideas`, 90/min; the live mark has its own 
 | `POST /api/ideas` | publisher | save a draft (`id` in the body updates it) |
 | `GET /api/ideas/[id]` | idea term | idea + timeline; 404 if missing or outside the plan |
 | `DELETE /api/ideas/[id]` | publisher | drafts only |
+| `GET /api/ideas/live` | idea term | live marks of all open ideas in the viewer's plan (board chips), keyed by idea id; limiter `ideas_live` |
 | `GET /api/ideas/[id]/live` | idea term | provisional live mark of an open idea (limiter `ideas_live`); `data: { live, market, disclaimer }`; closed idea `live: null`; 404 if missing or outside the plan |
 | `POST /api/ideas/[id]/publish` | publisher | revalidates, requires price data, stamps `published_at/on` and `ref_price`, records the `published` event |
 | `POST /api/ideas/[id]/schedule` | publisher | `{at: ISO}`, 2 minutes to 90 days ahead; `DELETE` unschedules. See "Scheduled publishing" |

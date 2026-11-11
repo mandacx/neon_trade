@@ -240,19 +240,12 @@ export async function getIdea(access: IdeaAccess, id: string): Promise<IdeaView 
  * refuse to mark a closed idea. No updates query.
  */
 export interface LiveIdeaRow { id: string; symbol: string; status: string; plan: LivePlan; official: LiveOfficial | null }
-export async function getIdeaForLive(access: IdeaAccess, id: string): Promise<LiveIdeaRow | null> {
-  if (!/^\d{1,18}$/.test(id)) return null;
-  const rows = await sql(
-    `SELECT i.id, i.symbol, i.direction, i.status, i.entry_low::float8 AS entry_low, i.entry_high::float8 AS entry_high, i.targets,
+const LIVE_COLS = `i.id, i.symbol, i.direction, i.status, i.entry_low::float8 AS entry_low, i.entry_high::float8 AS entry_high, i.targets,
             i.stop::float8 AS stop, i.published_on::text AS published_on,
             o.outcome AS o_outcome, o.entered_on::text AS o_entered_on, o.entry_price::float8 AS o_entry_price,
-            o.targets_hit AS o_targets_hit, o.evaluated_through::text AS o_through
-     FROM ${IDEA_FROM}
-     WHERE i.id = $1 AND i.horizon = ANY($2) AND i.status NOT IN ('draft','scheduled')`,
-    [id, horizonsFor(access)],
-  );
-  if (!rows.length) return null;
-  const r = rows[0] as any;
+            o.targets_hit AS o_targets_hit, o.evaluated_through::text AS o_through`;
+
+function toLiveRow(r: any): LiveIdeaRow {
   const targets: IdeaTarget[] = Array.isArray(r.targets) ? r.targets : [];
   return {
     id: String(r.id),
@@ -263,6 +256,27 @@ export async function getIdeaForLive(access: IdeaAccess, id: string): Promise<Li
       ? { outcome: r.o_outcome, enteredOn: r.o_entered_on, entryPrice: num(r.o_entry_price), targetsHit: Number(r.o_targets_hit ?? 0), evaluatedThrough: r.o_through }
       : null,
   };
+}
+
+/** Every open idea in the viewer's terms (same gate as getIdeaForLive), for the board's batched live read. Capped at 200. */
+export async function listOpenForLive(access: IdeaAccess): Promise<LiveIdeaRow[]> {
+  const rows = await sql(
+    `SELECT ${LIVE_COLS} FROM ${IDEA_FROM} WHERE i.horizon = ANY($1) AND i.status = ANY($2) ORDER BY i.published_at DESC, i.id DESC LIMIT 200`,
+    [horizonsFor(access), OPEN_STATUSES],
+  );
+  return (rows as any[]).map(toLiveRow);
+}
+
+export async function getIdeaForLive(access: IdeaAccess, id: string): Promise<LiveIdeaRow | null> {
+  if (!/^\d{1,18}$/.test(id)) return null;
+  const rows = await sql(
+    `SELECT ${LIVE_COLS}
+     FROM ${IDEA_FROM}
+     WHERE i.id = $1 AND i.horizon = ANY($2) AND i.status NOT IN ('draft','scheduled')`,
+    [id, horizonsFor(access)],
+  );
+  if (!rows.length) return null;
+  return toLiveRow(rows[0]);
 }
 
 /** The publisher's own ideas (drafts included); admins see everyone's. */

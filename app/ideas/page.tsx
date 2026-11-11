@@ -6,6 +6,8 @@ import { IDEA_HORIZONS } from '@/lib/ideaTypes';
 import {
   DirectionPill, HorizonPill, OutcomePill, RiskPill, Spinner, StatusPill, api, fmtDay, fmtPrice, fmtR, inputClass, rTone,
 } from '@/components/ideas/ideaUi';
+import LiveChip, { fmtPts, useBoardLive, type LiveBlockJson } from '@/components/ideas/LiveChip';
+import { pointsFromR } from '@/lib/ideaLiveMath';
 import type { IdeaView } from '@/lib/ideas';
 
 interface BoardData {
@@ -20,9 +22,11 @@ const TERM_NAME = { short: 'short-term', long: 'long-term' } as const;
 const TERM_PLANS = { short: 'Short term, Premium or Platinum', long: 'Long term, Premium or Platinum' } as const;
 const TERM_FEATURE = { short: 'ideas_short_term', long: 'ideas_long_term' } as const;
 
-function IdeaCard({ idea }: { idea: IdeaView }) {
+function IdeaCard({ idea, live, liveLoaded }: { idea: IdeaView; live?: LiveBlockJson; liveLoaded: boolean }) {
   const o = idea.outcome;
-  const closed = !['live', 'triggered'].includes(idea.status);
+  const open = ['live', 'triggered'].includes(idea.status);
+  const closed = !open;
+  const resultPts = o && o.entryPrice != null ? pointsFromR(o.r, o.entryPrice, idea.stop) : null;
   return (
     <Link href={`/ideas/${idea.id}`} className="block bg-white border border-gray-200 rounded-xl p-4 hover:border-indigo-300 hover:shadow-sm transition">
       <div className="flex flex-wrap items-center gap-1.5">
@@ -43,10 +47,16 @@ function IdeaCard({ idea }: { idea: IdeaView }) {
         <div>
           <div className="text-[10px] uppercase text-gray-400 font-semibold">{closed ? 'Result' : o?.outcome === 'open' ? 'Open R (unrealised)' : 'Valid until'}</div>
           {closed || o?.outcome === 'open'
-            ? <div className={`font-bold ${rTone(o?.r)}`}>{o ? fmtR(o.r) : '—'} {closed && o && <span className="ml-1 align-middle"><OutcomePill outcome={o.outcome} /></span>}</div>
+            ? <div className={`font-bold ${rTone(o?.r)}`}>{o ? fmtR(o.r) : '—'}{o && resultPts != null && <span className="ml-1.5">{fmtPts(resultPts)} pts</span>} {closed && o && <span className="ml-1 align-middle"><OutcomePill outcome={o.outcome} /></span>}</div>
             : <div className="font-semibold text-gray-800">{fmtDay(idea.validUntil)}</div>}
         </div>
       </div>
+      {open && <LiveChip block={live} loaded={liveLoaded} />}
+      {closed && o?.enteredOn && (
+        <div className="mt-2 pt-2 border-t border-gray-100 text-[11px] text-gray-500">
+          Entered {fmtDay(o.enteredOn)} @ {fmtPrice(o.entryPrice)}{o.exitOn ? ` · exited ${fmtDay(o.exitOn)} @ ${fmtPrice(o.exitPrice)}` : ''} · targets hit {o.targetsHit} of {o.targetsTotal}{o.daysHeld != null ? ` · ${o.daysHeld} day${o.daysHeld === 1 ? '' : 's'} held` : ''}
+        </div>
+      )}
     </Link>
   );
 }
@@ -60,6 +70,7 @@ export default function IdeasBoardPage() {
   const [data, setData] = useState<BoardData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const { live, loaded: liveLoaded } = useBoardLive(tab === 'open');
 
   useEffect(() => {
     let alive = true;
@@ -115,7 +126,7 @@ export default function IdeasBoardPage() {
               {tab === 'open' ? 'No open ideas right now. New ideas appear here as soon as they are published.' : 'No closed ideas match these filters yet.'}
             </div>
           )}
-          {data?.items.map(i => <IdeaCard key={i.id} idea={i} />)}
+          {data?.items.map(i => <IdeaCard key={i.id} idea={i} live={live[i.id]} liveLoaded={liveLoaded} />)}
           {data && data.total > data.items.length && <p className="text-xs text-gray-400 text-center">Showing the latest {data.items.length} of {data.total}.</p>}
         </div>
       )}

@@ -9,13 +9,19 @@ import TakeThis from '@/components/ideas/TakeThis';
 import {
   DirectionPill, HorizonPill, OutcomePill, RiskPill, Spinner, StatusPill, api, fmtDay, fmtPct, fmtPrice, fmtR, fmtWhen, inputClass, labelClass, rTone,
 } from '@/components/ideas/ideaUi';
-import { updateTypeMeta, OPEN_STATUSES, IDEA_UPDATE_TYPES } from '@/lib/ideaTypes';
+import { updateTypeMeta, OPEN_STATUSES, IDEA_UPDATE_TYPES, entryPriceOf } from '@/lib/ideaTypes';
+import { fmtPts } from '@/components/ideas/LiveChip';
+import { pointsFromR } from '@/lib/ideaLiveMath';
 import { Pill } from '@/components/ideas/ideaUi';
 import type { IdeaView } from '@/lib/ideas';
 
 function Stat({ label, children }: { label: string; children: React.ReactNode }) {
   return <div><div className="text-[10px] uppercase text-gray-400 font-semibold">{label}</div><div className="text-sm font-semibold text-gray-900">{children}</div></div>;
 }
+
+const etToday = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+/** Whole calendar days from a to b (YYYY-MM-DD strings, never parsed in local time). */
+const daysBetween = (a: string, b: string) => Math.round((Date.parse(`${b.slice(0, 10)}T12:00:00Z`) - Date.parse(`${a.slice(0, 10)}T12:00:00Z`)) / 86_400_000);
 
 function UpdateForm({ idea, onDone }: { idea: IdeaView; onDone: () => void }) {
   const open = OPEN_STATUSES.includes(idea.status);
@@ -85,6 +91,13 @@ export default function IdeaPage() {
 
   const o = idea.outcome;
   const closed = !OPEN_STATUSES.includes(idea.status) && idea.status !== 'draft';
+  const worstFill = entryPriceOf(idea.direction, idea.entryLow, idea.entryHigh);
+  const riskPts = Math.abs(worstFill - idea.stop);
+  const riskPct = worstFill > 0 ? (riskPts / worstFill) * 100 : null;
+  const resultPts = o && o.entryPrice != null ? pointsFromR(o.r, o.entryPrice, idea.stop) : null;
+  const today = etToday();
+  const sincePublish = idea.publishedAt ? daysBetween(idea.publishedAt.slice(0, 10), today) : null;
+  const daysLeft = OPEN_STATUSES.includes(idea.status) ? daysBetween(today, idea.validUntil) : null;
 
   return (
     <div className="space-y-4">
@@ -100,7 +113,7 @@ export default function IdeaPage() {
         </div>
         <p className="text-sm text-gray-700 mt-1">{idea.title}</p>
         <p className="text-[11px] text-gray-400 mt-0.5">
-          {idea.publishedAt ? `Published ${fmtWhen(idea.publishedAt)}` : 'Draft'}{idea.refPrice != null ? ` · last close at publish ${fmtPrice(idea.refPrice)}` : ''}. The plan below is frozen as published; changes appear in the timeline.
+          {idea.publishedAt ? `Published ${fmtWhen(idea.publishedAt)}` : 'Draft'}{idea.refPrice != null ? ` · last close at publish ${fmtPrice(idea.refPrice)}` : ''}{sincePublish != null && sincePublish >= 0 ? ` · ${sincePublish === 0 ? 'today' : `${sincePublish} day${sincePublish === 1 ? '' : 's'} ago`}` : ''}{daysLeft != null ? ` · ${daysLeft < 0 ? 'past its valid-until date' : daysLeft === 0 ? 'valid until today' : `${daysLeft} day${daysLeft === 1 ? '' : 's'} left`}` : ''}. The plan below is frozen as published; changes appear in the timeline.
         </p>
       </div>
 
@@ -108,11 +121,12 @@ export default function IdeaPage() {
         <div className="grid grid-cols-2 sm:grid-cols-6 gap-3">
           <Stat label="Entry zone">{fmtPrice(idea.entryLow)} – {fmtPrice(idea.entryHigh)}</Stat>
           <Stat label="Stop"><span className="text-red-700">{fmtPrice(idea.stop)}</span></Stat>
-          {idea.targets.map((t, i) => <Stat key={i} label={t.label || `Target ${i + 1}`}><span className="text-green-700">{fmtPrice(t.price)}</span> <span className="text-[10px] text-gray-400 font-normal">{idea.riskReward.perTarget[i]?.toFixed(1)}R</span></Stat>)}
+          {idea.targets.map((t, i) => <Stat key={i} label={t.label || `Target ${i + 1}`}><span className="text-green-700">{fmtPrice(t.price)}</span> <span className="text-[10px] text-gray-400 font-normal">{idea.riskReward.perTarget[i]?.toFixed(1)}R · {fmtPts(Math.abs(t.price - worstFill))} pts{worstFill > 0 ? ` (${fmtPct(Math.abs(t.price - worstFill) / worstFill * 100, 1)})` : ''}</span></Stat>)}
+          <Stat label="Risk per share"><span className="text-red-700">{riskPts.toFixed(2)} pts</span> <span className="text-[10px] text-gray-400 font-normal">{riskPct == null ? '' : `${riskPct.toFixed(1)}% of entry · 1R`}</span></Stat>
           <Stat label="Reward : risk">{idea.riskReward.blended == null ? '—' : `${idea.riskReward.blended.toFixed(1)} : 1`}</Stat>
           <Stat label="Valid until">{fmtDay(idea.validUntil)}</Stat>
         </div>
-        <p className="text-[11px] text-gray-400 mt-2">Reward : risk is measured from the worst fill inside the entry zone ({idea.direction === 'short' ? 'zone low' : 'zone high'}) to each target, over the risk to the stop.</p>
+        <p className="text-[11px] text-gray-400 mt-2">Reward : risk is measured from the worst fill inside the entry zone ({idea.direction === 'short' ? 'zone low' : 'zone high'}, {fmtPrice(worstFill)}) to each target, over the risk to the stop. Points are per share; 1R = the risk per share.</p>
       </div>
 
       {OPEN_STATUSES.includes(idea.status) && <LiveMark idea={idea} />}
@@ -130,9 +144,10 @@ export default function IdeaPage() {
             <OutcomePill outcome={o.outcome} />
             <span className="text-[11px] text-gray-400">Scored mechanically from daily bars through {o.evaluatedThrough ? fmtDay(o.evaluatedThrough) : '—'}. Stop first if one bar touches both stop and a target.{!closed ? ' Through the last completed session only; the live mark above is provisional.' : ''}</span>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-6 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-7 gap-3">
             <Stat label="Entered">{o.enteredOn ? `${fmtDay(o.enteredOn)} @ ${fmtPrice(o.entryPrice)}` : 'Not yet'}</Stat>
             <Stat label={closed ? 'Result' : 'R so far (unrealised)'}><span className={rTone(o.r)}>{fmtR(o.r)}</span></Stat>
+            <Stat label={closed ? 'Points per share' : 'Points so far'}><span className={rTone(resultPts)}>{fmtPts(resultPts)}{resultPts != null ? ' pts' : ''}</span></Stat>
             <Stat label="Return"><span className={rTone(o.pctReturn)}>{fmtPct(o.pctReturn, 2)}</span></Stat>
             <Stat label="Targets hit">{o.targetsHit} of {o.targetsTotal}</Stat>
             <Stat label="Exit">{o.exitOn ? `${fmtDay(o.exitOn)} @ ${fmtPrice(o.exitPrice)}` : '—'}</Stat>

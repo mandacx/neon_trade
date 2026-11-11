@@ -19,6 +19,8 @@ export interface LiveBlock {
   session: MarketSession;
   /** ISO server read time (the feed can lag a few seconds; cached up to 5 s, up to 120 s after a rate-limit pause). */
   asOf: string;
+  /** The regular-session day change at `price` (display only, never used in R); null when unknown. */
+  day: { change: number | null; changePercent: number | null };
   /** Pre-market / after-hours move, display only, never used in R. */
   ext: { label: string; price: number; changePercent: number | null } | null;
 }
@@ -45,6 +47,7 @@ export async function liveBlocksFor(
       basis: price == null ? null : state.session === 'regular' ? 'live' : 'last_close',
       session: state.session,
       asOf,
+      day: { change: q.change, changePercent: q.changePercent },
       ext: q.ext ? { label: q.ext.label, price: q.ext.price, changePercent: q.ext.changePercent } : null,
     });
   }
