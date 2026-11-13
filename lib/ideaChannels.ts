@@ -67,6 +67,13 @@ export async function countPushDevices(userId: string): Promise<number> {
 type Channel = 'email' | 'telegram' | 'push';
 const PREF_COLUMN: Record<Channel, string> = { email: 'email_alerts', telegram: 'telegram_alerts', push: 'push_alerts' };
 
+/**
+ * Email is on by default (2026-11-13): a user with no row, or a NULL `email_alerts`, has never chosen and counts as on; only an
+ * explicit false (Alerts menu or the unsubscribe link) stops it. Telegram and push stay opt-in. The default applies to events
+ * created from this instant on, so switching it on never mails a backlog of older events to people who never asked.
+ */
+export const EMAIL_DEFAULT_ON_FROM = '2026-11-13T00:00:00Z';
+
 interface Candidate { event_id: number; idea_id: number; summary: string; event_type: string; event_key: string; payload: unknown; user_id: string; email: string | null; telegram_chat_id: string | null }
 
 /**
@@ -97,7 +104,10 @@ async function candidates(channel: Channel): Promise<Candidate[]> {
   // The column name comes from a fixed map, never from input.
   const flag = PREF_COLUMN[channel];
   // Telegram alerts are the plan's existing "Telegram Alerts" feature: needs it, and a linked chat.
-  const extra = channel === 'telegram' ? `AND u.telegram_chat_id IS NOT NULL AND eff.features ? 'telegram_alerts'` : channel === 'push' ? `AND EXISTS (SELECT 1 FROM public.nt_idea_push_subscriptions s WHERE s.user_id = p.user_id)` : '';
+  const extra = channel === 'telegram' ? `AND u.telegram_chat_id IS NOT NULL AND eff.features ? 'telegram_alerts'` : channel === 'push' ? `AND EXISTS (SELECT 1 FROM public.nt_idea_push_subscriptions s WHERE s.user_id = u.user_id)` : '';
+  const optedIn = channel === 'email'
+    ? `(p.email_alerts OR (p.email_alerts IS NULL AND e.created_at >= '${EMAIL_DEFAULT_ON_FROM}'::timestamptz))`
+    : `p.${flag}`;
   const rows = await sql(`
     WITH eff AS (
       SELECT u.user_id, u.plan_expires_at,
@@ -110,17 +120,18 @@ async function candidates(channel: Channel): Promise<Candidate[]> {
         ), '[]'::jsonb) AS features
       FROM public.nt_app_user_profiles u JOIN public.nt_plans p ON p.id = u.plan_id
     )
-    SELECT e.id AS event_id, e.idea_id, e.summary, e.event_type, e.event_key, to_jsonb(e) -> 'payload' AS payload, p.user_id, a.email, u.telegram_chat_id
+    SELECT e.id AS event_id, e.idea_id, e.summary, e.event_type, e.event_key, to_jsonb(e) -> 'payload' AS payload, u.user_id, a.email, u.telegram_chat_id
     FROM public.nt_idea_events e
-    JOIN public.nt_idea_prefs p ON p.${flag}
-    JOIN public.nt_app_user_profiles u ON u.user_id = p.user_id
-    JOIN eff ON eff.user_id = p.user_id AND (eff.plan_expires_at IS NULL OR eff.plan_expires_at > now())
-    JOIN neon_auth."user" a ON a.id = p.user_id::uuid
+    JOIN public.nt_app_user_profiles u ON TRUE
+    LEFT JOIN public.nt_idea_prefs p ON p.user_id = u.user_id
+    JOIN eff ON eff.user_id = u.user_id AND (eff.plan_expires_at IS NULL OR eff.plan_expires_at > now())
+    JOIN neon_auth."user" a ON a.id = u.user_id::uuid
     WHERE e.created_at > now() - interval '3 days'
+      AND ${optedIn}
       AND ((e.horizon IN ('intraday','swing') AND eff.features ? 'ideas_short_term')
         OR (e.horizon IN ('positional','long_term') AND eff.features ? 'ideas_long_term'))
       ${extra}
-      AND NOT EXISTS (SELECT 1 FROM public.nt_idea_deliveries d WHERE d.event_id = e.id AND d.user_id = p.user_id AND d.channel = $1)
+      AND NOT EXISTS (SELECT 1 FROM public.nt_idea_deliveries d WHERE d.event_id = e.id AND d.user_id = u.user_id AND d.channel = $1)
     ORDER BY e.id LIMIT 200
   `, [channel]);
   return rows as unknown as Candidate[];

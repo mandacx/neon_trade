@@ -623,9 +623,10 @@ export async function markFeedSeen(userId: string): Promise<void> {
 
 export interface IdeaPrefs { emailAlerts: boolean; telegramAlerts: boolean; pushAlerts: boolean }
 
+/** Email counts as on until the user chooses otherwise (docs/trade-ideas.md, "Alerts"). */
 export async function getPrefs(userId: string): Promise<IdeaPrefs> {
   const rows = await sql(`SELECT email_alerts, telegram_alerts, push_alerts FROM public.nt_idea_prefs WHERE user_id = $1`, [userId]);
-  return { emailAlerts: !!rows[0]?.email_alerts, telegramAlerts: !!rows[0]?.telegram_alerts, pushAlerts: !!rows[0]?.push_alerts };
+  return { emailAlerts: rows[0]?.email_alerts ?? true, telegramAlerts: !!rows[0]?.telegram_alerts, pushAlerts: !!rows[0]?.push_alerts };
 }
 
 /** Set any of the channel opt-ins (omitted ones keep their value). In-app alerts are always on. */
@@ -640,16 +641,18 @@ export async function setPrefs(userId: string, patch: Partial<IdeaPrefs>): Promi
   return next;
 }
 
-/** One-click unsubscribe: 'done' when it was on, 'already' when off or no row (the same answer for an unknown user). */
+/** One-click unsubscribe: 'done' when it was on (explicitly or by default; writes the explicit off), 'already' when already off. */
 export async function turnOffIdeaEmails(userId: string): Promise<'done' | 'already'> {
-  const rows = await sql(
-    `UPDATE public.nt_idea_prefs SET email_alerts = false, updated_at = now() WHERE user_id = $1 AND email_alerts RETURNING user_id`,
+  const cur = await sql(`SELECT email_alerts FROM public.nt_idea_prefs WHERE user_id = $1`, [userId]);
+  if (cur[0]?.email_alerts === false) return 'already';
+  await sql(
+    `INSERT INTO public.nt_idea_prefs (user_id, email_alerts) VALUES ($1, false) ON CONFLICT (user_id) DO UPDATE SET email_alerts = false, updated_at = now()`,
     [userId],
   );
-  return rows.length ? 'done' : 'already';
+  return 'done';
 }
 
-/** Undo of the above (never inserts a row). */
+/** Undo of the above (never inserts a row: a user who never unsubscribed already has email on by default). */
 export async function turnOnIdeaEmails(userId: string): Promise<void> {
   await sql(`UPDATE public.nt_idea_prefs SET email_alerts = true, updated_at = now() WHERE user_id = $1`, [userId]);
 }

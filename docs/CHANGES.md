@@ -7,6 +7,14 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-11-13 — Trade Ideas: email alerts on by default for idea-plan users
+
+- **Why:** MSTR (published 2026-11-13 14:47Z) was emailed only to the one account that had ticked Email; the 8 assigned users had no `nt_idea_prefs` row, so nothing was sent (checked in the DB: delivery log showed 1 email / Telegram / push for the event). Decision (user): email defaults to on.
+- **Changed:** `lib/ideaChannels.ts` (`candidates`: LEFT JOIN prefs; email = `email_alerts` true, or NULL/no row for events from `EMAIL_DEFAULT_ON_FROM` = 2026-11-13; telegram/push unchanged), `lib/ideas.ts` (`getPrefs` email defaults true; `turnOffIdeaEmails` upserts the explicit off), `scripts/add-idea-email-default.mjs` (column nullable, default NULL; existing rows untouched), `docs/trade-ideas.md`.
+- **Effect on rollout:** after deploy the next `ideas-cron` tick emails today's MSTR `published` event to the entitled users without a row (older events, 2026-11-10/11, are excluded by the cutover).
+- **Verified:** `npx tsc --noEmit`. **Not verified:** the new query against the DB (see the run below if recorded), an email actually delivered to a default-on user, the Alerts menu showing Email ticked.
+- **Follow-ups:** consent wording for existing users (they were not told); every email carries the one-click unsubscribe link; Telegram/push remain opt-in.
+
 ## 2026-11-12 — Trade Ideas: late option entry quotes are flagged and re-priced next day
 
 - **Why:** the ISRG entry (11:15 ET, 2026-11-11) was priced from the after-hours quote 334 min later (`quote_mid_late`), so entry = latest and the option P&L read 0 by construction.
