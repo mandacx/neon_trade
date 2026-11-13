@@ -52,6 +52,8 @@ export default function OptionStrategyCard({ idea, track }: { idea: IdeaView; tr
           <p className="text-xs text-gray-500">Not open yet. The option position opens at the moment the stock enters (a completed 15-minute candle closing inside the entry zone).</p>
         ) : s!.status === 'unpriced' || !s!.entry ? (
           <p className="text-xs text-gray-500">The stock has entered. The option prices for that moment have not been captured yet; this fills in within a few minutes.</p>
+        ) : s!.entryApprox ? (
+          <p className="text-xs text-amber-700">The stock entered {fmtWhen(s!.entry.at)}, but the option prices could only be read more than an hour later, so the entry price is only approximate and no P&amp;L is shown. It is re-priced from that day&apos;s option trades once the day is past, if any traded.</p>
         ) : (
           <>
             <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">

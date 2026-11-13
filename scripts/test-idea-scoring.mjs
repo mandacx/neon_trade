@@ -725,4 +725,19 @@ t('options: rejects missing or invalid prices instead of guessing', () => {
   assert.equal(expiryProfile([], 0), null);
 });
 
+
+t('options: an entry quote read over an hour late withholds P&L; a short delay or a replayed price does not', () => {
+  const late = pt('entry', 'entry', '2026-11-11T16:15:00Z', [20.7, 38.5], { basis: 'quote_mid_late', capturedAt: '2026-11-11T21:49:00Z' });
+  const s = summarizeOption(BCS, [late, pt('mark', 'latest', '2026-11-11T21:49:00Z', [20.7, 38.5])], true);
+  assert.equal(s.entryApprox, true);
+  assert.equal(s.current.pnl, null);
+  assert.equal(s.current.returnPct, null);
+  const soon = pt('entry', 'entry', '2026-11-11T16:15:00Z', [20.7, 38.5], { basis: 'quote_mid_late', capturedAt: '2026-11-11T16:45:00Z' });
+  assert.equal(summarizeOption(BCS, [soon], true).entryApprox, false);
+  const replayed = pt('entry', 'entry', '2026-11-11T16:15:00Z', [20.7, 38.5], { basis: 'replay_last_trade', capturedAt: '2026-11-12T13:00:00Z' });
+  const r = summarizeOption(BCS, [replayed], true);
+  assert.equal(r.entryApprox, false);
+  assert.notEqual(r.current.pnl, undefined);
+});
+
 console.log(`ideas: ${passed} checks passed`);

@@ -27,7 +27,7 @@ import type { IdeaOptionStrategy } from '@/lib/ideaTypes';
 const LIVE_WINDOW_MS = 20 * 60_000;
 const addDays = (d: string, n: number) => new Date(Date.parse(`${d}T12:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
 
-interface Priced { prices: Array<number | null>; bases: string[] }
+interface Priced { prices: Array<number | null>; bases: string[]; /** replay only: true per leg when the price is a trade on the moment's own day */ sameDay?: boolean[] }
 const labelOf = (bases: string[]) => (bases.length && bases.every(b => b === bases[0]) ? bases[0] : 'mixed');
 
 /** Live quote mid per OCC symbol (last trade when there is no usable bid/ask). */
@@ -61,6 +61,7 @@ async function replayPrices(occs: string[], date: string, atMs: number | null): 
   ]);
   const prices: Array<number | null> = [];
   const bases: string[] = [];
+  const sameDay: boolean[] = [];
   for (const occ of occs) {
     const intraday = (m15.bars[occ] ?? []).filter(b => etDateOf(Date.parse(b.t)) === date && atMs != null && Date.parse(b.t) <= atMs);
     let px: number | null = intraday.length ? intraday[intraday.length - 1].c : null;
@@ -71,8 +72,9 @@ async function replayPrices(occs: string[], date: string, atMs: number | null): 
     }
     prices.push(px != null && px >= 0 ? px : null);
     bases.push(px != null ? 'replay_last_trade' : 'none');
+    sameDay.push(intraday.length > 0);
   }
-  return { prices, bases };
+  return { prices, bases, sameDay };
 }
 
 /** Price the legs for the moment described by (date, atMs): live mid when it is now, else the best honest estimate. */
@@ -91,6 +93,17 @@ interface EventLike { type: string; date: string; price: number | null; detail?:
 interface Row {
   id: string; symbol: string; outcome: string; entered_on: string | null; events: EventLike[] | null;
   option_strategy: IdeaOptionStrategy | null;
+}
+
+/** A same-day quote read long after its moment (quote_mid_late) is replaced once the day is past, when option trades of that day exist. */
+async function repriceLate(r: Row, occs: string[], key: string, kind: OptPoint['kind'], e: EventLike, have: Map<string, { basis: string }>, nowMs: number, res: OptionTrackResult): Promise<void> {
+  const h = have.get(key);
+  if (!h || h.basis !== 'quote_mid_late' || e.date >= etDateOf(nowMs)) return;
+  const at = eventAt(e);
+  const p = await replayPrices(occs, e.date, at.ms);
+  if (!complete(p) || !p.sameDay?.every(Boolean)) return; // a stale prior-day close is no better than the late quote
+  await insertPoint(r.id, key, kind, at.iso, e.price, occs, p, 'replaced the late quote with the last trade of that day', true); res.written++;
+  have.set(key, { basis: 'replay_last_trade' });
 }
 
 async function insertPoint(ideaId: string, key: string, kind: OptPoint['kind'], atIso: string, underlying: number | null, occs: string[], priced: Priced, note: string | null, replace: boolean): Promise<void> {
@@ -141,7 +154,7 @@ export async function trackOptionStrategies(opts: { deadline?: number } = {}): P
     try {
       const legs: OptLeg[] = strat.legs;
       const occs = legs.map(l => occSymbol(r.symbol, strat.expiry!, l.type, l.strike));
-      const have = new Map<string, true>(((await sql(`SELECT event_key FROM public.nt_idea_option_marks WHERE idea_id = $1`, [r.id])) as any[]).map(x => [x.event_key as string, true]));
+      const have = new Map<string, { basis: string }>(((await sql(`SELECT event_key, basis FROM public.nt_idea_option_marks WHERE idea_id = $1`, [r.id])) as any[]).map(x => [x.event_key as string, { basis: String(x.basis) }]));
       const events = Array.isArray(r.events) ? r.events : [];
       const trig = events.find(e => e.type === 'triggered');
       if (!trig) { res.skipped++; continue; }
@@ -152,17 +165,23 @@ export async function trackOptionStrategies(opts: { deadline?: number } = {}): P
         const p = await priceMoment(occs, trig.date, at.ms, nowMs);
         if (!complete(p)) { res.skipped++; continue; } // no entry price, so nothing after it can be measured: retry next run
         await insertPoint(r.id, 'entry', 'entry', at.iso, trig.price, occs, p, p.note, false); res.written++;
-        have.set('entry', true);
-      }
+        have.set('entry', { basis: labelOf(p.bases) });
+      } else await repriceLate(r, occs, 'entry', 'entry', trig, have, nowMs, res);
 
       // 2. Targets reached: information only.
       for (const e of events.filter(x => x.type === 'target_hit' && x.detail)) {
         const key = `target:${e.detail}`;
-        if (have.has(key) || e.date >= strat.expiry) continue;
+        if (e.date >= strat.expiry) continue;
+        if (have.has(key)) { await repriceLate(r, occs, key, 'target', e, have, nowMs, res); continue; }
         const at = eventAt(e);
         const p = await priceMoment(occs, e.date, at.ms, nowMs);
         if (!complete(p)) continue;
         await insertPoint(r.id, key, 'target', at.iso, e.price, occs, p, p.note, false); res.written++;
+      }
+
+      if (have.has('exit') && have.get('exit')!.basis === 'quote_mid_late') {
+        const finishedEv = r.outcome === 'target_hit' ? [...events].reverse().find(e => e.type === 'target_hit') : events.find(e => e.type === (r.outcome === 'closed_by_publisher' ? 'closed_by_publisher' : r.outcome));
+        if (finishedEv) await repriceLate(r, occs, 'exit', 'exit', finishedEv, have, nowMs, res);
       }
 
       // 3. Exit: with the idea, or when the options expire if that comes first.
@@ -179,13 +198,13 @@ export async function trackOptionStrategies(opts: { deadline?: number } = {}): P
             const prices = intrinsicPrices(legs, close);
             await insertPoint(r.id, 'exit', 'exit', new Date(etInstantMs(strat.expiry, '16:00')).toISOString(), close, occs,
               { prices, bases: prices.map(() => 'expiry_intrinsic') }, 'the options expired: intrinsic value at the stock close', false);
-            res.written++; have.set('exit', true);
+            res.written++; have.set('exit', { basis: 'expiry_intrinsic' });
           }
         } else if (endEv) {
           const at = eventAt(endEv);
           const p = await priceMoment(occs, endEv.date, at.ms, nowMs);
-          if (complete(p)) { await insertPoint(r.id, 'exit', 'exit', at.iso, endEv.price, occs, p, p.note, false); res.written++; have.set('exit', true); }
-        }
+          if (complete(p)) { await insertPoint(r.id, 'exit', 'exit', at.iso, endEv.price, occs, p, p.note, false); res.written++; have.set('exit', { basis: labelOf(p.bases) }); }
+        } 
       }
 
       // 4. Latest mark while open: refreshed during the regular session (once otherwise, so there is always one).
@@ -228,11 +247,11 @@ export async function getOptionTrack(ideaId: string, strategy: IdeaOptionStrateg
   }
   let rows: any[] = [];
   try {
-    rows = (await sql(`SELECT event_key, kind, at, underlying::float8 AS underlying, legs, basis FROM public.nt_idea_option_marks WHERE idea_id = $1`, [ideaId])) as any[];
+    rows = (await sql(`SELECT event_key, kind, at, captured_at, underlying::float8 AS underlying, legs, basis FROM public.nt_idea_option_marks WHERE idea_id = $1`, [ideaId])) as any[];
   } catch { return null; }
   const points: OptPoint[] = rows.map(x => ({
     kind: x.kind, key: x.event_key, at: new Date(x.at).toISOString(), underlying: x.underlying == null ? null : Number(x.underlying),
-    prices: (Array.isArray(x.legs) ? x.legs : []).map((l: any) => (typeof l?.price === 'number' ? l.price : null)), basis: String(x.basis),
+    prices: (Array.isArray(x.legs) ? x.legs : []).map((l: any) => (typeof l?.price === 'number' ? l.price : null)), basis: String(x.basis), capturedAt: new Date(x.captured_at).toISOString(),
   }));
   return { trackable: true, summary: summarizeOption(strategy.legs, points, entered), notes: OPTION_TRACK_NOTES };
 }

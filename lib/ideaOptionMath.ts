@@ -28,7 +28,12 @@ export interface OptPoint {
   prices: Array<number | null>;
   /** 'quote_mid' | 'quote_mid_late' | 'replay_last_trade' | 'last_trade' | 'expiry_intrinsic' | 'mixed' */
   basis: string;
+  /** ISO instant the prices were read (a late read of a past moment is only an approximation). */
+  capturedAt?: string;
 }
+
+/** A same-day quote read more than this long after the moment it describes is not treated as that moment's price. */
+export const LATE_APPROX_MS = 60 * 60_000;
 
 const round = (n: number, d = 2) => Math.round(n * 10 ** d) / 10 ** d;
 const finite = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
@@ -110,11 +115,13 @@ export interface OptSummary {
   exit: OptMarkView | null;
   /** The figure to show: the exit when closed, else the latest mark. */
   current: OptMarkView | null;
+  /** The entry price was read more than an hour after the entry moment: P&L is withheld until it is re-priced. */
+  entryApprox: boolean;
 }
 
-function view(legs: OptLeg[], v0: number, cap: number | null, p: OptPoint): OptMarkView {
+function view(legs: OptLeg[], v0: number, cap: number | null, p: OptPoint, approx = false): OptMarkView {
   const v = positionValue(legs, p.prices);
-  const pnl = v == null ? null : round(v - v0);
+  const pnl = v == null || approx ? null : round(v - v0);
   return {
     key: p.key, kind: p.kind, at: p.at, underlying: p.underlying, basis: p.basis, prices: p.prices, pnl,
     returnPct: pnl != null && cap != null && cap > 0 ? round((pnl / cap) * 100, 1) : null,
@@ -123,21 +130,22 @@ function view(legs: OptLeg[], v0: number, cap: number | null, p: OptPoint): OptM
 
 /** Everything the page needs from the stored points. `entered` comes from the OFFICIAL outcome (the stock entered). */
 export function summarizeOption(legs: OptLeg[], points: OptPoint[], entered: boolean): OptSummary {
-  const empty: OptSummary = { status: entered ? 'unpriced' : 'pending', kind: null, v0: null, profile: null, entry: null, targets: [], latest: null, exit: null, current: null };
+  const empty: OptSummary = { status: entered ? 'unpriced' : 'pending', kind: null, v0: null, profile: null, entry: null, targets: [], latest: null, exit: null, current: null, entryApprox: false };
   if (!entered || !legs.length) return { ...empty, status: entered ? 'unpriced' : 'pending' };
   const e = points.find(p => p.kind === 'entry');
   const v0 = e ? positionValue(legs, e.prices) : null;
   if (!e || v0 == null) return empty;
+  const approx = e.basis === 'quote_mid_late' && !!e.capturedAt && Date.parse(e.capturedAt) - Date.parse(e.at) > LATE_APPROX_MS;
   const profile = expiryProfile(legs, v0);
   const cap = profile ? profile.capital.value : null;
-  const targets = points.filter(p => p.kind === 'target').sort((a, b) => (a.key < b.key ? -1 : 1)).map(p => view(legs, v0, cap, p));
+  const targets = points.filter(p => p.kind === 'target').sort((a, b) => (a.key < b.key ? -1 : 1)).map(p => view(legs, v0, cap, p, approx));
   const exitP = points.find(p => p.kind === 'exit');
   const latestP = points.find(p => p.kind === 'mark');
-  const exit = exitP ? view(legs, v0, cap, exitP) : null;
-  const latest = latestP ? view(legs, v0, cap, latestP) : null;
+  const exit = exitP ? view(legs, v0, cap, exitP, approx) : null;
+  const latest = latestP ? view(legs, v0, cap, latestP, approx) : null;
   return {
-    status: exit ? 'closed' : 'open', kind: v0 < 0 ? 'credit' : 'debit', v0: round(v0), profile, entry: view(legs, v0, cap, e), targets, latest, exit,
-    current: exit ?? latest ?? view(legs, v0, cap, e),
+    status: exit ? 'closed' : 'open', kind: v0 < 0 ? 'credit' : 'debit', v0: round(v0), profile, entry: view(legs, v0, cap, e, approx), targets, latest, exit,
+    current: exit ?? latest ?? view(legs, v0, cap, e, approx), entryApprox: approx,
   };
 }
 

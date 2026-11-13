@@ -7,6 +7,13 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-11-12 — Trade Ideas: late option entry quotes are flagged and re-priced next day
+
+- **Why:** the ISRG entry (11:15 ET, 2026-11-11) was priced from the after-hours quote 334 min later (`quote_mid_late`), so entry = latest and the option P&L read 0 by construction.
+- **Changed:** `lib/ideaOptionMath.ts` (`OptPoint.capturedAt`, `LATE_APPROX_MS` = 1 h, `OptSummary.entryApprox`; P&L / return withheld when approximate), `lib/ideaOptions.ts` (`repriceLate`: replaces late-quote rows with same-day last trades once the day is past; `replayPrices` reports `sameDay`; `getOptionTrack` reads `captured_at`), `components/ideas/OptionStrategyCard.tsx` (approximation note instead of stats), `scripts/test-idea-scoring.mjs` (+1 check, 66 pass), `docs/trade-ideas.md`.
+- **Verified:** fixtures (66 pass), `npx tsc --noEmit` clean. **Not verified:** the re-price against live option bars (ISRG 420c had few trades; if a leg has none that day the row stays approximate), the card in a browser.
+- **Follow-ups:** open decisions from the 15-minute entry entry (entry price = zone edge vs bar close; skipping the 15-minute fetch when closed and already scored).
+
 ## 2026-11-11 (15-minute entry + option P&L) — Trade Ideas: enter on a completed 15-minute close in the zone; estimated option-strategy P&L
 
 Requested: an idea should not wait for the daily bar to be "entered": it is entered when the price is in the zone at the end of a 15-minute candle (shorts included).
