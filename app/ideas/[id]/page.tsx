@@ -25,12 +25,27 @@ const etToday = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Americ
 /** Whole calendar days from a to b (YYYY-MM-DD strings, never parsed in local time). */
 const daysBetween = (a: string, b: string) => Math.round((Date.parse(`${b.slice(0, 10)}T12:00:00Z`) - Date.parse(`${a.slice(0, 10)}T12:00:00Z`)) / 86_400_000);
 
+/** One line for a dates_changed update: what each date was and became. */
+function datesLine(payload: unknown): string {
+  const p = (payload ?? {}) as Record<string, { from?: string | null; to?: string | null } | undefined>;
+  const part = (label: string, c: { from?: string | null; to?: string | null } | undefined, none: string) => {
+    if (!c) return null;
+    const to = c.to ? fmtDay(c.to) : none;
+    return c.from ? `${label} ${fmtDay(c.from)} → ${to}` : `${label} now ${to}`;
+  };
+  return [part('Valid until', p.validUntil, 'no end date'), part('Enter by', p.entryBy, 'no limit')].filter(Boolean).join('; ') + '.';
+}
+
 function UpdateForm({ idea, onDone }: { idea: IdeaView; onDone: () => void }) {
   const open = OPEN_STATUSES.includes(idea.status);
   const [type, setType] = useState('note');
   const [body, setBody] = useState('');
   const [stop, setStop] = useState('');
   const [price, setPrice] = useState('');
+  const [validUntil, setValidUntil] = useState(idea.validUntil ?? '');
+  const [entryBy, setEntryBy] = useState(idea.entryBy ?? '');
+  // The enter-by date only matters until the idea enters.
+  const canEditEntryBy = idea.status === 'live' && !idea.outcome?.enteredOn;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const types = IDEA_UPDATE_TYPES.filter(t => open || t.key === 'note');
@@ -42,7 +57,12 @@ function UpdateForm({ idea, onDone }: { idea: IdeaView; onDone: () => void }) {
     try {
       await api(`/api/ideas/${idea.id}/updates`, {
         method: 'POST',
-        body: JSON.stringify({ type, body, stop: type === 'stop_moved' ? Number(stop) : undefined, price: type === 'partial_booked' && price ? Number(price) : undefined }),
+        body: JSON.stringify({
+          type, body, stop: type === 'stop_moved' ? Number(stop) : undefined, price: type === 'partial_booked' && price ? Number(price) : undefined,
+          // dates_changed: only the dates that differ from the current ones are sent; an empty box clears that date.
+          ...(type === 'dates_changed' && validUntil !== (idea.validUntil ?? '') ? { validUntil: validUntil || null } : {}),
+          ...(type === 'dates_changed' && canEditEntryBy && entryBy !== (idea.entryBy ?? '') ? { entryBy: entryBy || null } : {}),
+        }),
       });
       setBody(''); setStop(''); setPrice('');
       onDone();
@@ -59,6 +79,12 @@ function UpdateForm({ idea, onDone }: { idea: IdeaView; onDone: () => void }) {
         </select>
         {type === 'stop_moved' && <input className={`${inputClass} w-28`} type="number" step="any" placeholder="New stop" value={stop} onChange={e => setStop(e.target.value)} />}
         {type === 'partial_booked' && <input className={`${inputClass} w-28`} type="number" step="any" placeholder="Price (optional)" value={price} onChange={e => setPrice(e.target.value)} />}
+        {type === 'dates_changed' && (
+          <div className="flex flex-wrap gap-3 items-end">
+            <label className="text-[11px] text-gray-600">Valid until (empty = no end date)<div className="flex gap-1"><input className={`${inputClass} w-40`} type="date" min={etToday()} value={validUntil} onChange={e => setValidUntil(e.target.value)} />{validUntil && <button type="button" onClick={() => setValidUntil('')} className="px-2 text-xs font-semibold text-gray-600 border border-gray-300 rounded-lg hover:bg-white">Clear</button>}</div></label>
+            {canEditEntryBy && <label className="text-[11px] text-gray-600">Enter by (empty = no limit)<div className="flex gap-1"><input className={`${inputClass} w-40`} type="date" min={etToday()} value={entryBy} onChange={e => setEntryBy(e.target.value)} />{entryBy && <button type="button" onClick={() => setEntryBy('')} className="px-2 text-xs font-semibold text-gray-600 border border-gray-300 rounded-lg hover:bg-white">Clear</button>}</div></label>}
+          </div>
+        )}
       </div>
       <textarea className={`${inputClass} w-full`} rows={2} placeholder={type === 'note' ? 'What changed or what to watch' : 'Optional comment'} value={body} onChange={e => setBody(e.target.value)} maxLength={2000} />
       <p className="text-[11px] text-gray-500">{updateTypeMeta(type).description}</p>
@@ -100,7 +126,7 @@ export default function IdeaPage() {
   const resultPts = o && o.entryPrice != null ? pointsFromR(o.r, o.entryPrice, idea.stop) : null;
   const today = etToday();
   const sincePublish = idea.publishedAt ? daysBetween(idea.publishedAt.slice(0, 10), today) : null;
-  const daysLeft = OPEN_STATUSES.includes(idea.status) ? daysBetween(today, idea.validUntil) : null;
+  const daysLeft = OPEN_STATUSES.includes(idea.status) && idea.validUntil ? daysBetween(today, idea.validUntil) : null;
 
   return (
     <div className="space-y-4">
@@ -116,7 +142,7 @@ export default function IdeaPage() {
         </div>
         <p className="text-sm text-gray-700 mt-1">{idea.title}</p>
         <p className="text-[11px] text-gray-400 mt-0.5">
-          {idea.publishedAt ? `Published ${fmtWhen(idea.publishedAt)}` : 'Draft'}{idea.refPrice != null ? ` · last close at publish ${fmtPrice(idea.refPrice)}` : ''}{sincePublish != null && sincePublish >= 0 ? ` · ${sincePublish === 0 ? 'today' : `${sincePublish} day${sincePublish === 1 ? '' : 's'} ago`}` : ''}{daysLeft != null ? ` · ${daysLeft < 0 ? 'past its valid-until date' : daysLeft === 0 ? 'valid until today' : `${daysLeft} day${daysLeft === 1 ? '' : 's'} left`}` : ''}. The plan below is frozen as published; changes appear in the timeline.
+          {idea.publishedAt ? `Published ${fmtWhen(idea.publishedAt)}` : 'Draft'}{idea.refPrice != null ? ` · last close at publish ${fmtPrice(idea.refPrice)}` : ''}{sincePublish != null && sincePublish >= 0 ? ` · ${sincePublish === 0 ? 'today' : `${sincePublish} day${sincePublish === 1 ? '' : 's'} ago`}` : ''}{daysLeft != null ? ` · ${daysLeft < 0 ? 'past its valid-until date' : daysLeft === 0 ? 'valid until today' : `${daysLeft} day${daysLeft === 1 ? '' : 's'} left`}` : ''}. The plan below is frozen as published, except the valid-until and enter-by dates, which the publisher can change; every change appears in the timeline.
         </p>
       </div>
 
@@ -127,7 +153,8 @@ export default function IdeaPage() {
           {idea.targets.map((t, i) => <Stat key={i} label={t.label || `Target ${i + 1}`}><span className="text-green-700">{fmtPrice(t.price)}</span> <span className="text-[10px] text-gray-400 font-normal">{idea.riskReward.perTarget[i]?.toFixed(1)}R · {fmtPts(Math.abs(t.price - worstFill))} pts{worstFill > 0 ? ` (${fmtPct(Math.abs(t.price - worstFill) / worstFill * 100, 1)})` : ''}</span></Stat>)}
           <Stat label="Risk per share"><span className="text-red-700">{riskPts.toFixed(2)} pts</span> <span className="text-[10px] text-gray-400 font-normal">{riskPct == null ? '' : `${riskPct.toFixed(1)}% of entry · 1R`}</span></Stat>
           <Stat label="Reward : risk">{idea.riskReward.blended == null ? '—' : `${idea.riskReward.blended.toFixed(1)} : 1`}</Stat>
-          <Stat label="Valid until">{fmtDay(idea.validUntil)}</Stat>
+          <Stat label="Valid until">{idea.validUntil ? fmtDay(idea.validUntil) : <span className="text-gray-500 font-normal">No end date</span>}</Stat>
+          {idea.entryBy && <Stat label="Enter by">{fmtDay(idea.entryBy)}</Stat>}
         </div>
         <p className="text-[11px] text-gray-400 mt-2">Reward : risk is measured from the worst fill inside the entry zone ({idea.direction === 'short' ? 'zone low' : 'zone high'}, {fmtPrice(worstFill)}) to each target, over the risk to the stop. Points are per share; 1R = the risk per share.</p>
       </div>
@@ -181,6 +208,7 @@ export default function IdeaPage() {
                 <div className="text-sm text-gray-800">
                   {u.type === 'stop_moved' && typeof u.payload.stop === 'number' && <span className="font-semibold">Stop moved to {fmtPrice(u.payload.stop)}. </span>}
                   {u.type === 'partial_booked' && <span className="font-semibold">Partial booked{typeof u.payload.price === 'number' ? ` at ${fmtPrice(u.payload.price)}` : ''}. </span>}
+                  {u.type === 'dates_changed' && <span className="font-semibold">{datesLine(u.payload)} </span>}
                   {u.body}
                 </div>
               </li>

@@ -15,7 +15,7 @@ import {
   FEATURE_IDEAS_LONG_TERM, FEATURE_IDEAS_SHORT_TERM, FEATURE_PUBLISH_IDEAS, hasFeature,
 } from '@/lib/features';
 import {
-  CLOSED_STATUSES, CLOSING_UPDATE_TYPES, OPEN_STATUSES, entryBasisOf, horizonTerm, horizonsOfTerm, riskReward, validatePlan, validateScheduleTime,
+  CLOSED_STATUSES, CLOSING_UPDATE_TYPES, OPEN_STATUSES, checkDates, entryBasisOf, horizonTerm, horizonsOfTerm, riskReward, validatePlan, validateScheduleTime,
   type IdeaOptionStrategy, type IdeaPlanInput, type IdeaTarget, type IdeaTerm,
 } from '@/lib/ideaTypes';
 import { scoreIdea, type ScoreBar, type ScoreClosure, type ScoreIntradayBar, type ScoreResult } from '@/lib/ideaScoring';
@@ -98,7 +98,9 @@ export interface IdeaView {
   entryHigh: number;
   targets: IdeaTarget[];
   stop: number;
-  validUntil: string;
+  validUntil: string | null;
+  /** Last day the idea may enter (null = no limit). */
+  entryBy: string | null;
   riskRating: string;
   riskReward: { risk: number; perTarget: number[]; blended: number | null };
   optionStrategy?: IdeaOptionStrategy | null;
@@ -119,7 +121,7 @@ const iso = (v: unknown): string | null => (v ? new Date(v as string).toISOStrin
 
 const IDEA_COLS = `i.id, i.publisher_id, i.symbol, i.direction, i.horizon, i.status, i.title, i.rationale,
   i.entry_low::float8 AS entry_low, i.entry_high::float8 AS entry_high, i.targets, i.stop::float8 AS stop,
-  i.valid_until::text AS valid_until, i.risk_rating, i.option_strategy, i.ref_price::float8 AS ref_price,
+  i.valid_until::text AS valid_until, i.entry_by::text AS entry_by, i.risk_rating, i.option_strategy, i.ref_price::float8 AS ref_price,
   i.published_at, i.created_at, i.scheduled_for, i.schedule_error,
   o.outcome AS o_outcome, o.entered_on::text AS o_entered_on, o.entry_price::float8 AS o_entry_price,
   o.exit_on::text AS o_exit_on, o.exit_price::float8 AS o_exit_price, o.targets_hit AS o_targets_hit,
@@ -144,7 +146,8 @@ function toView(r: any, access: IdeaAccess): IdeaView {
     entryHigh: r.entry_high,
     targets,
     stop: r.stop,
-    validUntil: r.valid_until,
+    validUntil: r.valid_until ?? null,
+    entryBy: r.entry_by ?? null,
     riskRating: r.risk_rating,
     riskReward: riskReward(plan),
     refPrice: num(r.ref_price),
@@ -304,7 +307,7 @@ function assertPublisher(access: IdeaAccess) {
 
 const planParams = (p: IdeaPlanInput) => [
   p.symbol, p.direction, p.horizon, p.title, p.rationale, p.entryLow, p.entryHigh, JSON.stringify(p.targets), p.stop,
-  p.validUntil, p.riskRating, p.optionStrategy ? JSON.stringify(p.optionStrategy) : null,
+  p.validUntil, p.riskRating, p.optionStrategy ? JSON.stringify(p.optionStrategy) : null, p.entryBy,
 ];
 
 /** Draft plans skip the "valid until in the past" rule only at publish time, which re-validates. */
@@ -316,16 +319,16 @@ export async function saveDraft(access: IdeaAccess, raw: unknown, id?: string): 
   if (id) {
     const rows = await sql(
       `UPDATE public.nt_trade_ideas SET symbol=$1, direction=$2, horizon=$3, title=$4, rationale=$5, entry_low=$6, entry_high=$7,
-         targets=$8::jsonb, stop=$9, valid_until=$10::date, risk_rating=$11, option_strategy=$12::jsonb, updated_at=now()
-       WHERE id=$13 AND status IN ('draft','scheduled') AND published_at IS NULL AND ($14::boolean OR publisher_id=$15) RETURNING id`,
+         targets=$8::jsonb, stop=$9, valid_until=$10::date, risk_rating=$11, option_strategy=$12::jsonb, entry_by=$13::date, updated_at=now()
+       WHERE id=$14 AND status IN ('draft','scheduled') AND published_at IS NULL AND ($15::boolean OR publisher_id=$16) RETURNING id`,
       [...p, id, access.isStaff, access.userId],
     );
     if (!rows.length) throw new IdeaError('Draft not found (published ideas cannot be edited; add an update instead)', 404);
     return String(rows[0].id);
   }
   const rows = await sql(
-    `INSERT INTO public.nt_trade_ideas (symbol, direction, horizon, title, rationale, entry_low, entry_high, targets, stop, valid_until, risk_rating, option_strategy, publisher_id, status)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10::date,$11,$12::jsonb,$13,'draft') RETURNING id`,
+    `INSERT INTO public.nt_trade_ideas (symbol, direction, horizon, title, rationale, entry_low, entry_high, targets, stop, valid_until, risk_rating, option_strategy, entry_by, publisher_id, status)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10::date,$11,$12::jsonb,$13::date,$14,'draft') RETURNING id`,
     [...p, access.userId],
   );
   return String(rows[0].id);
@@ -436,7 +439,7 @@ async function publishCore(id: string, who: IdeaAccess | null): Promise<string> 
   const r: any = rows[0];
   const v = validatePlan({
     symbol: r.symbol, direction: r.direction, horizon: r.horizon, title: r.title, rationale: r.rationale, entryLow: r.entry_low,
-    entryHigh: r.entry_high, targets: r.targets, stop: r.stop, validUntil: r.valid_until, riskRating: r.risk_rating, optionStrategy: r.option_strategy,
+    entryHigh: r.entry_high, targets: r.targets, stop: r.stop, validUntil: r.valid_until, entryBy: r.entry_by, riskRating: r.risk_rating, optionStrategy: r.option_strategy,
   }, todayET());
   if (!v.ok) throw new IdeaError('Fix these before publishing', 422, v.errors);
   const ref = await referencePrice(v.plan.symbol);
@@ -470,10 +473,12 @@ export async function scheduleIdea(access: IdeaAccess, id: string, atIso: unknow
   const r: any = rows[0];
   const v = validatePlan({
     symbol: r.symbol, direction: r.direction, horizon: r.horizon, title: r.title, rationale: r.rationale, entryLow: r.entry_low,
-    entryHigh: r.entry_high, targets: r.targets, stop: r.stop, validUntil: r.valid_until, riskRating: r.risk_rating, optionStrategy: r.option_strategy,
+    entryHigh: r.entry_high, targets: r.targets, stop: r.stop, validUntil: r.valid_until, entryBy: r.entry_by, riskRating: r.risk_rating, optionStrategy: r.option_strategy,
   }, todayET());
   if (!v.ok) throw new IdeaError('Fix these before scheduling', 422, v.errors);
-  if (r.valid_until < etDateOf(t.at.getTime())) throw new IdeaError('Valid until is before the scheduled publish date.', 422);
+  const publishDay = etDateOf(t.at.getTime());
+  if (r.valid_until && r.valid_until < publishDay) throw new IdeaError('Valid until is before the scheduled publish date.', 422);
+  if (r.entry_by && r.entry_by < publishDay) throw new IdeaError('Enter by is before the scheduled publish date.', 422);
   const done = await sql(
     `UPDATE public.nt_trade_ideas SET status='scheduled', scheduled_for=$2::timestamptz, schedule_error=NULL, updated_at=now()
      WHERE id=$1 AND status IN ('draft','scheduled') RETURNING scheduled_for`,
@@ -521,15 +526,19 @@ export async function publishDueIdeas(deadline?: number): Promise<DueResult> {
   return res;
 }
 
-export interface NewUpdate { type: string; body?: string; stop?: number; price?: number; pct?: number }
+export interface NewUpdate {
+  type: string; body?: string; stop?: number; price?: number; pct?: number;
+  /** dates_changed: a key that is present is changed (null clears it); an absent key is left as it is. */
+  validUntil?: string | null; entryBy?: string | null;
+}
 
 /** Append a timeline entry. Closing updates end the idea early; none of them rewrite the plan. */
 export async function addUpdate(access: IdeaAccess, id: string, input: NewUpdate): Promise<string> {
   assertPublisher(access);
-  const types = ['note', 'stop_moved', 'partial_booked', 'closed', 'cancelled'];
+  const types = ['note', 'stop_moved', 'partial_booked', 'closed', 'cancelled', 'dates_changed'];
   if (!types.includes(input.type)) throw new IdeaError('Unknown update type');
   const body = String(input.body ?? '').trim().slice(0, 2000);
-  const payload: Record<string, number> = {};
+  const payload: Record<string, any> = {};
   if (input.type === 'stop_moved') {
     if (!(typeof input.stop === 'number' && input.stop > 0)) throw new IdeaError('A stop price is required');
     payload.stop = input.stop;
@@ -539,11 +548,33 @@ export async function addUpdate(access: IdeaAccess, id: string, input: NewUpdate
     if (typeof input.pct === 'number' && input.pct > 0 && input.pct <= 100) payload.pct = input.pct;
   }
   if (input.type === 'note' && !body) throw new IdeaError('Write a note');
-  const rows = await sql(`SELECT status, symbol, direction, title, horizon FROM public.nt_trade_ideas WHERE id=$1 AND status NOT IN ('draft','scheduled') AND ($2::boolean OR publisher_id=$3)`, [id, access.isStaff, access.userId]);
+  const rows = await sql(`SELECT i.status, i.symbol, i.direction, i.title, i.horizon, i.valid_until::text AS valid_until, i.entry_by::text AS entry_by, o.entered_on::text AS entered_on FROM public.nt_trade_ideas i LEFT JOIN public.nt_idea_outcomes o ON o.idea_id = i.id WHERE i.id=$1 AND i.status NOT IN ('draft','scheduled') AND ($2::boolean OR i.publisher_id=$3)`, [id, access.isStaff, access.userId]);
   if (!rows.length) throw new IdeaError('Idea not found', 404);
   const idea: any = rows[0];
   const closing = (CLOSING_UPDATE_TYPES as readonly string[]).includes(input.type);
   if (closing && !OPEN_STATUSES.includes(idea.status)) throw new IdeaError('This idea has already ended', 409);
+  let datesText = '';
+  if (input.type === 'dates_changed') {
+    if (!OPEN_STATUSES.includes(idea.status)) throw new IdeaError('This idea has already ended; its dates can no longer be changed', 409);
+    const setVU = 'validUntil' in input;
+    const setEB = 'entryBy' in input;
+    if (!setVU && !setEB) throw new IdeaError('Send validUntil and/or entryBy');
+    if (setEB && (idea.status === 'triggered' || idea.entered_on)) throw new IdeaError('The idea has already entered, so the enter-by date no longer applies', 409);
+    const chk = checkDates(setVU ? input.validUntil : null, setEB ? input.entryBy : null, todayET());
+    const errs = [...chk.errors];
+    const nextVU: string | null = setVU ? chk.validUntil : idea.valid_until;
+    const nextEB: string | null = setEB ? chk.entryBy : idea.entry_by;
+    if (!errs.length && nextVU && nextEB && nextEB > nextVU) errs.push('Enter by cannot be after valid until.');
+    if (errs.length) throw new IdeaError('Fix these dates', 422, errs);
+    const changes: string[] = [];
+    if (setVU && nextVU !== idea.valid_until) { payload.validUntil = { from: idea.valid_until, to: nextVU }; changes.push(nextVU ? `Valid until ${idea.valid_until ? 'changed from ' + idea.valid_until + ' to' : 'set to'} ${nextVU}` : 'Valid until removed (no end date)'); }
+    if (setEB && nextEB !== idea.entry_by) { payload.entryBy = { from: idea.entry_by, to: nextEB }; changes.push(nextEB ? `Enter by ${idea.entry_by ? 'changed from ' + idea.entry_by + ' to' : 'set to'} ${nextEB}` : 'Enter by removed (no limit on the entry date)'); }
+    if (!changes.length) throw new IdeaError('Nothing changed', 409);
+    datesText = changes.join('. ') + '.';
+    // The status guard is the DB trigger's too: the dates of an ended idea cannot move.
+    const moved = await sql(`UPDATE public.nt_trade_ideas SET valid_until=$2::date, entry_by=$3::date, updated_at=now() WHERE id=$1 AND status IN ('live','triggered') RETURNING id`, [id, nextVU, nextEB]);
+    if (!moved.length) throw new IdeaError('This idea has already ended; its dates can no longer be changed', 409);
+  }
   if (!closing && !OPEN_STATUSES.includes(idea.status) && input.type !== 'note') throw new IdeaError('This idea has already ended; you can still add a note', 409);
   const ins = await sql(
     `INSERT INTO public.nt_idea_updates (idea_id, update_type, body, payload, created_by, effective_on) VALUES ($1,$2,$3,$4::jsonb,$5,$6::date) RETURNING id`,
@@ -553,13 +584,15 @@ export async function addUpdate(access: IdeaAccess, id: string, input: NewUpdate
   if (closing) {
     await sql(`UPDATE public.nt_trade_ideas SET status=$2, updated_at=now() WHERE id=$1`, [id, input.type === 'closed' ? 'closed_by_publisher' : 'cancelled']);
   }
-  const label: Record<string, string> = { note: 'Update', stop_moved: `Stop moved to ${payload.stop}`, partial_booked: 'Partial booked', closed: 'Closed early', cancelled: 'Cancelled' };
+  const label: Record<string, string> = { dates_changed: 'Dates changed', note: 'Update', stop_moved: `Stop moved to ${payload.stop}`, partial_booked: 'Partial booked', closed: 'Closed early', cancelled: 'Cancelled' };
   const facts: AlertFacts = { v: 1 };
-  if (body) facts.note = body.slice(0, 1000);
+  const noteText = [datesText, body].filter(Boolean).join(' ');
+  if (noteText) facts.note = noteText.slice(0, 1000);
   if (payload.stop != null) facts.newStop = payload.stop;
   if (payload.price != null) facts.price = payload.price;
   if (payload.pct != null) facts.pct = payload.pct;
-  await recordEvent(Number(id), `update:${updateId}`, input.type, idea.horizon, `${label[input.type]}: ${idea.symbol} ${idea.direction}, ${idea.title}.${body ? ` ${body.slice(0, 200)}` : ''}`, facts);
+  // A dates change is announced as a desk note (the existing alert layout) carrying the change in words.
+  await recordEvent(Number(id), `update:${updateId}`, input.type === 'dates_changed' ? 'note' : input.type, idea.horizon, `${label[input.type]}: ${idea.symbol} ${idea.direction}, ${idea.title}.${noteText ? ` ${noteText.slice(0, 200)}` : ''}`, facts);
   return updateId;
 }
 
@@ -697,7 +730,7 @@ export async function evaluateIdeas(opts: { all?: boolean; ideaId?: string; dead
   if (opts.ideaId) { args.push(opts.ideaId); where += ` AND i.id = $1`; }
   else if (!opts.all) where += ` AND i.status IN ('live','triggered')`;
   const ideas = await sql(`SELECT i.id, i.symbol, i.direction, i.horizon, i.title, i.status, i.entry_low::float8 AS entry_low, i.entry_high::float8 AS entry_high,
-    i.targets, i.stop::float8 AS stop, i.published_on::text AS published_on, i.published_at, i.valid_until::text AS valid_until, o.entered_on::text AS o_entered_on
+    i.targets, i.stop::float8 AS stop, i.published_on::text AS published_on, i.published_at, i.valid_until::text AS valid_until, i.entry_by::text AS entry_by, o.entered_on::text AS o_entered_on
     FROM public.nt_trade_ideas i LEFT JOIN public.nt_idea_outcomes o ON o.idea_id = i.id WHERE ${where} ORDER BY i.id`, args);
 
   for (const idea of ideas as any[]) {
@@ -705,7 +738,7 @@ export async function evaluateIdeas(opts: { all?: boolean; ideaId?: string; dead
     try {
       const closeRows = await sql(`SELECT update_type, effective_on::text AS effective_on FROM public.nt_idea_updates WHERE idea_id=$1 AND update_type IN ('closed','cancelled') ORDER BY id LIMIT 1`, [idea.id]);
       const closure: ScoreClosure | null = closeRows[0] ? { kind: closeRows[0].update_type, effectiveOn: closeRows[0].effective_on } : null;
-      const to = idea.valid_until < asOf ? idea.valid_until : asOf;
+      const to = idea.valid_until && idea.valid_until < asOf ? idea.valid_until : asOf;
       let bars: ScoreBar[] = [];
       if (to > idea.published_on) {
         const got = await getDailyBars(idea.symbol, addDays(idea.published_on, 1), to);
@@ -719,7 +752,7 @@ export async function evaluateIdeas(opts: { all?: boolean; ideaId?: string; dead
       if (entryBasis === 'm15' && publishedAt) {
         // From the publish time; once an entry day is stored (and we are not rebuilding) only that day onwards is needed.
         const fromMs = !opts.all && idea.o_entered_on ? Math.max(Date.parse(publishedAt), etInstantMs(idea.o_entered_on, '04:00')) : Date.parse(publishedAt);
-        const capMs = Math.min(Date.now(), etInstantMs(idea.valid_until, '23:59'));
+        const capMs = idea.valid_until ? Math.min(Date.now(), etInstantMs(idea.valid_until, '23:59')) : Date.now();
         try {
           intraday = await getCompleted15mBars(idea.symbol, new Date(fromMs).toISOString(), capMs);
         } catch (error) {
@@ -729,7 +762,7 @@ export async function evaluateIdeas(opts: { all?: boolean; ideaId?: string; dead
         }
       }
       const score = scoreIdea(
-        { direction: idea.direction, entryLow: idea.entry_low, entryHigh: idea.entry_high, targets, stop: idea.stop, publishedOn: idea.published_on, validUntil: idea.valid_until, publishedAt, entryBasis },
+        { direction: idea.direction, entryLow: idea.entry_low, entryHigh: idea.entry_high, targets, stop: idea.stop, publishedOn: idea.published_on, validUntil: idea.valid_until ?? null, entryBy: idea.entry_by ?? null, publishedAt, entryBasis },
         bars, closure, asOf, intraday,
       );
       await storeOutcome(idea, score, closure);

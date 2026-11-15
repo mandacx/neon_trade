@@ -93,7 +93,7 @@ Created by `scripts/add-trade-ideas-tables.mjs` (idempotent). All tables are `nt
 | Table | Purpose |
 |---|---|
 | `nt_trade_ideas` | the idea: symbol, direction, horizon, status, entry zone, `targets` JSONB ladder, stop, `valid_until`, `risk_rating`, optional `option_strategy` JSONB, `ref_price` (last close at publish), publish stamps. Money columns are `NUMERIC(18,6)`. |
-| `nt_idea_updates` | append-only timeline: note, stop moved, partial booked, closed early, cancelled. A DB trigger rejects UPDATE/DELETE. |
+| `nt_idea_updates` | append-only timeline: note, stop moved, partial booked, dates changed, closed early, cancelled. A DB trigger rejects UPDATE/DELETE. |
 | `nt_idea_outcomes` | **derived and rebuildable** result per idea (`lib/ideaScoring.ts`). Safe to TRUNCATE and rebuild (`/api/ideas/evaluate {all:true}` or `/api/cron/ideas?force=true`). |
 | `nt_idea_option_marks` | **derived and rebuildable** price points of an idea's option strategy: `entry`, `target:T1..` (information only), `exit`, `latest`; one row per `(idea_id, event_key)`, legs as JSONB with per-share estimate prices and how each was priced. Created by `scripts/add-idea-option-marks.mjs` (idempotent). See "Option strategy tracking". |
 | `nt_idea_events` | append-only event feed (published, triggered, T1.., stopped, expired, updates). `UNIQUE (idea_id, event_key)`: re-running the tracker never duplicates an event. `payload JSONB` (nullable, `{ v: 1, ... }`) holds the event's own facts for the alert builders (added 2026-11-10 by `scripts/add-idea-event-payload.mjs`; NULL on older events). |
@@ -106,9 +106,11 @@ Created by `scripts/add-trade-ideas-tables.mjs` (idempotent). All tables are `nt
 `nt_trade_ideas` also has `scheduled_for` and `schedule_error`; `nt_idea_prefs` has `telegram_alerts` and `push_alerts`.
 
 **Immutability.** Once `published_at` is set, a trigger rejects any change to the plan columns (symbol, direction,
-horizon, title, rationale, entry zone, targets, stop, valid-until, risk, option strategy, publisher, publish stamps),
+horizon, title, rationale, entry zone, targets, stop, risk, option strategy, publisher, publish stamps),
 and rejects deleting the idea. Only `status` and `updated_at` change afterwards (tracker and publisher actions).
 Changes are `nt_idea_updates` rows, each timestamped and alerted. The original entry, targets and stop are what get scored.
+
+**Dates (2026-11-15).** `valid_until` is optional (NULL = the idea never expires on its own) and a new optional `entry_by` DATE limits the entry (the last day the idea may enter, inclusive; not entered by then = `not_triggered`, dated at `entry_by`). Both are the one exception to immutability: the publisher can change or clear them on a published idea **only while it is open (live / in trade)** through a `dates_changed` update (`POST /api/ideas/[id]/updates` with `validUntil` and/or `entryBy`; a key that is present is changed, `null` or `''` clears it). Each change is a timestamped, append-only `nt_idea_updates` row (`payload`: `{ validUntil: {from, to}, entryBy: {from, to} }`) shown in the timeline and announced like a desk note. Rules: dates cannot be set in the past, enter-by cannot be after valid-until, enter-by cannot be changed once the idea has entered, nothing can change after the idea ended. The DB trigger enforces the open-only rule too (`scripts/add-idea-dates.mjs`). Scoring always uses the current dates (`scoreIdea`: `validUntil` null = no end, `entryBy`). An idea with neither date that never enters stays `live` until it hits a stop / target without entering or the publisher cancels it. Alerts: the `published` alert lists "Enter by" when set and omits "Valid until" when empty.
 
 **Catalogs** (`lib/ideaTypes.ts`, each entry has key, label, tone, description): horizons
 (intraday, swing -> short term; positional, long_term -> long term), statuses
@@ -240,7 +242,7 @@ All under `/api/ideas` (rate limiter `ideas`, 90/min; the live mark has its own 
 | `GET /api/ideas/taken` | idea term | my trades, marks, followed vs not followed |
 | `PATCH/DELETE /api/ideas/taken/[tid]` | idea term | close at my own exit price `{exitPrice}` / remove my record (own rows only) |
 | `GET/POST/DELETE /api/ideas/push` | idea term | VAPID public key + device count / register this browser (also turns push on) / remove it |
-| `POST /api/ideas/[id]/updates` | publisher | `{type, body?, stop?, price?, pct?}`, append-only |
+| `POST /api/ideas/[id]/updates` | publisher | `{type, body?, stop?, price?, pct?, validUntil?, entryBy?}`, append-only (`dates_changed` also moves the two dates) |
 | `GET /api/ideas/managed` | publisher | own ideas, drafts first (admins: everyone's) |
 | `GET /api/ideas/performance?horizon=&direction=&from=&to=` | idea term | stats, breakdowns, closed list, definitions |
 | `GET/POST /api/ideas/feed` | idea term | in-app alerts; POST marks read |

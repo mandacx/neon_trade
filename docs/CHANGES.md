@@ -7,6 +7,14 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-11-15 — Trade Ideas: optional, editable valid-until and a new enter-by date
+
+- **Why (user request):** the Valid until date should be editable and may be empty, and a second date should limit the entry. Decisions (asked): editable also after publish, via a logged update, only while the idea is open; an empty valid-until means the idea never expires on its own.
+- **Changed:** `scripts/add-idea-dates.mjs` (new; `valid_until` nullable, `entry_by DATE`, immutability trigger no longer freezes the two dates but only lets them move while the idea is live / in trade; **applied to the live DB 2026-11-15**), `lib/ideaTypes.ts` (`IdeaPlanInput.validUntil` nullable + `entryBy`, `checkDates`, update type `dates_changed`), `lib/ideaScoring.ts` (null validity = no end; `entryBy` ends an un-entered idea as `not_triggered` dated at the enter-by day, both bases), `lib/ideas.ts` (columns, drafts, publish / schedule checks, tracker, `addUpdate` `dates_changed`), `app/api/ideas/[id]/updates/route.ts`, `app/ideas/publish/page.tsx` (two optional date fields with Clear), `app/ideas/[id]/page.tsx` (Valid until / Enter by stats, date editor in the update form, timeline line), `app/ideas/page.tsx` (board: "No end date", "Enter by"), `lib/ideaAlertModel.ts` + `lib/ideaChannels.ts` (alerts list Enter by), `scripts/test-idea-scoring.mjs` (+6 checks, 72 pass), `docs/trade-ideas.md`, `CLAUDE.md`.
+- **Verified:** fixtures (scoring 72, alerts 29), `npx tsc --noEmit`; trigger behaviour on the live DB inside rolled-back transactions (open idea: dates change and clear OK; stop change blocked; dates of an ended idea blocked); no data changed.
+- **Not verified:** the pages in a browser, a real `dates_changed` update end to end (it would alert subscribers), the tracker run on a no-end-date idea, the 15-minute fetch cap when `valid_until` is empty (it now reads up to now). Dates changes are announced to subscribers as a desk note.
+- **Follow-ups:** the `published` alert preview in the composer shows Enter by only through the real builders; a never-expiring idea that never enters stays live until cancelled (by decision).
+
 ## 2026-11-13 — Trade Ideas: email alerts on by default for idea-plan users
 
 - **Why:** MSTR (published 2026-11-13 14:47Z) was emailed only to the one account that had ticked Email; the 8 assigned users had no `nt_idea_prefs` row, so nothing was sent (checked in the DB: delivery log showed 1 email / Telegram / push for the event). Decision (user): email defaults to on.

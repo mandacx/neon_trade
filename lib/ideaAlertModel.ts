@@ -31,6 +31,8 @@ export interface AlertIdea {
   stop: number;
   targets: Array<{ price: number; label?: string }>;
   validUntil: string | null;
+  /** Last day the idea may enter; absent / null = no limit. */
+  entryBy?: string | null;
   riskRating: string;
   optionStrategyName: string | null;
 }
@@ -250,9 +252,11 @@ export function toAlertIdea(row: any): AlertIdea | null {
   const os = row.option_strategy ?? row.optionStrategy;
   const optName = os && typeof os === 'object' && typeof os.name === 'string' && os.name.trim() ? clampWords(os.name, 80) : null;
   const vu = row.valid_until ?? row.validUntil;
+  const eb = row.entry_by ?? row.entryBy;
   return {
     symbol, direction, horizon: String(row.horizon ?? ''), title: String(row.title ?? ''), rationale: String(row.rationale ?? ''),
     entryLow, entryHigh, stop, targets, validUntil: typeof vu === 'string' && YMD.test(vu.slice(0, 10)) ? vu.slice(0, 10) : null,
+    entryBy: typeof eb === 'string' && YMD.test(eb.slice(0, 10)) ? eb.slice(0, 10) : null,
     riskRating: String(row.risk_rating ?? row.riskRating ?? 'medium'), optionStrategyName: optName,
   };
 }
@@ -370,7 +374,11 @@ export function levelRows(kind: AlertKind, idea: AlertIdea, facts: AlertFacts | 
       return { label: `T${i + 1}`, value: fmtPrice(t.price) ?? '', status: statusOf(i), date: dateOf(i), rNote: r ?? undefined, highlight: hi(i) };
     });
   const valid = fmtDate(idea.validUntil, today);
-  const validRow: LevelRow[] = valid ? [{ label: 'Valid until', value: valid, highlight: false }] : [];
+  const entryByTxt = fmtDate(idea.entryBy, today);
+  const validRow: LevelRow[] = [
+    ...(entryByTxt ? [{ label: 'Enter by', value: entryByTxt, highlight: false }] : []),
+    ...(valid ? [{ label: 'Valid until', value: valid, highlight: false }] : []),
+  ];
   // Which targets count as hit: known from the event's own counter, otherwise unknown (no marks).
   const hitStatus = (i: number): RowStatus | undefined => (hitCount == null ? undefined : i < hitCount ? 'hit' : 'open');
   const finalStatus = (i: number): RowStatus | undefined => (hitCount == null ? undefined : i < hitCount ? 'hit' : 'notreached');

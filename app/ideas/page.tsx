@@ -48,7 +48,7 @@ function IdeaCard({ idea, live, liveLoaded }: { idea: IdeaView; live?: LiveBlock
           <div className="text-[10px] uppercase text-gray-400 font-semibold">{closed ? 'Result' : o?.outcome === 'open' ? 'Open R (unrealised)' : 'Valid until'}</div>
           {closed || o?.outcome === 'open'
             ? <div className={`font-bold ${rTone(o?.r)}`}>{o ? fmtR(o.r) : '—'}{o && resultPts != null && <span className="ml-1.5">{fmtPts(resultPts)} pts</span>} {closed && o && <span className="ml-1 align-middle"><OutcomePill outcome={o.outcome} /></span>}</div>
-            : <div className="font-semibold text-gray-800">{fmtDay(idea.validUntil)}</div>}
+            : <div className="font-semibold text-gray-800">{idea.validUntil ? fmtDay(idea.validUntil) : <span className="font-normal text-gray-500">No end date</span>}{idea.entryBy && <span className="block text-[10px] font-normal text-gray-500">Enter by {fmtDay(idea.entryBy)}</span>}</div>}
         </div>
       </div>
       {open && <LiveChip block={live} loaded={liveLoaded} />}

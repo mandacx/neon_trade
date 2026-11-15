@@ -5,7 +5,7 @@ import { addUpdate } from '@/lib/ideas';
 export const dynamic = 'force-dynamic';
 
 /**
- * Append a timeline entry to a published idea: { type: note|stop_moved|partial_booked|closed|cancelled, body?, stop?, price?, pct? }.
+ * Append a timeline entry to a published idea: { type: note|stop_moved|partial_booked|dates_changed|closed|cancelled, body?, stop?, price?, pct?, validUntil?, entryBy? }.
  * Append-only: there is no edit or delete. The original entry, targets and stop are still what gets scored.
  */
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -20,6 +20,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       stop: typeof body.stop === 'number' ? body.stop : undefined,
       price: typeof body.price === 'number' ? body.price : undefined,
       pct: typeof body.pct === 'number' ? body.pct : undefined,
+      // dates_changed: a key that is present is changed (null or '' clears it); an absent key is left alone.
+      ...('validUntil' in body ? { validUntil: typeof body.validUntil === 'string' && body.validUntil.trim() ? body.validUntil : body.validUntil === undefined ? undefined : null } : {}),
+      ...('entryBy' in body ? { entryBy: typeof body.entryBy === 'string' && body.entryBy.trim() ? body.entryBy : body.entryBy === undefined ? undefined : null } : {}),
     });
     return NextResponse.json({ success: true, data: { id: updateId } }, { status: 201 });
   } catch (error) {

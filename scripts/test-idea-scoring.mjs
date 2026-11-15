@@ -740,4 +740,65 @@ t('options: rejects missing or invalid prices instead of guessing', () => {
   assert.notEqual(r.current.pnl, undefined);
 });
 
+// --- optional valid-until and the enter-by date --------------------------------
+t('dates: no valid-until never expires; an open idea keeps running and a pending one stays pending', () => {
+  const open = scoreIdea({ ...long, validUntil: null }, [bar('2026-01-06', 103, 104, 101, 103)], null, '2026-06-30');
+  assert.equal(open.outcome, 'open');
+  assert.equal(open.final, false);
+  const pending = scoreIdea({ ...long, validUntil: null }, [bar('2026-01-06', 104, 105, 103, 104)], null, '2026-06-30');
+  assert.equal(pending.outcome, 'pending');
+  assert.equal(pending.final, false);
+});
+
+t('dates: daily basis, a touch AFTER the enter-by date does not enter; not_triggered is dated at the enter-by date', () => {
+  const plan = { ...long, entryBy: '2026-01-07' };
+  const r = scoreIdea(plan, [bar('2026-01-06', 104, 105, 103, 104), bar('2026-01-07', 104, 105, 103, 104), bar('2026-01-08', 103, 104, 101, 103)], null, '2026-01-20');
+  assert.equal(r.outcome, 'not_triggered');
+  assert.equal(r.exitOn, '2026-01-07');
+  assert.match(r.events[r.events.length - 1].detail, /enter-by/);
+  // a touch ON the enter-by day still enters
+  const ok = scoreIdea(plan, [bar('2026-01-06', 104, 105, 103, 104), bar('2026-01-07', 103, 104, 101, 103)], null, '2026-01-20');
+  assert.equal(ok.outcome, 'open');
+  assert.equal(ok.enteredOn, '2026-01-07');
+});
+
+t('dates: enter-by passed with no later bars at all is still not_triggered once the day is complete, and pending before', () => {
+  const plan = { ...long, entryBy: '2026-01-07' };
+  const bars = [bar('2026-01-06', 104, 105, 103, 104), bar('2026-01-07', 104, 105, 103, 104)];
+  assert.equal(scoreIdea(plan, bars, null, '2026-01-06').outcome, 'pending');
+  assert.equal(scoreIdea(plan, bars, null, '2026-01-07').outcome, 'not_triggered');
+});
+
+t('dates: once entered, the enter-by date no longer matters', () => {
+  const plan = { ...long, entryBy: '2026-01-06' };
+  const r = scoreIdea(plan, [bar('2026-01-06', 103, 104, 101, 103), bar('2026-01-20', 103, 104, 101, 103)], null, '2026-03-01');
+  assert.equal(r.outcome, 'expired');
+  assert.notEqual(r.outcome, 'not_triggered');
+  assert.equal(r.enteredOn, '2026-01-06');
+});
+
+t('dates: m15 basis, a close in the zone after the enter-by date does not enter; one on it does', () => {
+  const plan = { ...M, entryBy: '2026-01-06' };
+  const late = [ib('2026-01-07', '15:00', 104, 104.5, 100.5, 101)];
+  const r = scoreIdea(plan, [bar('2026-01-07', 104, 104.5, 100.5, 101)], null, '2026-01-20', late);
+  assert.equal(r.outcome, 'not_triggered');
+  assert.equal(r.exitOn, '2026-01-06');
+  const onTime = [ib('2026-01-06', '15:00', 104, 104.5, 100.5, 101)];
+  const ok = scoreIdea(plan, [bar('2026-01-06', 104, 104.5, 100.5, 101)], null, '2026-01-06', onTime);
+  assert.equal(ok.enteredOn, '2026-01-06');
+});
+
+t('dates: validatePlan accepts empty dates, rejects enter-by after valid-until and past dates', () => {
+  const ok = validatePlan({ ...goodPlan, validUntil: '', entryBy: '' }, '2026-01-05');
+  assert.equal(ok.ok, true);
+  assert.equal(ok.plan.validUntil, null);
+  assert.equal(ok.plan.entryBy, null);
+  const only = validatePlan({ ...goodPlan, validUntil: null, entryBy: '2026-01-20' }, '2026-01-05');
+  assert.equal(only.ok, true);
+  assert.equal(only.plan.entryBy, '2026-01-20');
+  assert.equal(validatePlan({ ...goodPlan, validUntil: '2026-02-01', entryBy: '2026-02-02' }, '2026-01-05').ok, false);
+  assert.equal(validatePlan({ ...goodPlan, entryBy: '2026-01-01' }, '2026-01-05').ok, false);
+  assert.equal(validatePlan({ ...goodPlan, entryBy: 'soon' }, '2026-01-05').ok, false);
+});
+
 console.log(`ideas: ${passed} checks passed`);

@@ -36,6 +36,7 @@ export const IDEA_UPDATE_TYPES: CatalogEntry[] = [
   { key: 'partial_booked', label: 'Partial booked', tone: 'green', description: 'The publisher booked part of the position. Scoring still follows the original ladder.' },
   { key: 'closed', label: 'Closed early', tone: 'amber', description: 'The publisher closed the idea. Scored at that session\'s close.' },
   { key: 'cancelled', label: 'Cancelled', tone: 'gray', description: 'The publisher withdrew the idea.' },
+  { key: 'dates_changed', label: 'Dates changed', tone: 'blue', description: 'The publisher changed the valid-until and/or enter-by date. Scoring uses the current dates; the history stays in the timeline.' },
 ];
 /** Updates that change an idea's status (and so its scoring); the rest are commentary. */
 export const CLOSING_UPDATE_TYPES = ['closed', 'cancelled'] as const;
@@ -93,7 +94,10 @@ export interface IdeaPlanInput {
   entryHigh: number;
   targets: IdeaTarget[];
   stop: number;
-  validUntil: string;
+  /** Last day the idea runs (an entered position is marked to that close). null = no end date: it never expires on its own. */
+  validUntil: string | null;
+  /** Last day the idea may ENTER (inclusive). Not entered by then = not triggered. null = no limit on the entry date. */
+  entryBy: string | null;
   riskRating: string;
   optionStrategy: IdeaOptionStrategy | null;
 }
@@ -134,6 +138,27 @@ export function riskReward(p: Pick<IdeaPlanInput, 'direction' | 'entryLow' | 'en
   const perTarget = p.targets.map(t => (risk > 0 ? Math.abs(t.price - entry) / risk : 0));
   const blended = perTarget.length && risk > 0 ? perTarget.reduce((a, b) => a + b, 0) / perTarget.length : null;
   return { risk, perTarget, blended };
+}
+
+const isDate = (s: string) => YMD.test(s) && !Number.isNaN(Date.parse(`${s}T12:00:00Z`));
+
+/**
+ * The two optional dates of a plan. Empty / null = not set. `validUntil` (last day the idea runs) and `entryBy` (last day it
+ * may enter) must each be a real date that is not in the past, and the entry-by date cannot be after valid-until.
+ */
+export function checkDates(rawValidUntil: unknown, rawEntryBy: unknown, today: string): { validUntil: string | null; entryBy: string | null; errors: string[] } {
+  const errors: string[] = [];
+  const read = (v: unknown, label: string): string | null => {
+    if (v === null || v === undefined || (typeof v === 'string' && v.trim() === '')) return null;
+    const s = String(v).trim();
+    if (!isDate(s)) { errors.push(`${label} must be a date (YYYY-MM-DD) or empty.`); return null; }
+    if (s < today) { errors.push(`${label} cannot be in the past.`); return null; }
+    return s;
+  };
+  const validUntil = read(rawValidUntil, 'Valid until');
+  const entryBy = read(rawEntryBy, 'Enter by');
+  if (validUntil && entryBy && entryBy > validUntil) errors.push('Enter by cannot be after valid until.');
+  return { validUntil, entryBy, errors };
 }
 
 /**
@@ -186,9 +211,8 @@ export function validatePlan(raw: any, today: string): { ok: true; plan: IdeaPla
     }
   }
 
-  const validUntil = String(raw?.validUntil ?? '');
-  if (!YMD.test(validUntil) || Number.isNaN(Date.parse(`${validUntil}T12:00:00Z`))) errors.push('Valid until must be a date (YYYY-MM-DD).');
-  else if (validUntil < today) errors.push('Valid until cannot be in the past.');
+  const dates = checkDates(raw?.validUntil, raw?.entryBy, today);
+  errors.push(...dates.errors);
 
   let optionStrategy: IdeaOptionStrategy | null = null;
   if (raw?.optionStrategy) {
@@ -218,7 +242,7 @@ export function validatePlan(raw: any, today: string): { ok: true; plan: IdeaPla
     ok: true,
     plan: {
       symbol, direction, horizon, title, rationale, entryLow: round6(entryLow!), entryHigh: round6(entryHigh!),
-      targets, stop: round6(stop!), validUntil, riskRating, optionStrategy,
+      targets, stop: round6(stop!), validUntil: dates.validUntil, entryBy: dates.entryBy, riskRating, optionStrategy,
     },
   };
 }

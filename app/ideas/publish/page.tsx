@@ -12,7 +12,7 @@ import type { IdeaPreview, IdeaView } from '@/lib/ideas';
 interface Form {
   id: string | null;
   symbol: string; direction: 'long' | 'short'; horizon: string; title: string; rationale: string;
-  entryLow: string; entryHigh: string; stop: string; validUntil: string; riskRating: string;
+  entryLow: string; entryHigh: string; stop: string; validUntil: string; entryBy: string; riskRating: string;
   targets: string[];
   useOption: boolean;
   option: { name: string; expiry: string; note: string; legs: Array<{ side: 'buy' | 'sell'; type: 'call' | 'put'; strike: string; qty: string }> };
@@ -20,7 +20,7 @@ interface Form {
 
 const plusDays = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
 const blank = (): Form => ({
-  id: null, symbol: '', direction: 'long', horizon: 'swing', title: '', rationale: '', entryLow: '', entryHigh: '', stop: '', validUntil: plusDays(30),
+  id: null, symbol: '', direction: 'long', horizon: 'swing', title: '', rationale: '', entryLow: '', entryHigh: '', stop: '', validUntil: plusDays(30), entryBy: '',
   riskRating: 'medium', targets: ['', ''], useOption: false,
   option: { name: '', expiry: '', note: '', legs: [{ side: 'buy', type: 'call', strike: '', qty: '1' }] },
 });
@@ -31,7 +31,7 @@ function toPayload(f: Form) {
   return {
     id: f.id ?? undefined,
     symbol: f.symbol, direction: f.direction, horizon: f.horizon, title: f.title, rationale: f.rationale,
-    entryLow: n(f.entryLow), entryHigh: n(f.entryHigh), stop: n(f.stop), validUntil: f.validUntil, riskRating: f.riskRating,
+    entryLow: n(f.entryLow), entryHigh: n(f.entryHigh), stop: n(f.stop), validUntil: f.validUntil || null, entryBy: f.entryBy || null, riskRating: f.riskRating,
     targets: f.targets.filter(t => t.trim() !== '').map(t => ({ price: Number(t) })),
     optionStrategy: f.useOption
       ? { name: f.option.name, expiry: f.option.expiry || null, note: f.option.note || null, legs: f.option.legs.map(l => ({ side: l.side, type: l.type, strike: Number(l.strike), qty: Number(l.qty) })) } satisfies IdeaOptionStrategy
@@ -43,7 +43,7 @@ function fromIdea(i: IdeaView): Form {
   const o = i.optionStrategy;
   return {
     id: i.id, symbol: i.symbol, direction: i.direction as 'long' | 'short', horizon: i.horizon, title: i.title, rationale: i.rationale,
-    entryLow: String(i.entryLow), entryHigh: String(i.entryHigh), stop: String(i.stop), validUntil: i.validUntil, riskRating: i.riskRating,
+    entryLow: String(i.entryLow), entryHigh: String(i.entryHigh), stop: String(i.stop), validUntil: i.validUntil ?? '', entryBy: i.entryBy ?? '', riskRating: i.riskRating,
     targets: i.targets.map(t => String(t.price)), useOption: !!o,
     option: { name: o?.name ?? '', expiry: o?.expiry ?? '', note: o?.note ?? '', legs: (o?.legs ?? []).map(l => ({ side: l.side, type: l.type, strike: String(l.strike), qty: String(l.qty) })) },
   };
@@ -163,11 +163,16 @@ export default function PublishPage() {
         </div>
         {field('Title', <input className={`${inputClass} w-full`} value={form.title} onChange={e => set('title', e.target.value)} maxLength={140} placeholder="One line: the call" />)}
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           {field('Entry zone low', <input className={`${inputClass} w-full`} type="number" step="any" value={form.entryLow} onChange={e => set('entryLow', e.target.value)} />)}
           {field('Entry zone high', <input className={`${inputClass} w-full`} type="number" step="any" value={form.entryHigh} onChange={e => set('entryHigh', e.target.value)} />)}
           {field('Stop', <input className={`${inputClass} w-full`} type="number" step="any" value={form.stop} onChange={e => set('stop', e.target.value)} />)}
-          {field('Valid until', <input className={`${inputClass} w-full`} type="date" value={form.validUntil} onChange={e => set('validUntil', e.target.value)} />)}
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {field('Valid until (optional)', <div className="flex gap-2"><input className={`${inputClass} w-full`} type="date" value={form.validUntil} onChange={e => set('validUntil', e.target.value)} />{form.validUntil && <button type="button" onClick={() => set('validUntil', '')} className="px-2 text-xs font-semibold text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">Clear</button>}</div>)}
+          {field('Enter by (optional)', <div className="flex gap-2"><input className={`${inputClass} w-full`} type="date" value={form.entryBy} onChange={e => set('entryBy', e.target.value)} />{form.entryBy && <button type="button" onClick={() => set('entryBy', '')} className="px-2 text-xs font-semibold text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">Clear</button>}</div>)}
+          <p className="sm:col-span-2 text-[11px] text-gray-500">Valid until: the last day the idea runs (an open position is marked to that close). Leave it empty for no end date. Enter by: the last day the idea may enter; not entered by then, it counts as not triggered. Both can be changed or cleared later from the idea page while it is open.</p>
         </div>
 
         <div>

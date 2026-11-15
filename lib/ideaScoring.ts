@@ -35,7 +35,10 @@ export interface ScorePlan {
   targets: number[];
   stop: number;
   publishedOn: string; // ET date the idea went live
-  validUntil: string;
+  /** Last day the idea runs; null = no end date (it never expires on its own). */
+  validUntil: string | null;
+  /** Last day the idea may ENTER (inclusive); null = no limit. Not entered by then = not_triggered. */
+  entryBy?: string | null;
   /** ISO instant the idea went live; with the 'm15' basis only 15-minute bars that START at or after it can enter the idea. */
   publishedAt?: string | null;
   /** Default 'daily'. */
@@ -72,6 +75,8 @@ export interface ScoreResult {
   evaluatedThrough: string | null;
 }
 
+/** Stands in for a missing valid-until in date comparisons only; never stored or shown. */
+const NO_END = '9999-12-31';
 const round = (n: number, d = 4) => Math.round(n * 10 ** d) / 10 ** d;
 const dayDiff = (a: string, b: string) => Math.round((Date.parse(`${b}T12:00:00Z`) - Date.parse(`${a}T12:00:00Z`)) / 86_400_000);
 
@@ -104,8 +109,11 @@ export function scoreIdea(plan: ScorePlan, bars: ScoreBar[], closure: ScoreClosu
   };
   if (!(risk > 0) || n === 0) return { ...base, outcome: 'not_triggered', final: true, events: [{ type: 'not_triggered', date: plan.publishedOn, price: null, detail: 'invalid plan' }] };
 
+  // No end date: the idea runs as long as the data does (a far-future sentinel keeps the date comparisons below simple).
+  const validUntil = plan.validUntil ?? NO_END;
+  const entryBy = plan.entryBy ?? null;
   // The window of sessions this idea can use.
-  let last = plan.validUntil < asOf ? plan.validUntil : asOf;
+  let last = validUntil < asOf ? validUntil : asOf;
   if (closure && closure.effectiveOn < last) last = closure.effectiveOn;
   const window = bars.filter(b => b.date > plan.publishedOn && b.date <= last).sort((a, b) => (a.date < b.date ? -1 : 1));
 
@@ -115,7 +123,7 @@ export function scoreIdea(plan: ScorePlan, bars: ScoreBar[], closure: ScoreClosu
   let entryBar: ScoreIntradayBar | null = null;
   let ibars: ScoreIntradayBar[] = [];
   if (m15) {
-    const lastI = closure && closure.effectiveOn < plan.validUntil ? closure.effectiveOn : plan.validUntil;
+    const lastI = closure && closure.effectiveOn < validUntil ? closure.effectiveOn : validUntil;
     const from = plan.publishedAt ? Date.parse(plan.publishedAt) : NaN;
     ibars = intraday
       .filter(b => b.date <= lastI && Number.isFinite(b.close) && (Number.isNaN(from) ? b.date > plan.publishedOn : Date.parse(b.t) >= from))
@@ -143,6 +151,8 @@ export function scoreIdea(plan: ScorePlan, bars: ScoreBar[], closure: ScoreClosu
   let list: Step[] = window;
   if (m15) {
     for (const b of ibars) {
+      // Past the enter-by date nothing can enter any more (the idea is ended as not triggered below).
+      if (entryBy && b.date > entryBy) break;
       if (b.close >= plan.entryLow && b.close <= plan.entryHigh) { entryBar = b; break; }
       const ranToTarget = long ? b.close >= plan.targets[0] : b.close <= plan.targets[0];
       const hitStop = long ? b.close <= plan.stop : b.close >= plan.stop;
@@ -163,6 +173,7 @@ export function scoreIdea(plan: ScorePlan, bars: ScoreBar[], closure: ScoreClosu
 
   for (const b of list) {
     if (!entered) {
+      if (entryBy && b.date > entryBy) { neverEntered = { date: entryBy, why: 'the enter-by date passed without entering the zone' }; break; }
       const touches = b.low <= plan.entryHigh && b.high >= plan.entryLow;
       if (!touches) {
         // Ran away or broke down without ever touching the zone: the idea never entered.
@@ -212,7 +223,8 @@ export function scoreIdea(plan: ScorePlan, bars: ScoreBar[], closure: ScoreClosu
       // Withdrawn (or closed) before it entered: nothing was ever traded.
       return finishNever('cancelled', closure.effectiveOn, 'withdrawn before entry');
     }
-    if (asOf >= plan.validUntil) return finishNever('not_triggered', plan.validUntil, 'valid-until passed without entering the zone');
+    if (entryBy && asOf >= entryBy && (!plan.validUntil || entryBy <= plan.validUntil)) return finishNever('not_triggered', entryBy, 'the enter-by date passed without entering the zone');
+    if (plan.validUntil && asOf >= plan.validUntil) return finishNever('not_triggered', plan.validUntil, 'valid-until passed without entering the zone');
     return { ...base, evaluatedThrough };
   }
 
@@ -244,7 +256,7 @@ export function scoreIdea(plan: ScorePlan, bars: ScoreBar[], closure: ScoreClosu
     return done('closed_by_publisher', lastBar.date, lastBar.close);
   }
   // Valid-until passed with the position still open: mark to the last close.
-  if (asOf >= plan.validUntil && lastBar) {
+  if (plan.validUntil && asOf >= plan.validUntil && lastBar) {
     events.push({ type: 'expired', date: lastBar.date, price: lastBar.close, detail: 'marked to the last close' });
     return done('expired', lastBar.date, lastBar.close);
   }

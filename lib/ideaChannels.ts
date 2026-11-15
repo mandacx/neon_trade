@@ -87,7 +87,7 @@ async function loadIdeas(cands: Candidate[]): Promise<Map<number, AlertIdea>> {
   if (!ids.length) return out;
   const rows = await sql(
     `SELECT id, symbol, direction, horizon, title, rationale, entry_low::float8 AS entry_low, entry_high::float8 AS entry_high,
-       stop::float8 AS stop, targets, valid_until::text AS valid_until, risk_rating, option_strategy
+       stop::float8 AS stop, targets, valid_until::text AS valid_until, entry_by::text AS entry_by, risk_rating, option_strategy
      FROM public.nt_trade_ideas WHERE id = ANY($1::bigint[])`,
     [ids],
   );
