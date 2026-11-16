@@ -3,6 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { NewsItem, NewsResponse } from '@/types/news';
 
+/** How often an open page re-reads the news by itself (stock tab and landing card). */
+export const NEWS_POLL_MS = 15 * 60_000;
+
 /** "5m ago", "3h ago", "2d ago", then a short date. */
 export function timeAgo(iso: string, now = Date.now()): string {
   const t = Date.parse(iso);
@@ -19,13 +22,13 @@ function NewsCard({ item, current, now }: { item: NewsItem; current: string; now
   const others = item.symbols.filter(s => s !== current);
   const body = item.excerpt ?? item.summary;
   return (
-    <article className="flex gap-3 px-4 py-3 border-b border-gray-100 last:border-b-0">
+    <article className="flex gap-3 px-3 py-2 border-b border-gray-100 last:border-b-0">
       {item.imageUrl && (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={item.imageUrl} alt="" loading="lazy" referrerPolicy="no-referrer" className="hidden sm:block w-28 h-20 object-cover rounded-md bg-gray-100 shrink-0" />
+        <img src={item.imageUrl} alt="" loading="lazy" referrerPolicy="no-referrer" className="hidden sm:block w-24 h-16 object-cover rounded-md bg-gray-100 shrink-0" />
       )}
       <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-gray-500 mb-0.5">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-gray-500">
           {item.source && <span className="font-semibold capitalize text-gray-600">{item.source}</span>}
           <span title={new Date(item.createdAt).toLocaleString()}>{timeAgo(item.createdAt, now)}</span>
           {others.map(s => (
@@ -36,13 +39,14 @@ function NewsCard({ item, current, now }: { item: NewsItem; current: string; now
           {item.url ? <a href={item.url} target="_blank" rel="noopener noreferrer" className="hover:text-blue-700">{item.headline}</a> : item.headline}
         </h3>
         {body && (
-          <div className="mt-1 text-[13px] leading-relaxed text-gray-600 whitespace-pre-line">
-            {body}
-            {item.excerpt && item.truncated && ' …'}
+          <div className="mt-0.5 text-[13px] leading-snug text-gray-600 space-y-1">
+            {body.split('\n\n').map((p, i, all) => (
+              <p key={i}>{p}{item.excerpt && item.truncated && i === all.length - 1 ? ' …' : ''}</p>
+            ))}
           </div>
         )}
         {item.url && (
-          <a href={item.url} target="_blank" rel="noopener noreferrer" className="mt-1 inline-block text-xs font-semibold text-blue-600 hover:underline">
+          <a href={item.url} target="_blank" rel="noopener noreferrer" className="mt-0.5 inline-block text-xs font-semibold text-blue-600 hover:underline">
             {item.excerpt && item.truncated ? 'Read more' : 'Read full story'}{item.source ? ` at ${item.source.replace(/^./, c => c.toUpperCase())}` : ''} →
           </a>
         )}
@@ -62,24 +66,29 @@ export default function NewsTab({ symbol }: { symbol: string }) {
   const [now, setNow] = useState(() => Date.now());
   const seq = useRef(0);
 
-  const load = useCallback(async (refresh: boolean) => {
+  // `silent` (the 15-minute poll) updates the list in place: no spinner, and a failure keeps what is shown.
+  const load = useCallback(async (refresh: boolean, silent = false) => {
     const mine = ++seq.current;
-    setLoading(true);
-    setError(null);
+    if (!silent) { setLoading(true); setError(null); }
     try {
       const res = await fetch(`/api/stocks/${encodeURIComponent(symbol)}/news${refresh ? '?refresh=1' : ''}`, { cache: 'no-store' });
       const body = await res.json().catch(() => null);
       if (mine !== seq.current) return;
       if (res.ok && body?.success) setData(body.data as NewsResponse);
-      else setError(res.status === 429 ? 'Too many refreshes. Wait a minute and try again.' : (body?.message || body?.error || 'News is unavailable right now.'));
+      else if (!silent) setError(res.status === 429 ? 'Too many refreshes. Wait a minute and try again.' : (body?.message || body?.error || 'News is unavailable right now.'));
     } catch {
-      if (mine === seq.current) setError('Could not reach the server.');
+      if (mine === seq.current && !silent) setError('Could not reach the server.');
     } finally {
-      if (mine === seq.current) { setLoading(false); setNow(Date.now()); }
+      if (mine === seq.current) { if (!silent) setLoading(false); setNow(Date.now()); }
     }
   }, [symbol]);
 
   useEffect(() => { void load(false); }, [load]);
+  // Re-read every 15 minutes while the browser tab is visible (the server cache is 60 s, so this is one feed call).
+  useEffect(() => {
+    const id = setInterval(() => { if (!document.hidden) void load(false, true); }, NEWS_POLL_MS);
+    return () => clearInterval(id);
+  }, [load]);
   // Keep "5m ago" labels honest while the tab stays open.
   useEffect(() => { const id = setInterval(() => setNow(Date.now()), 60_000); return () => clearInterval(id); }, []);
 

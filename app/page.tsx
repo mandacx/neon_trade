@@ -12,7 +12,7 @@ import { FEATURE_EARNINGS, hasFeature } from '@/lib/features';
 import { fmtShortDate, fmtNextDate, earningsTimeShort, daysUntilLabel } from '@/components/watchlists/watchlistShared';
 import type { EarningsBadge, EarningsEvent } from '@/types/earnings';
 import type { NewsItem } from '@/types/news';
-import { timeAgo } from '@/components/stock/tabs/NewsTab';
+import { timeAgo, NEWS_POLL_MS } from '@/components/stock/tabs/NewsTab';
 import type { ExtendedQuote } from '@/lib/quote';
 import ExtendedMove from '@/components/ui/ExtendedMove';
 
@@ -269,11 +269,15 @@ export default function Home() {
   }, []);
 
   // Latest market news: public, its own request so a slow or failing feed never delays the dashboard.
+  // Re-read every 15 minutes while the browser tab is visible; a failed poll keeps what is shown.
   useEffect(() => {
-    fetch('/api/home/news')
+    const load = () => fetch('/api/home/news')
       .then(r => r.json())
-      .then(res => { if (res.success) setNews(res.data?.items ?? []); })
+      .then(res => { if (res.success && res.data?.items?.length) setNews(res.data.items); })
       .catch(() => {});
+    void load();
+    const id = setInterval(() => { if (!document.hidden) void load(); }, NEWS_POLL_MS);
+    return () => clearInterval(id);
   }, []);
 
   // Earnings card + Top OI flags (Pro) — a separate, gated request, since
