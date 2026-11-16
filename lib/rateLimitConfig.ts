@@ -90,6 +90,14 @@ export const LIMITERS: LimiterDef[] = [
     standard: 20,
     entitled: null,
   },
+  {
+    name: 'level_request',
+    label: 'Level requests',
+    description: 'Signed-in users asking an admin to add a stock to the levels list (one tier). Each request is also capped at 20 open per user.',
+    windowSeconds: 60,
+    standard: 10,
+    entitled: null,
+  },
 ];
 
 export const RATE_LIMITS_KEY = 'rate_limits';

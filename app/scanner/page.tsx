@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import Header from '@/components/layout/Header';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
+import RequestLevelsButton from '@/components/ui/RequestLevelsButton';
 import DataTable, { type Column } from '@/components/oi/DataTable';
 import { Spinner, inputClass, labelClass } from '@/components/oi/oiShared';
 import {
@@ -156,7 +157,9 @@ export default function UsScannerPage() {
             {r.symbol}
           </Link>
           {r.kind === 'etf' && <span className="text-[9px] font-bold text-slate-600 bg-slate-100 rounded px-1">ETF</span>}
-          {r.hasLevels && <span className="text-[9px] font-bold text-green-700 bg-green-50 border border-green-200 rounded px-1" title="Option price levels available on the chart">Levels</span>}
+          {r.hasLevels
+            ? <span className="text-[9px] font-bold text-green-700 bg-green-50 border border-green-200 rounded px-1" title="Option price levels available on the chart">Levels</span>
+            : <RequestLevelsButton symbol={r.symbol} />}
           {r.flag && <span className="text-[9px] font-bold text-amber-800 bg-amber-50 border border-amber-300 rounded px-1 cursor-help" title={r.flag}>Check corporate action</span>}
         </span>
       ),

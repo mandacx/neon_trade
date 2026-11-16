@@ -10,6 +10,7 @@ import ScanAlertsTicker from '@/components/ui/ScanAlertsTicker';
 import OptionContractModal from '@/components/stock/OptionContractModal';
 import { EarningsHeaderLines, EarningsExpiryChip, EarningsHistoryTable } from '@/components/stock/EarningsPanel';
 import Tabs from '@/components/ui/Tabs';
+import RequestLevelsButton from '@/components/ui/RequestLevelsButton';
 import PriceLevelsTab, { RANGE_PRESET_DAYS, type RangePreset } from '@/components/stock/tabs/PriceLevelsTab';
 import OpenInterestTab from '@/components/stock/tabs/OpenInterestTab';
 import OptionChainTab from '@/components/stock/tabs/OptionChainTab';
@@ -1260,7 +1261,13 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
         )}
       </div>
     </div>
-  ) : null;
+  ) : (!isLoading && !embedded ? (
+    // No option levels for this symbol: a signed-in user can ask an admin to add it (docs/level-symbols.md).
+    <div className="bg-white rounded-lg shadow-md px-3 py-2 min-w-0 w-full flex flex-wrap items-center gap-2">
+      <span className="text-xs text-gray-600">No option levels for {symbol.toUpperCase()}.</span>
+      <RequestLevelsButton symbol={symbol} />
+    </div>
+  ) : null);
 
   const closestLvl = closestLevelName
     ? displayLevels.find((l: any) => l.name === closestLevelName) || stockData?.levels?.find((l: any) => l.name === closestLevelName)

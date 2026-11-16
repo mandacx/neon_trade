@@ -7,6 +7,21 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-11-16 (level symbols) — Request / approve / remove symbols in `us_symbols`
+
+- **Why (user request):** signed-in users can ask for levels on a stock that has none (scanner, stock page); admins approve (adds to `us_symbols`, which the loader reads), add directly, or soft-delete. Decisions (asked): any signed-in user; soft delete via `active`/`deleted_at`/`updated_at` (old levels stay visible); loader reads `us_symbols`; admin badge only, no email; new symbols get `strike_size` 5.
+- **Changed:** `scripts/create-level-requests.mjs` (new table `nt_level_requests`), `lib/levelRequestRules.ts`, `lib/levelRequests.ts`, `lib/rateLimitConfig.ts` (limiter `level_request`), routes under `app/api/level-requests` and `app/api/admin/level-{symbols,requests}`, `app/admin/level-symbols/page.tsx` + `components/admin/LevelSymbolsAdmin.tsx`, `app/admin/layout.tsx` (nav link + pending badge), `components/ui/RequestLevelsButton.tsx`, `app/scanner/page.tsx`, `components/stock/StockAnalysis.tsx`, `scripts/test-level-requests.mjs`, `docs/level-symbols.md`, `CLAUDE.md`.
+- **Verified:** `us_symbols` schema read from the live DB (columns above, PK on `symbol`, 676 rows); `node scripts/test-level-requests.mjs` (24 pass); `npx tsc --noEmit` clean.
+- **Not verified:** `scripts/create-level-requests.mjs` has not been run (the new table does not exist until it is: the admin page shows an error and the badge stays 0 until then); no route, page or button was exercised in a browser or against the DB; whether the loader tolerates the symbols and strike sizes the app writes; `npm run build`.
+- **Follow-ups:** show users their request status; optional strike-size auto-detect from the chain; the search dropdown has no request button.
+
+## 2026-11-15 — DB: `nt_us_stocks_rw` granted on `public.us_symbols`
+
+- **Why (user request):** the user created `public.us_symbols` and asked for the external loader role to have read/write access.
+- **Changed:** `GRANT SELECT, INSERT, UPDATE ON public.us_symbols TO nt_us_stocks_rw` (no `DELETE`, matching the 2026-11-05 grants). Run by the user with the owner role; no repo code changed.
+- **Verified (live DB, read-only):** table exists as `public.us_symbols` (lowercase); `has_table_privilege` for `nt_us_stocks_rw` = SELECT true, INSERT true, UPDATE true, DELETE false; the table has no owned sequences, so no sequence grant is needed.
+- **Not verified:** a real write by the role.
+
 ## 2026-11-16 — Trade Ideas: "Edit dates" button on the idea page
 
 - **Why (user request):** the dates editor lived only in the update form at the bottom (type "Dates changed"), so it was not discoverable.
