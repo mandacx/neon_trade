@@ -36,9 +36,9 @@ function datesLine(payload: unknown): string {
   return [part('Valid until', p.validUntil, 'no end date'), part('Enter by', p.entryBy, 'no limit')].filter(Boolean).join('; ') + '.';
 }
 
-function UpdateForm({ idea, onDone }: { idea: IdeaView; onDone: () => void }) {
+function UpdateForm({ idea, onDone, initialType = 'note' }: { idea: IdeaView; onDone: () => void; initialType?: string }) {
   const open = OPEN_STATUSES.includes(idea.status);
-  const [type, setType] = useState('note');
+  const [type, setType] = useState(initialType);
   const [body, setBody] = useState('');
   const [stop, setStop] = useState('');
   const [price, setPrice] = useState('');
@@ -71,7 +71,7 @@ function UpdateForm({ idea, onDone }: { idea: IdeaView; onDone: () => void }) {
   }
 
   return (
-    <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-2">
+    <div id="idea-update-form" className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-2">
       <div className="text-xs font-bold text-gray-700">Add an update (append-only: it cannot be edited or deleted)</div>
       <div className="flex flex-wrap gap-2">
         <select className={inputClass} value={type} onChange={e => setType(e.target.value)} aria-label="Update type">
@@ -100,6 +100,12 @@ export default function IdeaPage() {
   const [optionTrack, setOptionTrack] = useState<OptionTrack | null>(null);
   const [canPublish, setCanPublish] = useState(false);
   const [error, setError] = useState<{ status?: number; message: string } | null>(null);
+  // "Edit dates" opens the update form on the Dates changed type (the key remounts it so the type applies again).
+  const [datesForm, setDatesForm] = useState(0);
+  const editDates = () => {
+    setDatesForm(n => n + 1);
+    setTimeout(() => document.getElementById('idea-update-form')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
+  };
 
   const load = useCallback(() => {
     api<{ idea: IdeaView; canPublish: boolean; optionTrack?: OptionTrack | null }>(`/api/ideas/${id}`)
@@ -156,6 +162,9 @@ export default function IdeaPage() {
           <Stat label="Valid until">{idea.validUntil ? fmtDay(idea.validUntil) : <span className="text-gray-500 font-normal">No end date</span>}</Stat>
           {idea.entryBy && <Stat label="Enter by">{fmtDay(idea.entryBy)}</Stat>}
         </div>
+        {canPublish && (idea.status === 'live' || idea.status === 'triggered') && (
+          <button type="button" onClick={editDates} className="mt-2 px-2.5 py-1 text-xs font-semibold text-indigo-700 border border-indigo-200 rounded-lg hover:bg-indigo-50">Edit dates</button>
+        )}
         <p className="text-[11px] text-gray-400 mt-2">Reward : risk is measured from the worst fill inside the entry zone ({idea.direction === 'short' ? 'zone low' : 'zone high'}, {fmtPrice(worstFill)}) to each target, over the risk to the stop. Points are per share; 1R = the risk per share.</p>
       </div>
 
@@ -216,7 +225,7 @@ export default function IdeaPage() {
           </ol>
         )}
         {idea.updates && idea.updates.some(u => u.type === 'stop_moved') && <p className="text-[11px] text-gray-400 mt-2">A moved stop is the publisher&apos;s own management; the tracked result above still uses the original stop.</p>}
-        {canPublish && <UpdateForm idea={idea} onDone={load} />}
+        {canPublish && <UpdateForm key={datesForm} idea={idea} onDone={load} initialType={datesForm > 0 ? 'dates_changed' : 'note'} />}
       </div>
     </div>
   );

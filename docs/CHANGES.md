@@ -7,6 +7,12 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-11-16 — Trade Ideas: "Edit dates" button on the idea page
+
+- **Why (user request):** the dates editor lived only in the update form at the bottom (type "Dates changed"), so it was not discoverable.
+- **Changed:** `app/ideas/[id]/page.tsx`: an **Edit dates** button under the plan stats (shown to publishers while the idea is live or in trade) remounts the update form on the "Dates changed" type and scrolls to it. Same API and rules as before; no data or backend change.
+- **Verified:** `npx tsc --noEmit`. **Not verified:** in a browser (button visibility, scroll, saving).
+
 ## 2026-11-15 (batch email) — Trade Ideas: alert emails sent through Resend's batch endpoint
 
 - **Why (user request):** asked about Resend Broadcasts / BCC. Decision: neither. Broadcasts need a synced contact segment and their own unsubscribe, and one shared BCC message would lose the per-user unsubscribe link and per-user delivery rows. Instead the same one-message-per-user emails go out via `POST /emails/batch` (up to 100 per call).
