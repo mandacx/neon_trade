@@ -17,6 +17,8 @@ anything not tested as *unverified*.
 - **Data repair needed (not yet done):** delete the `nt_daily_bars_cover` rows for SPX and NDX so the next chart view re-pulls the range through the fallback (stored bars are upserted, not removed). Until the fix is deployed a warm run would advance coverage again.
 - **Related, not fixed:** SPX stored history starts 2026-05-05 although coverage starts 2025-10-14, so the same rule probably also claimed older days (backward extension) without bars. MSGS and RAMP show the same "covered, no recent bars" shape (last bars 10-26 / 10-30), probably delisted: not checked.
 
+**Addendum 2026-11-16 (repair done, fix pushed as 873ee71):** with the user's approval the `nt_daily_bars_cover` rows for SPX (to 11-14) and NDX (to 11-12) were deleted (2 rows; bars untouched). Then the production `/api/stocks/{SPX,NDX}/ohlc?interval=daily&from=2026-10-20&to=2026-11-16` returned every session 10-20..11-13 for both (19 bars, no gaps), so the lazy fallback refilled them. Not checked: whether the 11-16 live bar appears once the session opens, the next warm run leaving the coverage rows consistent, and the older history (before 2026-10-20).
+
 ## 2026-11-16 (level symbols) — Request / approve / remove symbols in `us_symbols`
 
 - **Why (user request):** signed-in users can ask for levels on a stock that has none (scanner, stock page); admins approve (adds to `us_symbols`, which the loader reads), add directly, or soft-delete. Decisions (asked): any signed-in user; soft delete via `active`/`deleted_at`/`updated_at` (old levels stay visible); loader reads `us_symbols`; admin badge only, no email; new symbols get `strike_size` 5.
