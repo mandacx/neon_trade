@@ -59,6 +59,7 @@ export function parseScreenParams(sp: URLSearchParams): OiScreenParams | string 
     groupBy: pick<OiGroupBy>(sp.get('groupBy'), ['contract', 'underlying', 'expiry', 'strike', 'date']) ?? 'contract',
     symbols: list(sp.get('symbols'), /^[A-Z][A-Z0-9.\-]{0,9}$/),
     excludeSymbols: list(sp.get('exclude'), /^[A-Z][A-Z0-9.\-]{0,9}$/, 50),
+    onlySymbols: list(sp.get('only'), /^[A-Z][A-Z0-9.\-]{0,9}$/, 50),
     optType: pick<OptType>(sp.get('optType'), ['call', 'put']),
     expiryFrom: YMD.test(sp.get('expiryFrom') ?? '') ? sp.get('expiryFrom') : null,
     expiryTo: YMD.test(sp.get('expiryTo') ?? '') ? sp.get('expiryTo') : null,

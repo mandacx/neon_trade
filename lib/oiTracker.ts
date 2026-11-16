@@ -32,6 +32,8 @@ export interface OiScreenParams {
   symbols?: string[] | null;
   /** Underlyings to leave out (e.g. SPX, NDX, SPY, QQQ). Applied in SQL after every other symbol filter. */
   excludeSymbols?: string[] | null;
+  /** Keep only these underlyings (e.g. SPX, NDX, SPY, QQQ). ANDed with `symbols`, so a typed list narrows it further. */
+  onlySymbols?: string[] | null;
   optType?: OptType | null;
   expiryFrom?: string | null;
   expiryTo?: string | null;
@@ -166,6 +168,7 @@ function buildBase(p: OiScreenParams, loads: string[], sessions: string[], symbo
 
   const where: string[] = [`r.load_dt = ANY(${loadsP}::date[])`];
   if (symbols) where.push(`r.symbol_und = ANY(${$(symbols)}::text[])`);
+  if (p.onlySymbols?.length) where.push(`r.symbol_und = ANY(${$(p.onlySymbols)}::text[])`);
   if (p.excludeSymbols?.length) where.push(`NOT (r.symbol_und = ANY(${$(p.excludeSymbols)}::text[]))`);
   if (p.optType) where.push(`TRIM(r.opt_type) = ${$(p.optType)}`);
   if (p.expiryFrom) where.push(`r.expiry_dt >= ${$(p.expiryFrom)}::date`);

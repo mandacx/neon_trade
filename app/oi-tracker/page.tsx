@@ -31,6 +31,7 @@ const GROUP_TABLE_ID: Record<Exclude<OiGroupBy, 'contract'>, string> = {
 /** Underlyings whose index/ETF flow dwarfs single stocks; excluded by default (toggle in the filters). */
 const EXCLUDED_SYMBOLS = ['SPX', 'NDX', 'SPY', 'QQQ'];
 const EXCLUDE_BIG_KEY = 'oiTracker.excludeBig';
+type BigMode = 'excluded' | 'included' | 'only';
 const RANGES: Array<[string, string]> = [['1', '1 day'], ['5', '5D'], ['10', '10D'], ['20', '20D'], ['60', '60D'], ['custom', 'Custom']];
 const RANK_BY: Array<[string, string]> = [
   ['abs_chg_value', '|Chg $|'], ['abs_chg', '|OI chg|'], ['chg', 'OI opened'], ['oi_value', 'OI $'], ['vol', 'Volume'],
@@ -85,14 +86,18 @@ export default function OiTrackerPage() {
 
   // The index/ETF giants are left out unless the user switches them back on (remembered in this browser).
   // It is read before the first screen request, which waits for `meta`, so the choice never causes a second load.
-  const [excludeBig, setExcludeBig] = useState(true);
-  const setExcludeBigSaved = (v: boolean) => {
-    setExcludeBig(v);
-    try { localStorage.setItem(EXCLUDE_BIG_KEY, v ? '1' : '0'); } catch { /* storage blocked */ }
+  // Three states: left out (default), mixed in with everything else, or the only ones shown.
+  const [bigMode, setBigMode] = useState<BigMode>('excluded');
+  const setBigModeSaved = (v: BigMode) => {
+    setBigMode(v);
+    try { localStorage.setItem(EXCLUDE_BIG_KEY, v === 'excluded' ? '1' : v === 'included' ? '0' : 'only'); } catch { /* storage blocked */ }
   };
 
   useEffect(() => {
-    try { if (localStorage.getItem(EXCLUDE_BIG_KEY) === '0') setExcludeBig(false); } catch { /* storage blocked */ }
+    try {
+      const saved = localStorage.getItem(EXCLUDE_BIG_KEY); // '1' excluded, '0' included (older saves), 'only'
+      if (saved === '0') setBigMode('included'); else if (saved === 'only') setBigMode('only');
+    } catch { /* storage blocked */ }
     fetch('/api/oi-tracker/meta')
       .then(r => r.json())
       .then(j => {
@@ -122,9 +127,11 @@ export default function OiTrackerPage() {
     if (indexCode) p.set('index', indexCode);
     if (watchlistId) p.set('watchlist', watchlistId);
     // Typing symbols in is explicit (SPY included on purpose), so the exclusion only applies to the open screen.
-    if (excludeBig && !symbols) p.set('exclude', EXCLUDED_SYMBOLS.join(','));
+    // "Only" is sent even with typed symbols: the two filters are ANDed on the server (typed list narrows the four).
+    if (bigMode === 'excluded' && !symbols) p.set('exclude', EXCLUDED_SYMBOLS.join(','));
+    if (bigMode === 'only') p.set('only', EXCLUDED_SYMBOLS.join(','));
     return p;
-  }, [from, to, symbols, optType, expiryKind, expiry, dteMin, dteMax, sector, indexCode, watchlistId, excludeBig]);
+  }, [from, to, symbols, optType, expiryKind, expiry, dteMin, dteMax, sector, indexCode, watchlistId, bigMode]);
 
   const screenGroup: OiGroupBy = tab === 'stocks' ? 'underlying' : groupBy;
   useEffect(() => {
@@ -338,12 +345,12 @@ export default function OiTrackerPage() {
                       </div>
                     </>
                   )}
-                  <div title={symbols ? 'Ignored while a symbol list is typed in' : `Leave out ${EXCLUDED_SYMBOLS.join(', ')}: their volume dwarfs single stocks`}>
+                  <div title={`Excluded leaves out ${EXCLUDED_SYMBOLS.join(', ')} (their volume dwarfs single stocks; ignored while a symbol list is typed in). Included mixes them in. Only shows just these.`}>
                     <label className={labelClass}>{EXCLUDED_SYMBOLS.join(' · ')}</label>
-                    <Segmented<'excluded' | 'included'>
-                      value={excludeBig ? 'excluded' : 'included'}
-                      onChange={v => setExcludeBigSaved(v === 'excluded')}
-                      options={[['excluded', 'Excluded'], ['included', 'Included']]}
+                    <Segmented<BigMode>
+                      value={bigMode}
+                      onChange={setBigModeSaved}
+                      options={[['excluded', 'Excluded'], ['included', 'Included'], ['only', 'Only']]}
                     />
                   </div>
                   {meta.watchlists.length > 0 && (
