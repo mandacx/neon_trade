@@ -3,7 +3,7 @@
  * this vendor's name, hosts or field names in API responses, routes or UI text.
  */
 import axios, { type AxiosInstance } from 'axios';
-import type { Bar, CalendarRow, NewsArticle, OptionSnapshot, Snapshot } from '../types';
+import type { Bar, CalendarRow, NewsArticle, NewsArticleFull, OptionSnapshot, Snapshot } from '../types';
 import type { ChartInterval } from '../intervals';
 
 const ALPACA_API_KEY = process.env.ALPACA_API_KEY;
@@ -625,4 +625,33 @@ export async function fetchNewsPage(opts: { start: string; end?: string; symbols
   if (!res.ok) throw new Error(`news HTTP ${res.status}`);
   const body = (await res.json()) as { news?: NewsArticle[]; next_page_token?: string | null };
   return { news: body.news ?? [], nextPageToken: body.next_page_token ?? null };
+}
+
+/**
+ * Latest articles, newest first, with summary, source, link, images and (optionally) the HTML body.
+ * `symbols` empty = market-wide. Throws on HTTP failure. (Shape verified live 2026-11-16: 50 per page max.)
+ */
+export async function fetchLatestNews(opts: { symbols?: string[]; limit: number; includeContent: boolean }): Promise<NewsArticleFull[]> {
+  const params = new URLSearchParams({
+    limit: String(Math.min(50, Math.max(1, opts.limit))),
+    sort: 'desc',
+    include_content: opts.includeContent ? 'true' : 'false',
+  });
+  if (opts.symbols?.length) params.set('symbols', opts.symbols.join(','));
+  const res = await fetch(`${ALPACA_BASE_URL}/v1beta1/news?${params}`, {
+    headers: authHeaders(), cache: 'no-store', signal: AbortSignal.timeout(8000),
+  });
+  if (!res.ok) throw new Error(`news HTTP ${res.status}`);
+  const body = (await res.json()) as { news?: Array<Partial<NewsArticleFull>> };
+  return (body.news ?? []).map(n => ({
+    id: Number(n.id),
+    headline: n.headline ?? '',
+    symbols: Array.isArray(n.symbols) ? n.symbols : [],
+    created_at: n.created_at ?? '',
+    summary: n.summary ?? '',
+    content: n.content ?? '',
+    url: n.url ?? null,
+    source: n.source ?? '',
+    images: Array.isArray(n.images) ? n.images : [],
+  }));
 }

@@ -91,6 +91,14 @@ export const LIMITERS: LimiterDef[] = [
     entitled: null,
   },
   {
+    name: 'news',
+    label: 'News requests',
+    description: 'Stock page News tab (opened once per stock, plus every "Refresh" click, which re-reads the feed) and the landing page latest-news card. Public, counted per user or per IP (one tier).',
+    windowSeconds: 60,
+    standard: 40,
+    entitled: null,
+  },
+  {
     name: 'level_request',
     label: 'Level requests',
     description: 'Signed-in users asking an admin to add a stock to the levels list (one tier). Each request is also capped at 20 open per user.',

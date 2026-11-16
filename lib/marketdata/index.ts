@@ -13,7 +13,7 @@
  *               has none for (SPX, NDX; no volume)
  *  - crypto   : live quotes and candles for the crypto levels page (getCryptoTickers, getCryptoBars)
  */
-export type { Bar, Snapshot, OptionSnapshot, OptionChainContract, CalendarRow, NewsArticle } from './types';
+export type { Bar, Snapshot, OptionSnapshot, OptionChainContract, CalendarRow, NewsArticle, NewsArticleFull } from './types';
 export type { ChartInterval } from './intervals';
 export { isIntradayInterval } from './intervals';
 
@@ -36,6 +36,7 @@ export {
   getOptionChainSnapshots,
   fetchCalendar,
   fetchNewsPage,
+  fetchLatestNews,
 } from './provider/primary';
 export type { DailyClose, PacedBarsResult } from './provider/primary';
 

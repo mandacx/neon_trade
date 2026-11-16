@@ -13,6 +13,7 @@ import Tabs from '@/components/ui/Tabs';
 import RequestLevelsButton from '@/components/ui/RequestLevelsButton';
 import PriceLevelsTab, { RANGE_PRESET_DAYS, type RangePreset } from '@/components/stock/tabs/PriceLevelsTab';
 import OpenInterestTab from '@/components/stock/tabs/OpenInterestTab';
+import NewsTab from '@/components/stock/tabs/NewsTab';
 import OptionChainTab from '@/components/stock/tabs/OptionChainTab';
 import { shiftDateString } from '@/components/stock/tabs/shared';
 import { useAuthContext } from '@/components/providers/AuthContextProvider';
@@ -79,8 +80,8 @@ const coversRange = (c: LevelsCoverage | null, symbol: string, expiry: string, f
 const NO_LEVELS = new Map<string, LevelHistoryEntry>();
 
 // Tabs below the chart (docs/CHANGES.md 2026-10-28 "stock page tabs"); `?tab=` keeps the open one.
-type StockTab = 'levels' | 'oi' | 'chain' | 'builder' | 'earnings';
-const STOCK_TABS: StockTab[] = ['levels', 'oi', 'chain', 'builder', 'earnings'];
+type StockTab = 'levels' | 'oi' | 'chain' | 'builder' | 'earnings' | 'news';
+const STOCK_TABS: StockTab[] = ['levels', 'oi', 'chain', 'builder', 'earnings', 'news'];
 
 // Shape of /api/stocks/[symbol]/quote. Every field but `price` can be null —
 // The snapshot omits prevDailyBar/dailyBar for names that haven't printed, and the
@@ -1355,6 +1356,7 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
         { id: 'chain', tone: 'blue', label: 'Option Chain', title: 'Live option chain: bid, ask, IV, greeks, volume and open interest by strike', badge: hasFeature(authCtx.features, FEATURE_OPTION_CHAIN) ? undefined : 'Pro' },
         { id: 'builder', tone: 'violet', label: 'Strategy Builder', title: 'Payoff, probability of profit, breakevens and greeks for 45 option strategies', badge: hasFeature(authCtx.features, FEATURE_STRATEGY_BUILDER) ? undefined : 'Pro' },
         { id: 'earnings', tone: 'amber', label: 'Earnings', title: 'Reported quarters: EPS and sales vs consensus', badge: earningsLocked === true ? 'Pro' : undefined },
+        { id: 'news', tone: 'gray', label: 'News', title: 'Latest news for this stock, with a Refresh button to fetch the newest now' },
       ]}
     />
   );
@@ -1556,6 +1558,11 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
                       )}
                     </div>
                   )}
+                </div>
+              )}
+              {visitedTabs.has('news') && (
+                <div hidden={tab !== 'news'}>
+                  <NewsTab symbol={symbol} />
                 </div>
               )}
             </div>

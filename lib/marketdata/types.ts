@@ -57,3 +57,12 @@ export interface OptionChainContract {
 export interface CalendarRow { date: string; open: string; close: string; sessionOpen: string | null; sessionClose: string | null }
 
 export interface NewsArticle { id: number; headline: string; symbols: string[]; created_at: string }
+
+/** A news article with the fields a reader needs. `content` is the publisher's HTML (never render it raw). */
+export interface NewsArticleFull extends NewsArticle {
+  summary: string;
+  content: string;
+  url: string | null;
+  source: string;
+  images: Array<{ size: string; url: string }>;
+}

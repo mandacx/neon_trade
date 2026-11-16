@@ -11,6 +11,8 @@ import { useAuthContext } from '@/components/providers/AuthContextProvider';
 import { FEATURE_EARNINGS, hasFeature } from '@/lib/features';
 import { fmtShortDate, fmtNextDate, earningsTimeShort, daysUntilLabel } from '@/components/watchlists/watchlistShared';
 import type { EarningsBadge, EarningsEvent } from '@/types/earnings';
+import type { NewsItem } from '@/types/news';
+import { timeAgo } from '@/components/stock/tabs/NewsTab';
 import type { ExtendedQuote } from '@/lib/quote';
 import ExtendedMove from '@/components/ui/ExtendedMove';
 
@@ -238,6 +240,7 @@ export default function Home() {
   const authCtx = useAuthContext();
   const earningsEnabled = hasFeature(authCtx.features, FEATURE_EARNINGS);
   const [homeEarnings, setHomeEarnings] = useState<HomeEarnings | null>(null);
+  const [news, setNews] = useState<NewsItem[]>([]);
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [moverTab, setMoverTab] = useState('gainers');
@@ -263,6 +266,14 @@ export default function Home() {
       .then(r => r.json())
       .then(res => { if (res.success) setData(res.data); })
       .finally(() => setLoading(false));
+  }, []);
+
+  // Latest market news: public, its own request so a slow or failing feed never delays the dashboard.
+  useEffect(() => {
+    fetch('/api/home/news')
+      .then(r => r.json())
+      .then(res => { if (res.success) setNews(res.data?.items ?? []); })
+      .catch(() => {});
   }, []);
 
   // Earnings card + Top OI flags (Pro) — a separate, gated request, since
@@ -392,6 +403,38 @@ export default function Home() {
                   : <div className="px-4 py-8 text-center text-sm text-gray-400">No data available</div>}
             </section>
           </div>
+
+          {/* Latest news (public) */}
+          {news.length > 0 && (
+            <section className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <div className="px-4 py-3 border-b border-gray-100">
+                <h2 className="font-bold text-gray-800 text-sm">Latest News</h2>
+                <div className="text-[10px] text-gray-400">Most-followed stocks · open any stock for its own news</div>
+              </div>
+              <div className="grid md:grid-cols-2 md:divide-x divide-gray-100">
+                {news.map(n => (
+                  <article key={n.id} className="flex gap-3 px-4 py-2.5 border-b border-gray-100">
+                    {n.imageUrl && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={n.imageUrl} alt="" loading="lazy" referrerPolicy="no-referrer" className="w-16 h-12 object-cover rounded bg-gray-100 shrink-0" />
+                    )}
+                    <div className="min-w-0">
+                      <h3 className="text-[13px] font-semibold text-gray-900 leading-snug line-clamp-2">
+                        {n.url ? <a href={n.url} target="_blank" rel="noopener noreferrer" className="hover:text-blue-700">{n.headline}</a> : n.headline}
+                      </h3>
+                      <div className="flex flex-wrap items-center gap-x-2 text-[10px] text-gray-400 mt-0.5">
+                        {n.source && <span className="capitalize">{n.source}</span>}
+                        <span>{timeAgo(n.createdAt)}</span>
+                        {n.symbols.slice(0, 3).map(s => (
+                          <Link key={s} href={`/stock/${s}`} className="text-blue-600 hover:underline">{s}</Link>
+                        ))}
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
+          )}
 
           {/* Earnings (Pro) */}
           {homeEarnings && (homeEarnings.upcoming.length > 0 || homeEarnings.reported.length > 0) && (
