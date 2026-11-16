@@ -7,6 +7,16 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-11-16 (SPX/NDX bars) — Daily top-up no longer advances coverage for symbols the primary feed has no bars for
+
+- **Symptom (user):** SPX chart OHLC missing after 2026-11-05.
+- **Found (live DB, read-only):** `nt_daily_bars` SPX had 10-27, 11-05, 11-13 and nothing between (10-28..11-04, 11-06..11-12 missing), while `nt_daily_bars_cover` said SPX was covered to 2026-11-14 (checked 2026-11-16 00:23Z). The fallback source returned bars for every one of those days (HTTP 200, 13 sessions 10-28..11-13), so the data exists. NDX: no bars after 10-30, cover to 11-12. Both are in the warm list (they have option levels). Ordinary symbols are fine (AAPL 10, MSFT 10, SPY 9 bars since 11-02).
+- **Cause:** `warmDailyBars` marked a symbol "known" (coverage advanced to the range end) whenever it had any coverage, even with zero bars returned. The primary feed has no index bars, so every daily run moved SPX/NDX coverage forward without storing anything; `ensureStored` (the lazy fallback path) then saw the days as held and never fetched them.
+- **Changed:** `lib/dailyBars.ts`: in a top-up (`g.overlap`) an empty result no longer counts as known (it is counted in `noBars` and left to the lazy path). A top-up re-reads stored sessions, so symbols the primary serves are never empty there. Non-overlap (older-history) groups keep the old rule.
+- **Verified:** `npx tsc --noEmit`. **Not verified:** the fix in a running warm job; the chart after repair.
+- **Data repair needed (not yet done):** delete the `nt_daily_bars_cover` rows for SPX and NDX so the next chart view re-pulls the range through the fallback (stored bars are upserted, not removed). Until the fix is deployed a warm run would advance coverage again.
+- **Related, not fixed:** SPX stored history starts 2026-05-05 although coverage starts 2025-10-14, so the same rule probably also claimed older days (backward extension) without bars. MSGS and RAMP show the same "covered, no recent bars" shape (last bars 10-26 / 10-30), probably delisted: not checked.
+
 ## 2026-11-16 (level symbols) — Request / approve / remove symbols in `us_symbols`
 
 - **Why (user request):** signed-in users can ask for levels on a stock that has none (scanner, stock page); admins approve (adds to `us_symbols`, which the loader reads), add directly, or soft-delete. Decisions (asked): any signed-in user; soft delete via `active`/`deleted_at`/`updated_at` (old levels stay visible); loader reads `us_symbols`; admin badge only, no email; new symbols get `strike_size` 5.

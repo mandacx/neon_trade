@@ -364,7 +364,10 @@ export async function warmDailyBars(opts: { symbols?: string[]; days?: number; d
         const list = parsed.get(sym) ?? [];
         for (const bar of list) rows.push({ symbol: sym, bar });
         // A symbol with stored history that simply had no new bars (weekend, holiday) is still covered up to the end of the range.
-        if (list.length > 0 || covers.has(sym)) known.push(sym);
+        // But a top-up (`overlap`) re-reads a few stored sessions, so a symbol the primary feed serves is never empty there:
+        // an empty result means the primary has nothing for it (indices such as SPX / NDX). Its coverage must NOT advance,
+        // or the lazy fallback path (ensureStored) would think the days are held and never fetch them (SPX / NDX gaps after 2026-11-05).
+        if (list.length > 0 || (covers.has(sym) && !g.overlap)) known.push(sym);
         else never.add(sym);
       }
       for (let k = 0; k < rows.length; k += 10_000) {
