@@ -1523,7 +1523,7 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
                     hasBuilder={hasFeature(authCtx.features, FEATURE_STRATEGY_BUILDER)}
                     onOpenBuilder={() => openTab('builder')}
                     loggedIn={authCtx.loggedIn}
-                    onOpenContract={(strike, optType, occRoot) => setSelectedOptContract({ strike, optType, occRoot })}
+                    onOpenContract={(strike, optType, occRoot, expiry) => setSelectedOptContract({ strike, optType, occRoot, expiry })}
                   />
                 </div>
               )}
@@ -1542,7 +1542,7 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
                     hasBuilder={hasFeature(authCtx.features, FEATURE_STRATEGY_BUILDER)}
                     onOpenBuilder={() => openTab('builder')}
                     loggedIn={authCtx.loggedIn}
-                    onOpenContract={(strike, optType, occRoot) => setSelectedOptContract({ strike, optType, occRoot })}
+                    onOpenContract={(strike, optType, occRoot, expiry) => setSelectedOptContract({ strike, optType, occRoot, expiry })}
                   />
                 </div>
               )}
@@ -1570,10 +1570,10 @@ export default function StockAnalysis({ symbol, embedded = false }: { symbol: st
         </div>
       </div>
 
-      {selectedOptContract && selectedExpiry && (
+      {selectedOptContract && (selectedOptContract.expiry ?? selectedExpiry) && (
         <OptionContractModal
           symbol={symbol}
-          expiry={selectedOptContract.expiry ?? selectedExpiry}
+          expiry={(selectedOptContract.expiry ?? selectedExpiry) as string}
           strike={selectedOptContract.strike}
           optType={selectedOptContract.optType}
           occRoot={selectedOptContract.occRoot}

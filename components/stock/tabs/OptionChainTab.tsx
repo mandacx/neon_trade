@@ -51,7 +51,8 @@ export default function OptionChainTab({ symbol, selectedExpiry: pageExpiry, exp
   hasBuilder: boolean;
   onOpenBuilder?: () => void;
   loggedIn: boolean;
-  onOpenContract: (strike: number, optType: 'call' | 'put', occRoot?: string) => void;
+  /** `expiry` is the chain's own expiry: for symbols without price levels the page has no selected expiry, so the contract chart needs it from here. */
+  onOpenContract: (strike: number, optType: 'call' | 'put', occRoot?: string, expiry?: string) => void;
 }) {
   const builder = mode === 'builder';
   const [chains, setChains] = useState<Map<string, OptionChain>>(new Map());
@@ -285,7 +286,7 @@ export default function OptionChainTab({ symbol, selectedExpiry: pageExpiry, exp
       {!builder ? (
         chain && (
           <div className="bg-white rounded-lg shadow-md p-3 min-w-0">
-            <ChainTable chain={chain} onOpenContract={(strike, t) => onOpenContract(strike, t, chain.root !== symbol.toUpperCase() ? chain.root : undefined)} />
+            <ChainTable chain={chain} onOpenContract={(strike, t) => onOpenContract(strike, t, chain.root !== symbol.toUpperCase() ? chain.root : undefined, chain.expiry)} />
           </div>
         )
       ) : (
@@ -294,7 +295,7 @@ export default function OptionChainTab({ symbol, selectedExpiry: pageExpiry, exp
       {chain && (
         <div className="bg-white rounded-lg shadow-md p-3 min-w-0 lg:sticky lg:top-2">
           <h3 className="text-base font-bold mb-1">Option chain <span className="text-xs font-normal text-gray-400">{selectedExpiry}</span></h3>
-          <ChainTable chain={chain} onAdd={addFromChain} onOpenContract={(strike, t) => onOpenContract(strike, t, chain.root !== symbol.toUpperCase() ? chain.root : undefined)} />
+          <ChainTable chain={chain} onAdd={addFromChain} onOpenContract={(strike, t) => onOpenContract(strike, t, chain.root !== symbol.toUpperCase() ? chain.root : undefined, chain.expiry)} />
         </div>
       )}
 

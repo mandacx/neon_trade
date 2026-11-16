@@ -7,6 +7,13 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-11-16 (contract chart) — Clicking a strike did nothing for stocks without price levels
+
+- **Symptom (user):** on stocks that are not tracked (no levels), clicking a strike in the Option Chain tab did not open the option contract chart.
+- **Cause (code read, not reproduced in a browser):** `StockAnalysis` rendered `OptionContractModal` only when its own `selectedExpiry` was set. Symbols without levels have no expiries on the page, so that state stays `''` (the Option Chain tab lists their expiries itself via `/chain-expiries` and keeps the pick in its own `localExpiry`). The chain and Strategy Builder callbacks `(strike, optType, occRoot)` also did not pass an expiry, so the modal never mounted. Tracked stocks worked because the page expiry exists. The Open Interest tab already passed its expiry.
+- **Changed:** `components/stock/tabs/OptionChainTab.tsx` (`onOpenContract` takes a 4th argument, the chain's `expiry`, passed by both chain tables), `components/stock/StockAnalysis.tsx` (the chain and builder handlers store it; the modal renders when `selectedOptContract.expiry ?? selectedExpiry` is set and uses that expiry).
+- **Verified:** `npx tsc --noEmit`; on a dev server (anonymous) the modal's data routes work for a symbol with no levels (F, not confirmed absent from `us_symbols`): `/option-bars` returned daily bars for `F261218C00012000`, `/opt-chain` returned `rows: []` (our change report has no history for it, which the modal handles as 0 snapshots). **Not verified:** the click itself in a browser (needs a Pro session), so the fix is code-reasoned, not observed.
+
 ## 2026-11-16 (OI tracker) — "Only" option for SPX · NDX · SPY · QQQ
 
 - **Why (user request):** the filter had Excluded / Included; add a third state that shows only those four underlyings.
