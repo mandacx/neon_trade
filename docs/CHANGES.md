@@ -15,6 +15,8 @@ anything not tested as *unverified*.
 - **Not verified:** `scripts/create-level-requests.mjs` has not been run (the new table does not exist until it is: the admin page shows an error and the badge stays 0 until then); no route, page or button was exercised in a browser or against the DB; whether the loader tolerates the symbols and strike sizes the app writes; `npm run build`.
 - **Follow-ups:** show users their request status; optional strike-size auto-detect from the chain; the search dropdown has no request button.
 
+**Addendum 2026-11-16:** `scripts/create-level-requests.mjs` was run against the live DB with the user's approval. `nt_level_requests` already existed (the script's pre-check printed `exists: true`), so the run only re-asserted `IF NOT EXISTS` for the table and its two indexes; the 9 columns match the script. Still not exercised: a real request / approve / remove through the app.
+
 ## 2026-11-15 — DB: `nt_us_stocks_rw` granted on `public.us_symbols`
 
 - **Why (user request):** the user created `public.us_symbols` and asked for the external loader role to have read/write access.
