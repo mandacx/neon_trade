@@ -11,7 +11,7 @@
 import 'server-only';
 import { sendNotification, setVapidDetails } from 'web-push';
 import { sql } from '@/lib/db';
-import { sendEmail, emailConfigured } from '@/lib/email';
+import { sendEmailBatch, emailConfigured, type SendEmailInput } from '@/lib/email';
 import { listUnsubscribeHeaders } from '@/lib/emailFormat';
 import { ideaUnsubscribeLinks, unsubscribeConfigured } from '@/lib/ideaUnsubscribe';
 import { IDEA_SENDER_NAME } from '@/lib/site';
@@ -158,16 +158,19 @@ async function deliverEmail(deadline: number): Promise<ChannelResult> {
   const ideas = await loadIdeas(cands);
   const today = etDateOf(Date.now());
   if (cands.length && !unsubscribeConfigured()) console.warn('[ideas] IDEA_UNSUB_SECRET not set: emails go out without an unsubscribe link');
+  // Claim every row first, then send in batches of up to 100 (one message per user: own unsubscribe link, no shared To/BCC).
+  const claimed: { id: string; input: SendEmailInput }[] = [];
   for (const c of cands) {
     if (Date.now() > deadline) break;
     const id = await claim(c, 'email');
     if (!id || !c.email) { if (id) await finish(id, false, 'no email address'); continue; }
     const links = ideaUnsubscribeLinks(c.user_id); // null without the secret: no link, no headers
     const m = buildEmail(toInput(c, ideas, today), { unsubscribeUrl: links?.page ?? null });
-    const r = await sendEmail({ to: c.email, subject: m.subject, text: m.text, html: m.html, fromName: IDEA_SENDER_NAME, headers: listUnsubscribeHeaders(links?.oneClick) });
-    await finish(id, r.ok, r.ok ? null : r.error);
-    if (r.ok) out.sent++; else out.failed++;
+    claimed.push({ id, input: { to: c.email, subject: m.subject, text: m.text, html: m.html, fromName: IDEA_SENDER_NAME, headers: listUnsubscribeHeaders(links?.oneClick) } });
   }
+  const results = await sendEmailBatch(claimed.map(x => x.input));
+  await Promise.all(claimed.map((x, i) => finish(x.id, results[i].ok, results[i].ok ? null : (results[i] as { error: string }).error)));
+  for (const r of results) if (r.ok) out.sent++; else out.failed++;
   return out;
 }
 

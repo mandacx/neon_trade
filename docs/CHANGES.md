@@ -7,6 +7,14 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-11-15 (batch email) — Trade Ideas: alert emails sent through Resend's batch endpoint
+
+- **Why (user request):** asked about Resend Broadcasts / BCC. Decision: neither. Broadcasts need a synced contact segment and their own unsubscribe, and one shared BCC message would lose the per-user unsubscribe link and per-user delivery rows. Instead the same one-message-per-user emails go out via `POST /emails/batch` (up to 100 per call).
+- **Changed:** `lib/email.ts` (`sendEmailBatch`: chunks of 100; a 4xx rejects the batch before sending so the chunk is retried one by one with `sendEmail`; a timeout / 5xx / 429 marks the chunk failed and is never resent, since some may have gone out), `lib/ideaChannels.ts` (`deliverEmail` claims all `nt_idea_deliveries` rows, sends one batch, then records each result). Behaviour for recipients is unchanged.
+- **Verified:** `npx tsc --noEmit`; Resend docs (batch: 100 per call, per-email `headers`, response `{data:[{id}]}` in request order).
+- **Not verified:** a live batch send (custom List-Unsubscribe headers inside a batch are documented as a field but there is no example; run the next alert and check `nt_idea_deliveries` and the received headers). Resend's batch validation-error body and any partial-send mode are undocumented on the page I read, so the 4xx fallback treats a rejection as "nothing sent".
+- **Follow-ups:** with ~9 recipients this saves little; it matters as the plan user count grows.
+
 ## 2026-11-15 — Trade Ideas: optional, editable valid-until and a new enter-by date
 
 - **Why (user request):** the Valid until date should be editable and may be empty, and a second date should limit the entry. Decisions (asked): editable also after publish, via a logged update, only while the idea is open; an empty valid-until means the idea never expires on its own.
