@@ -247,6 +247,7 @@ export default function PublishPage() {
           <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-3">
             <h3 className="text-sm font-bold text-gray-900">Preview</h3>
             {preview.warnings.map(w => <div key={w} className="rounded-lg bg-amber-50 border border-amber-300 px-3 py-2 text-xs text-amber-900">{w}</div>)}
+            <div className="text-xs text-gray-800"><b>{preview.plan.symbol}</b> · {preview.company ?? 'company name not found'}</div>
             <div className="text-xs text-gray-600">Last close {preview.refPrice == null ? 'unavailable' : fmtPrice(preview.refPrice)} · reward : risk {preview.riskReward.blended?.toFixed(2)} : 1</div>
             <div>
               <div className={labelClass}>Who sees it</div>

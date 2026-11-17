@@ -7,6 +7,15 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-11-17 (idea alerts) — Company name in every alert; update emails carry the original idea with the updates at the end
+
+- **Request (interpreted, not confirmed):** "evaluate the symbol keyed in and include that in the notifications" was read as: resolve the typed symbol to its company/fund name, show it in the publish preview, and include it in the alerts. If more was meant (e.g. a live price in the alert), say so.
+- **What changed:** `lib/companyNames.ts` (new: name from `nt_us_universe`, then `securities`; none found = no name, never an error), `lib/ideaAlertModel.ts` (`AlertIdea.company` / `publishedOn`, `AlertInput.history`, `includesOriginal()`, `historyFromUpdates()`), `lib/ideaEmail.ts`, `lib/ideaMessages.ts` (Telegram identity line and push body carry the name; push line cap 80 → 100), `lib/ideaChannels.ts` (loads names, `published_on` and earlier `nt_idea_updates` per candidate), `lib/ideas.ts` (preview returns `company`; warns when the symbol has no name), `app/ideas/publish/page.tsx` (preview shows `SYMBOL · company`), `scripts/test-idea-alerts.mjs` (2 new tests; the old "entered email has no Why" assertion now covers outcome emails only).
+- **Email rule:** entered, desk note, stop moved and partial booked emails now show **the original idea first** (published date, planned levels table, why, option idea) and **the updates at the end** (earlier desk updates oldest first, the current one last, highlighted as "Latest"). Targets, all targets, stopped, expired, never triggered, closed early and cancelled keep their stand-alone layout. Entered was not on the user's exclusion list, so it is treated as an update.
+- **Design:** the plan comes from the immutable idea row at delivery time; history = earlier `nt_idea_updates` of the same idea with an id below this event's update id (closed/cancelled never precede an email). Telegram and push are unchanged apart from the company name (still short by design).
+- **Verified:** `npx tsc --noEmit` clean; `node scripts/test-idea-alerts.mjs` 31 passed; `npm run build` passed; vendor-name grep on `.next/static` empty; printed a sample stop-moved email as text. **Not verified:** the HTML in a real mail client, a real delivery (needs the cron and a published update), the name lookup against the live DB (the SQL was not executed), the publish preview in a browser.
+- **Follow-ups:** the name is looked up at send time, so a later rename in `securities` shows in new alerts only. Telegram/push could also carry the original idea if wanted.
+
 ## 2026-11-16 (contract chart) — Clicking a strike did nothing for stocks without price levels
 
 - **Symptom (user):** on stocks that are not tracked (no levels), clicking a strike in the Option Chain tab did not open the option contract chart.

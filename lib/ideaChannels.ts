@@ -17,7 +17,8 @@ import { ideaUnsubscribeLinks, unsubscribeConfigured } from '@/lib/ideaUnsubscri
 import { IDEA_SENDER_NAME } from '@/lib/site';
 import { isPermanentTelegramError, sendTelegramMessage } from '@/lib/telegram';
 import { etDateOf } from '@/lib/marketSession';
-import { alertKind, parseFacts, toAlertIdea, type AlertIdea, type AlertInput } from '@/lib/ideaAlertModel';
+import { alertKind, historyFromUpdates, includesOriginal, parseFacts, toAlertIdea, type AlertIdea, type AlertInput } from '@/lib/ideaAlertModel';
+import { companyNames } from '@/lib/companyNames';
 import { buildEmail } from '@/lib/ideaEmail';
 import { buildPush, buildTelegram, pushUrgency } from '@/lib/ideaMessages';
 
@@ -87,18 +88,46 @@ async function loadIdeas(cands: Candidate[]): Promise<Map<number, AlertIdea>> {
   if (!ids.length) return out;
   const rows = await sql(
     `SELECT id, symbol, direction, horizon, title, rationale, entry_low::float8 AS entry_low, entry_high::float8 AS entry_high,
-       stop::float8 AS stop, targets, valid_until::text AS valid_until, entry_by::text AS entry_by, risk_rating, option_strategy
+       stop::float8 AS stop, targets, valid_until::text AS valid_until, entry_by::text AS entry_by, risk_rating, option_strategy,
+       published_on::text AS published_on
      FROM public.nt_trade_ideas WHERE id = ANY($1::bigint[])`,
     [ids],
   );
-  for (const r of rows as any[]) { const idea = toAlertIdea(r); if (idea) out.set(Number(r.id), idea); }
+  const names = await companyNames((rows as any[]).map(r => String(r.symbol ?? '')));
+  for (const r of rows as any[]) {
+    const idea = toAlertIdea({ ...r, company: names.get(String(r.symbol ?? '').toUpperCase()) ?? null });
+    if (idea) out.set(Number(r.id), idea);
+  }
   return out;
 }
 
-const toInput = (c: Candidate, ideas: Map<number, AlertIdea>, today: string): AlertInput => ({
-  eventId: c.event_id, ideaId: c.idea_id, eventType: c.event_type, eventKey: c.event_key, summary: c.summary,
-  idea: ideas.get(Number(c.idea_id)) ?? null, facts: parseFacts(c.payload), today,
-});
+/** Earlier desk updates per idea (oldest first), only for the candidates whose email carries the original idea and the updates. */
+type UpdateRow = { id: string; idea_id: string; update_type: string; body: string | null; payload: unknown; effective_on: string | null };
+async function loadUpdates(cands: Candidate[]): Promise<Map<number, UpdateRow[]>> {
+  const ids = [...new Set(cands.filter(c => includesOriginal(alertKind(c.event_type, c.event_key))).map(c => Number(c.idea_id)).filter(n => Number.isSafeInteger(n)))];
+  const out = new Map<number, UpdateRow[]>();
+  if (!ids.length) return out;
+  try {
+    const rows = await sql(
+      `SELECT id::text AS id, idea_id::text AS idea_id, update_type, body, payload, effective_on::text AS effective_on
+       FROM public.nt_idea_updates WHERE idea_id = ANY($1::bigint[]) ORDER BY created_at, id`,
+      [ids],
+    );
+    for (const r of rows as unknown as UpdateRow[]) { const k = Number(r.idea_id); out.set(k, [...(out.get(k) ?? []), r]); }
+  } catch (e) { console.warn('[ideas] update history unavailable:', e instanceof Error ? e.message : e); }
+  return out;
+}
+
+const toInput = (c: Candidate, ideas: Map<number, AlertIdea>, today: string, updates?: Map<number, UpdateRow[]>): AlertInput => {
+  // An update event's key is `update:<updateId>`: the history is every earlier update of the same idea.
+  const m = /^update:(\d+)$/.exec(c.event_key);
+  const prior = updates?.get(Number(c.idea_id))?.filter(u => (m ? BigInt(u.id) < BigInt(m[1]) : true)) ?? [];
+  return {
+    eventId: c.event_id, ideaId: c.idea_id, eventType: c.event_type, eventKey: c.event_key, summary: c.summary,
+    idea: ideas.get(Number(c.idea_id)) ?? null, facts: parseFacts(c.payload), today,
+    history: m || alertKind(c.event_type, c.event_key) === 'triggered' ? historyFromUpdates(prior) : [],
+  };
+};
 
 async function candidates(channel: Channel): Promise<Candidate[]> {
   // The column name comes from a fixed map, never from input.
@@ -156,6 +185,7 @@ async function deliverEmail(deadline: number): Promise<ChannelResult> {
   const cands = await candidates('email');
   out.candidates = cands.length;
   const ideas = await loadIdeas(cands);
+  const updates = await loadUpdates(cands);
   const today = etDateOf(Date.now());
   if (cands.length && !unsubscribeConfigured()) console.warn('[ideas] IDEA_UNSUB_SECRET not set: emails go out without an unsubscribe link');
   // Claim every row first, then send in batches of up to 100 (one message per user: own unsubscribe link, no shared To/BCC).
@@ -165,7 +195,7 @@ async function deliverEmail(deadline: number): Promise<ChannelResult> {
     const id = await claim(c, 'email');
     if (!id || !c.email) { if (id) await finish(id, false, 'no email address'); continue; }
     const links = ideaUnsubscribeLinks(c.user_id); // null without the secret: no link, no headers
-    const m = buildEmail(toInput(c, ideas, today), { unsubscribeUrl: links?.page ?? null });
+    const m = buildEmail(toInput(c, ideas, today, updates), { unsubscribeUrl: links?.page ?? null });
     claimed.push({ id, input: { to: c.email, subject: m.subject, text: m.text, html: m.html, fromName: IDEA_SENDER_NAME, headers: listUnsubscribeHeaders(links?.oneClick) } });
   }
   const results = await sendEmailBatch(claimed.map(x => x.input));

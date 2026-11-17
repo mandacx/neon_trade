@@ -73,6 +73,7 @@ export function buildTelegram(input: AlertInput): BuiltTelegram {
       both(clampWords(input.summary, 600));
     } else {
       H.push(`${meta.tgGlyph} <b>${escapeHtml(idea.symbol)} . ${escapeHtml(headline)}</b>`); P.push(`${meta.tgGlyph} ${idea.symbol} . ${headline}`);
+      if (idea.company) both(clampWords(idea.company, 80));
       both([sideLabel(idea), ...identityParts(idea)].join(' . '));
       if (idea.title.trim()) { const t = clampWords(idea.title, 120); H.push(`<i>${escapeHtml(t)}</i>`); P.push(t); }
       blank();
@@ -126,7 +127,7 @@ export const IDEA_ALERT_BADGE = '/idea-alert-badge.svg';
 export interface PushPayload { title: string; body: string; url: string; tag: string; icon: string; badge: string }
 
 const PUSH_TITLE_MAX = 60;
-const PUSH_LINE_MAX = 80;
+const PUSH_LINE_MAX = 100;
 
 /** Web push payload: kept short (push services cap the encrypted body near 4 KB). One tag per event, so T2 never replaces T1. */
 export function buildPush(input: AlertInput): PushPayload {
@@ -142,6 +143,7 @@ export function buildPush(input: AlertInput): PushPayload {
   } else {
     title = kind === 'published' ? `New idea: ${idea.symbol} ${sideWord(idea)}` : `${idea.symbol} ${sideWord(idea)}: ${eventPhrase(kind, input.facts, label)}`;
     line = pushLine(kind, idea, input.facts, label);
+    if (idea.company) line = `${clampWords(oneLine(idea.company), 22)} . ${line}`;
   }
   const idPart = String(input.ideaId ?? 'new').replace(/[^A-Za-z0-9_-]/g, '-');
   const evPart = String(input.eventId ?? input.eventKey).replace(/[^A-Za-z0-9_-]/g, '-');

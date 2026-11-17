@@ -35,7 +35,14 @@ export interface AlertIdea {
   entryBy?: string | null;
   riskRating: string;
   optionStrategyName: string | null;
+  /** Company / fund name resolved from the symbol (display only; absent when the symbol is not in our name tables). */
+  company?: string | null;
+  /** US/Eastern date the idea was published (the "original idea" block shows it). */
+  publishedOn?: string | null;
 }
+
+/** One earlier desk update of the same idea, shown above the current one in an update email. */
+export interface AlertHistoryItem { kind: AlertKind; date: string | null; text: string }
 
 /** Facts of ONE event, written once into `nt_idea_events.payload` (version 1). Everything but `v` is optional. */
 export interface AlertFacts {
@@ -60,6 +67,8 @@ export interface AlertInput {
   summary: string;
   idea: AlertIdea | null;
   facts: AlertFacts | null;
+  /** Earlier desk updates of this idea (oldest first), for the update email. Absent = none. */
+  history?: AlertHistoryItem[];
   /** US/Eastern YYYY-MM-DD, used only to decide whether a date shows its year. */
   today: string;
 }
@@ -99,6 +108,13 @@ export function alertKind(eventType: string, eventKey: string): AlertKind {
   if (eventType === 'target_hit') return eventKey === 'all_targets' ? 'all_targets' : 'target';
   return ONE_TO_ONE[eventType] ?? 'unknown';
 }
+
+/**
+ * Emails of these kinds carry the ORIGINAL idea (plan, rationale, option idea) first and the update(s) at the end.
+ * Not the terminal outcomes (stopped, targets, expired, never triggered, closed, cancelled): those stand on their own.
+ */
+const WITH_ORIGINAL: ReadonlySet<AlertKind> = new Set<AlertKind>(['triggered', 'note', 'stop_moved', 'partial_booked']);
+export const includesOriginal = (kind: AlertKind): boolean => WITH_ORIGINAL.has(kind);
 
 /** The designer's summary-only layout: used when the event has no facts (recorded before the column) or no plan, or is unknown. */
 export const isFallback = (i: AlertInput): boolean => i.facts == null || i.idea == null || alertKind(i.eventType, i.eventKey) === 'unknown';
@@ -258,7 +274,41 @@ export function toAlertIdea(row: any): AlertIdea | null {
     entryLow, entryHigh, stop, targets, validUntil: typeof vu === 'string' && YMD.test(vu.slice(0, 10)) ? vu.slice(0, 10) : null,
     entryBy: typeof eb === 'string' && YMD.test(eb.slice(0, 10)) ? eb.slice(0, 10) : null,
     riskRating: String(row.risk_rating ?? row.riskRating ?? 'medium'), optionStrategyName: optName,
+    company: typeof row.company === 'string' && row.company.trim() ? clampWords(row.company, 80) : null,
+    publishedOn: typeof (row.published_on ?? row.publishedOn) === 'string' && YMD.test(String(row.published_on ?? row.publishedOn).slice(0, 10)) ? String(row.published_on ?? row.publishedOn).slice(0, 10) : null,
   };
+}
+
+/** Earlier `nt_idea_updates` rows (oldest first, snake_case columns) to the history shown in an update email. Newest 5 kept. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function historyFromUpdates(rows: any[]): AlertHistoryItem[] {
+  const out: AlertHistoryItem[] = [];
+  for (const r of rows ?? []) {
+    const type = String(r?.update_type ?? '');
+    let p: any = r?.payload;
+    if (typeof p === 'string') { try { p = JSON.parse(p); } catch { p = {}; } }
+    p = p && typeof p === 'object' ? p : {};
+    const body = typeof r?.body === 'string' ? r.body.trim() : '';
+    const bits: string[] = [];
+    let kind: AlertKind;
+    if (type === 'stop_moved') { kind = 'stop_moved'; const s = fmtPrice(p.stop); bits.push(s ? `Stop moved to ${s}.` : 'Stop moved.'); }
+    else if (type === 'partial_booked') {
+      kind = 'partial_booked'; const pct = fmtPct(p.pct); const px = fmtPrice(p.price);
+      bits.push(pct ? `Booked ${pct} of the position${px ? ` at ${px}` : ''}.` : px ? `Booked part of the position at ${px}.` : 'Booked part of the position.');
+    } else if (type === 'dates_changed') {
+      kind = 'note';
+      const vu = p.validUntil; const eb = p.entryBy;
+      if (vu && typeof vu === 'object') bits.push(vu.to ? `Valid until ${vu.from ? `changed from ${vu.from} to` : 'set to'} ${vu.to}.` : 'Valid until removed.');
+      if (eb && typeof eb === 'object') bits.push(eb.to ? `Enter by ${eb.from ? `changed from ${eb.from} to` : 'set to'} ${eb.to}.` : 'Enter by removed.');
+      if (!bits.length) bits.push('Dates changed.');
+    } else if (type === 'note') { kind = 'note'; }
+    else continue; // closed / cancelled end the idea; nothing later is mailed with history
+    if (body) bits.push(body);
+    const text = bits.join(' ').trim();
+    if (!text) continue;
+    out.push({ kind, date: typeof r?.effective_on === 'string' && YMD.test(r.effective_on) ? r.effective_on : null, text: clampWords(text, 300, '...', true) });
+  }
+  return out.slice(-5);
 }
 
 // ---------------------------------------------------------------------------------------------------

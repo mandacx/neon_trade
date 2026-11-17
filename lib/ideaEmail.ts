@@ -5,7 +5,7 @@
  */
 import {
   ALERT_META, MANAGE_ALERTS_URL, alertKind, clampWords, escapeHtml, eventPhrase, fmtRange, footnoteOf, headlineOf, headlineR,
-  identityParts, ideaLink, isFallback, levelRows, oneLine, planStrip, preheaderOf, resultLine, sideWord, statusWord,
+  fmtDate, identityParts, ideaLink, includesOriginal, isFallback, levelRows, oneLine, planStrip, preheaderOf, resultLine, sideWord, statusWord,
   targetLabelOf, whatHappened,
   type AlertInput, type AlertKind, type AlertTone, type LevelRow,
 } from './ideaAlertModel.ts';
@@ -92,7 +92,13 @@ export function buildEmail(input: AlertInput, opts: EmailOptions = {}): BuiltEma
 
   // ---- shared pieces ----
   const sentence = fallback || !idea ? clampWords(input.summary, 600) : whatHappened(kind, idea, facts, input.today, label);
-  const rows = !fallback && idea && kind !== 'note' && kind !== 'cancelled' ? levelRows(kind, idea, facts, input.today, label) : [];
+  // Update emails (entered, note, stop moved, partial booked) carry the original idea first and the update(s) at the end;
+  // the outcome emails (targets, stop, expired, never triggered, closed, cancelled) stand on their own.
+  const orig = !fallback && !!idea && includesOriginal(kind);
+  const origRows = orig && idea ? levelRows('published', idea, null, input.today) : [];
+  const history = orig ? (input.history ?? []) : [];
+  const publishedTxt = orig && idea ? fmtDate(idea.publishedOn, input.today) : null;
+  const rows = !fallback && idea && !orig && kind !== 'note' && kind !== 'cancelled' ? levelRows(kind, idea, facts, input.today, label) : [];
   const result = !fallback && idea ? resultLine(kind, idea, facts, label) : null;
   const footnote = !fallback ? footnoteOf(kind) : null;
   const note = !fallback && facts?.note && ['note', 'stop_moved', 'partial_booked', 'closed', 'cancelled'].includes(kind) ? clampWords(facts.note, 600, '...', true) : null;
@@ -103,26 +109,40 @@ export function buildEmail(input: AlertInput, opts: EmailOptions = {}): BuiltEma
   if (fallback || !idea) {
     t.push(`${headline.toUpperCase()}`, '', sentence);
   } else {
-    t.push(`${headline.toUpperCase()}  |  ${idea.symbol}  ${sideWord(idea).toUpperCase()}`, identityParts(idea).join(' . '));
+    t.push(`${headline.toUpperCase()}  |  ${idea.symbol}  ${sideWord(idea).toUpperCase()}`);
+    if (idea.company) t.push(clampWords(idea.company, 80));
+    t.push(identityParts(idea).join(' . '));
     if (idea.title.trim()) t.push(clampWords(idea.title, 140));
-    t.push('', sentence);
-    if (result) t.push(result);
-    if (note) t.push('', note);
-    if (kind === 'note' && !rows.length) t.push('', planStrip(idea));
-    if (rows.length) {
-      const w = Math.max(...rows.map(r => r.label.length));
-      const vw = Math.max(...rows.map(r => r.value.length));
-      t.push('', 'LEVELS');
-      for (const r of rows) {
+    const rowsText = (rs: LevelRow[], head: string) => {
+      const w = Math.max(...rs.map(r => r.label.length));
+      const vw = Math.max(...rs.map(r => r.value.length));
+      t.push('', head);
+      for (const r of rs) {
         const st = r.status ? (r.status === 'hit' ? `HIT${r.date ? ` (${r.date})` : ''}` : r.status === 'entered' ? `Entered${r.date ? ` (${r.date})` : ''}` : statusWord(r.status)) : '';
         t.push(`${r.label.padEnd(w)}  ${(r.rNote || st ? r.value.padEnd(vw) : r.value)}${r.rNote ? `  ${r.rNote}` : ''}${st ? `  ${st}` : ''}`.trimEnd());
         if (r.sub) t.push(`${' '.repeat(w)}  ${r.sub}`);
       }
-    }
-    if (footnote) t.push('', footnote);
-    if (kind === 'published') {
-      if (idea.rationale.trim()) t.push('', `Why: ${clampWords(idea.rationale, 240)}`);
+    };
+    if (orig) {
+      t.push('', `THE ORIGINAL IDEA${publishedTxt ? ` (published ${publishedTxt})` : ''}`);
+      if (origRows.length) rowsText(origRows, 'PLAN');
+      if (idea.rationale.trim()) t.push('', `Why: ${clampWords(idea.rationale, 600, '...', true)}`);
       if (idea.optionStrategyName) t.push(`Option idea: ${idea.optionStrategyName}`);
+      t.push('', history.length || kind !== 'triggered' ? 'UPDATES' : 'UPDATE', '----------------------------------------');
+      for (const h of history) { const d = fmtDate(h.date, input.today); t.push(`${d ? `${d}: ` : ''}${h.text}`, ''); }
+      t.push(`${history.length ? 'LATEST: ' : ''}${sentence}`);
+      if (note) t.push('', note);
+    } else {
+      t.push('', sentence);
+      if (result) t.push(result);
+      if (note) t.push('', note);
+      if (kind === 'note' && !rows.length) t.push('', planStrip(idea));
+      if (rows.length) rowsText(rows, 'LEVELS');
+      if (footnote) t.push('', footnote);
+      if (kind === 'published') {
+        if (idea.rationale.trim()) t.push('', `Why: ${clampWords(idea.rationale, 240)}`);
+        if (idea.optionStrategyName) t.push(`Option idea: ${idea.optionStrategyName}`);
+      }
     }
   }
   t.push('', `${buttonText}: ${link}`, '', '----------------------------------------', disclaimerText(), '', '----------------------------------------',
@@ -142,9 +162,26 @@ export function buildEmail(input: AlertInput, opts: EmailOptions = {}): BuiltEma
   const idHtml = fallback || !idea ? '' : cell(INK.card, `padding:20px 24px 0 24px;color:${INK.primary};`,
     `<span style="font-size:28px;line-height:34px;font-weight:700;color:${INK.primary}">${escapeHtml(idea.symbol)}</span> `
     + `<span style="display:inline-block;vertical-align:middle;background-color:${idea.direction === 'short' ? FILL.red : FILL.green};color:${INK.white};font-size:12px;line-height:16px;font-weight:700;letter-spacing:0.5px;padding:3px 8px;border-radius:4px"><span aria-hidden="true">${idea.direction === 'short' ? '&#9660;' : '&#9650;'}</span> ${idea.direction === 'short' ? 'SHORT' : 'LONG'}</span>${chip ? ` &nbsp;${chip}` : ''}`
+    + (idea.company ? `<div style="font-size:14px;line-height:20px;color:${INK.body};padding-top:2px">${escapeHtml(clampWords(idea.company, 80, '…'))}</div>` : '')
     + `<div style="font-size:13px;line-height:20px;color:${INK.secondary};padding-top:4px">${identityParts(idea).map(escapeHtml).join(' &middot; ')}</div>`
     + (idea.title.trim() ? `<div style="font-size:16px;line-height:22px;color:${INK.primary};padding-top:6px">${escapeHtml(clampWords(idea.title, 140, '…'))}</div>` : ''), 'align="left"');
   const bodyParts: string[] = [];
+  const sectionHead = (txt: string, color: string = INK.secondary, top = 0) =>
+    `<div style="margin:${top}px 0 8px 0;${FONT}font-size:12px;line-height:16px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:${color}">${escapeHtml(txt)}</div>`;
+  if (orig && idea) {
+    // The original message first, then every update, the newest last (highlighted).
+    bodyParts.push(sectionHead(`The original idea${publishedTxt ? ` (published ${publishedTxt})` : ''}`));
+    if (origRows.length) bodyParts.push(levelsTableHtml(origRows, 'blue'));
+    if (idea.rationale.trim()) bodyParts.push(`<p style="margin:14px 0 0 0;${FONT}font-size:14px;line-height:21px;color:${INK.footnote}"><strong>Why:</strong> ${escapeHtml(clampWords(idea.rationale, 600, '…', true))}</p>`);
+    if (idea.optionStrategyName) bodyParts.push(`<p style="margin:8px 0 0 0;${FONT}font-size:14px;line-height:21px;color:${INK.footnote}"><strong>Option idea:</strong> ${escapeHtml(idea.optionStrategyName)}</p>`);
+    bodyParts.push(`<div style="margin:22px 0 0 0;border-top:1px solid ${INK.border};font-size:0;line-height:0">&nbsp;</div>`);
+    bodyParts.push(sectionHead(history.length || kind !== 'triggered' ? 'Updates' : 'Update', FILL[tone], 12));
+    for (const h of history) {
+      const d = fmtDate(h.date, input.today);
+      bodyParts.push(`<div style="margin:0 0 10px 0;border-left:3px solid ${INK.border};padding:2px 0 2px 12px;${FONT}font-size:14px;line-height:21px;color:${INK.secondary};white-space:pre-line">${d ? `<strong>${escapeHtml(d)}</strong> &middot; ` : ''}${escapeHtml(h.text)}</div>`);
+    }
+    bodyParts.push(`<div style="margin:0;border-left:4px solid ${FILL[tone]};background-color:${TINT[tone]};padding:10px 14px;${FONT}font-size:15px;line-height:22px;color:${INK.body}">${history.length ? `<div style="font-size:12px;line-height:16px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;color:${FILL[tone]};padding-bottom:4px">Latest</div>` : ''}${escapeHtml(sentence)}${noteHtml ? `<div style="padding-top:8px;white-space:pre-line">${escapeHtml(noteHtml)}</div>` : ''}</div>`);
+  } else {
   bodyParts.push(`<p style="margin:0 0 14px 0;${FONT}font-size:15px;line-height:22px;color:${INK.body}">${escapeHtml(sentence)}</p>`);
   if (rows.length) bodyParts.push(levelsTableHtml(rows, tone));
   if (result) bodyParts.push(`<p style="margin:12px 0 0 0;${FONT}font-size:14px;line-height:20px;font-weight:700;color:${INK.primary}">${escapeHtml(result)}</p>`);
@@ -156,6 +193,7 @@ export function buildEmail(input: AlertInput, opts: EmailOptions = {}): BuiltEma
     // becomes per-reader, this block must follow it.
     if (idea.rationale.trim()) bodyParts.push(`<p style="margin:14px 0 0 0;${FONT}font-size:14px;line-height:21px;color:${INK.footnote}"><strong>Why:</strong> ${escapeHtml(clampWords(idea.rationale, 240, '…'))}</p>`);
     if (idea.optionStrategyName) bodyParts.push(`<p style="margin:8px 0 0 0;${FONT}font-size:14px;line-height:21px;color:${INK.footnote}"><strong>Option idea:</strong> ${escapeHtml(idea.optionStrategyName)}</p>`);
+  }
   }
   const safeLink = escapeHtml(link);
   const cta = `<table role="presentation" align="center" cellpadding="0" cellspacing="0" border="0" style="margin:22px auto 0 auto"><tr><td align="center" bgcolor="${INK.cta}" style="background-color:${INK.cta};border-radius:8px"><a href="${safeLink}" style="display:block;padding:14px 28px;${FONT}font-size:16px;line-height:20px;font-weight:700;color:${INK.white};text-decoration:none">${buttonText}</a></td></tr></table>`

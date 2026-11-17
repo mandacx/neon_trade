@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import { scoreIdea } from '../lib/ideaScoring.ts';
 import { riskReward } from '../lib/ideaTypes.ts';
 import {
-  alertKind, allTargetsFacts, clampWords, escapeHtml, fmtDate, fmtPrice, fmtR, fmtRange, ideaLink, parseFacts, scoreEventFacts, toAlertIdea,
+  alertKind, allTargetsFacts, clampWords, escapeHtml, fmtDate, fmtPrice, fmtR, fmtRange, ideaLink, historyFromUpdates, parseFacts, scoreEventFacts, toAlertIdea,
 } from '../lib/ideaAlertModel.ts';
 import { buildEmail, EMAIL_PALETTE, FOOTER_FALLBACK, FOOTER_SCOPE, FOOTER_WHY, UNSUB_LINK_TEXT } from '../lib/ideaEmail.ts';
 import { buildPush, buildTelegram, pushUrgency } from '../lib/ideaMessages.ts';
@@ -271,8 +271,13 @@ t('email html structure: layout tables, th scope, aria-hidden glyphs, fixed ligh
   assert.ok(e.html.includes('aria-hidden="true"'));
   assert.ok(!/<img\b|<script|url\(|@import|<link\b/i.test(e.html), 'no images or remote assets');
   assert.ok(e.html.includes('View the full plan') && e.html.includes('Option idea:') && e.html.includes('Bull call spread') && e.html.includes('Why:'));
-  const other = buildEmail(ALL.find(a => a.name === 'triggered long').input);
-  assert.ok(other.html.includes('View idea') && !other.html.includes('Option idea:') && !other.html.includes('Why:'));
+  // Outcome emails stand alone (no original idea); entered / update emails carry it (2026-11-17).
+  for (const n of ALL.map(a => a.name).filter(n => /^(target|all_targets|stopped|expired|not_triggered|closed|cancelled)/.test(n))) {
+    const o = buildEmail(ALL.find(a => a.name === n).input);
+    assert.ok(o.html.includes('View idea') && !o.html.includes('Option idea:') && !o.html.includes('Why:') && !o.html.includes('The original idea'), n);
+  }
+  const trig = buildEmail(ALL.find(a => a.name === 'triggered long').input);
+  assert.ok(trig.html.includes('The original idea') && trig.html.includes('Why:') && trig.text.includes('THE ORIGINAL IDEA'));
   assert.ok(e.html.includes('+1.14R') && e.html.includes('+2.57R') && e.html.includes('Dec 12'));
   const tg = buildTelegram(ALL.find(a => a.name === 'published long').input);
   assert.ok(/<pre>[\s\S]*Entry\s+100\.00 - 102\.00[\s\S]*<\/pre>/.test(tg.html));
@@ -461,6 +466,37 @@ t('email <style> block has balanced braces (every @media and rule is closed)', (
     assert.equal(depth, 0, `unclosed block in the email <style>: ${css}`);
     assert.equal(minDepth, 0, 'no stray closing brace');
   }
+});
+
+// --- 2026-11-17: company name, original idea + updates at the end ---------------------------------------
+t('company name shows in email, Telegram and push; absent name drops cleanly', () => {
+  const withCo = toAlertIdea({ ...LONG_ROW, company: 'Apple Inc.', published_on: '2026-11-02' });
+  assert.equal(withCo.company, 'Apple Inc.');
+  const inp = mk(withCo, 'triggered', 'triggered', { v: 1, date: D, price: 102 });
+  assert.ok(buildEmail(inp).html.includes('Apple Inc.') && buildEmail(inp).text.includes('Apple Inc.'));
+  assert.ok(buildTelegram(inp).html.includes('Apple Inc.'));
+  assert.ok(buildPush(inp).body.includes('Apple Inc.'));
+  const none = buildEmail(mk(LONG, 'triggered', 'triggered', { v: 1 }));
+  assert.ok(!/null|undefined/.test(none.text));
+});
+t('update email: original idea first, earlier updates, newest update last; outcome emails unchanged', () => {
+  const idea = toAlertIdea({ ...LONG_ROW, company: 'Apple Inc.', published_on: '2026-11-02' });
+  const history = historyFromUpdates([
+    { update_type: 'note', body: 'First note.', payload: {}, effective_on: '2026-11-05' },
+    { update_type: 'stop_moved', body: '', payload: { stop: 100 }, effective_on: '2026-11-06' },
+    { update_type: 'closed', body: 'ignored', payload: {}, effective_on: '2026-11-07' },
+  ]);
+  assert.equal(history.length, 2);
+  for (const [type, facts] of [['note', { v: 1, note: 'Latest note text.' }], ['stop_moved', { v: 1, newStop: 102 }], ['partial_booked', { v: 1, pct: 50, price: 110 }]]) {
+    const e = buildEmail(mk(idea, type, 'update:9', facts, { history }));
+    for (const body of [e.text, e.html]) {
+      const o = body.toLowerCase().indexOf('the original idea'); const u = body.indexOf('First note.'); const l = body.lastIndexOf(type === 'note' ? 'Latest note text.' : type === 'stop_moved' ? '102' : '50%');
+      assert.ok(o >= 0 && u > o && l > u, `${type}: original < earlier update < latest`);
+    }
+    assert.ok(e.html.includes('Published') || e.html.includes('published Nov 2'));
+  }
+  const closed = buildEmail(mk(idea, 'closed', 'update:9', { v: 1, note: 'Out.' }, { history }));
+  assert.ok(!closed.html.includes('The original idea') && !closed.html.includes('First note.'));
 });
 
 console.log(`ok: ${passed} idea-alert tests passed`);

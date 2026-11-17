@@ -24,6 +24,7 @@ import { computeStats, breakdownBy, type StatRow } from '@/lib/ideaStats';
 import { IDEA_DISCLAIMER, DISCLAIMER_VERSION } from '@/lib/ideaDisclaimer';
 import { allTargetsFacts, scoreEventFacts, toAlertIdea, type AlertFacts, type AlertInput } from '@/lib/ideaAlertModel';
 import { buildEmail } from '@/lib/ideaEmail';
+import { companyName } from '@/lib/companyNames';
 import { buildPush, buildTelegram } from '@/lib/ideaMessages';
 import type { LiveOfficial, LivePlan } from '@/lib/ideaLiveMath';
 import { etDateOf, etInstantMs } from '@/lib/marketSession';
@@ -358,6 +359,8 @@ export interface IdeaPreview {
   plan: IdeaPlanInput;
   riskReward: ReturnType<typeof riskReward>;
   refPrice: number | null;
+  /** Company / fund name resolved from the symbol (null when unknown); alerts show it next to the ticker. */
+  company: string | null;
   warnings: string[];
   tiers: PreviewTier[];
   /** Exactly what the alert on publish will say. */
@@ -374,8 +377,9 @@ export async function previewIdea(access: IdeaAccess, raw: unknown): Promise<Ide
   if (!v.ok) throw new IdeaError('Fix these before previewing', 422, v.errors);
   const plan = v.plan;
   const term = horizonTerm(plan.horizon);
-  const refPrice = await referencePrice(plan.symbol);
+  const [refPrice, company] = await Promise.all([referencePrice(plan.symbol), companyName(plan.symbol)]);
   const warnings: string[] = [];
+  if (company == null) warnings.push(`${plan.symbol} is not in our company-name list, so alerts will show the ticker only. Check the symbol.`);
   if (refPrice == null) warnings.push(`No price data was found for ${plan.symbol}; check the symbol. Publishing needs price data to track the idea.`);
   else {
     const mid = (plan.entryLow + plan.entryHigh) / 2;
@@ -398,14 +402,14 @@ export async function previewIdea(access: IdeaAccess, raw: unknown): Promise<Ide
     idea: toAlertIdea({
       symbol: plan.symbol, direction: plan.direction, horizon: plan.horizon, title: plan.title, rationale: plan.rationale,
       entry_low: plan.entryLow, entry_high: plan.entryHigh, stop: plan.stop, targets: plan.targets, valid_until: plan.validUntil,
-      risk_rating: plan.riskRating, option_strategy: plan.optionStrategy,
+      risk_rating: plan.riskRating, option_strategy: plan.optionStrategy, company,
     }),
   };
   const mail = buildEmail(alertInput, { unsubscribeUrl: `${SITE_URL}/unsubscribe?t=preview` });
   const push = buildPush(alertInput);
   const tg = buildTelegram(alertInput);
   return {
-    plan, riskReward: rr, refPrice, warnings, tiers,
+    plan, riskReward: rr, refPrice, company, warnings, tiers,
     alert: {
       subject: mail.subject, preheader: mail.preheader, summary, disclaimer: IDEA_DISCLAIMER,
       email: { text: mail.text, html: mail.html }, push: { title: push.title, body: push.body }, telegram: { text: tg.plain },
