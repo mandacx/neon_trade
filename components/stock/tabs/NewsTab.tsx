@@ -18,15 +18,32 @@ export function timeAgo(iso: string, now = Date.now()): string {
   return new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+/**
+ * Small picture on the left of a news row: the article's own image when the feed has one (or when it fails to load,
+ * a neutral newspaper tile, so every row has the same shape and the text column keeps the same width).
+ */
+export function NewsThumb({ url, size }: { url: string | null; size: 'sm' | 'md' }) {
+  const [failed, setFailed] = useState(false);
+  const box = size === 'md' ? 'w-16 h-12 sm:w-24 sm:h-16' : 'w-16 h-12';
+  if (url && !failed) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={url} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(true)} className={`${box} object-cover rounded-md bg-gray-100 shrink-0`} />;
+  }
+  return (
+    <div aria-hidden className={`${box} rounded-md bg-gradient-to-br from-slate-100 to-slate-200 text-slate-400 flex items-center justify-center shrink-0`}>
+      <svg viewBox="0 0 24 24" className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M5 4h11a2 2 0 0 1 2 2v13H7a2 2 0 0 1-2-2V4z" /><path d="M18 9h1a1 1 0 0 1 1 1v7a2 2 0 0 1-2 2" /><path d="M8 8h7M8 12h7M8 16h4" />
+      </svg>
+    </div>
+  );
+}
+
 function NewsCard({ item, current, now }: { item: NewsItem; current: string; now: number }) {
   const others = item.symbols.filter(s => s !== current);
   const body = item.excerpt ?? item.summary;
   return (
     <article className="flex gap-3 px-3 py-2 border-b border-gray-100 last:border-b-0">
-      {item.imageUrl && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={item.imageUrl} alt="" loading="lazy" referrerPolicy="no-referrer" className="hidden sm:block w-24 h-16 object-cover rounded-md bg-gray-100 shrink-0" />
-      )}
+      <NewsThumb url={item.imageUrl} size="md" />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-gray-500">
           {item.source && <span className="font-semibold capitalize text-gray-600">{item.source}</span>}

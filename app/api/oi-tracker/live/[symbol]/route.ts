@@ -8,7 +8,8 @@ import { toLive, topBySessionVolume, type LiveOption } from '@/lib/oiLive';
 
 export const dynamic = 'force-dynamic';
 
-const TOP = 200;
+// Rows sent to the table (it shows 200 and pages "Show more"). The chain read is capped at 6,000 contracts anyway.
+const TOP = 2000;
 // One load is 1–6 upstream requests of ≤1,000 contracts (measured 2026-10-28: KO 2, AAPL 4,
 // TSLA/SPY 6 with SPY at the 6-page cap; 0.3–1.6 s, 0.5–3.2 MB). Shared per symbol for 30 s.
 const CACHE_MS = 30_000;

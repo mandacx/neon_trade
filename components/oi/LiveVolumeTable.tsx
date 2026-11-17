@@ -21,6 +21,9 @@ const COLUMNS: Column<LiveOption>[] = [
     return o ? <span className="flex items-center gap-1.5"><ExpiryCell expiry={o.expiry} /><b>{fmtStrike(o.strike)}</b><TypeBadge t={o.optType} /></span> : r.contract;
   } },
   { key: 'vol', label: 'Volume', type: 'number', value: r => r.vol, render: r => <b>{(r.vol ?? 0).toLocaleString()}</b> },
+  // Premium traded in the session: last price x volume x 100 shares per contract (same convention as the OI tracker's $ columns).
+  { key: 'value', label: 'Value $', type: 'number', title: 'Last price x volume x 100 (premium traded in the session, at the last price)', value: r => (r.last != null && r.vol != null ? r.last * r.vol * 100 : null),
+    render: r => (r.last != null && r.vol != null ? <b>${Math.round(r.last * r.vol * 100).toLocaleString()}</b> : '—') },
   { key: 'prevVol', label: 'Prev vol', type: 'number', value: r => r.prevVol, render: r => (r.prevVol ?? 0).toLocaleString() },
   { key: 'x', label: 'Vol ×', type: 'number', value: r => (r.prevVol ? (r.vol ?? 0) / r.prevVol : null), render: r => (r.prevVol ? `${((r.vol ?? 0) / r.prevVol).toFixed(1)}×` : '—'), title: 'Latest session volume / the session before' },
   { key: 'last', label: 'Last', type: 'number', value: r => r.last, render: r => r.last?.toFixed(2) ?? '—' },
@@ -45,10 +48,11 @@ export default function LiveVolumeTable({ rows, count, session, stale = 0, onOpe
   onOpenContract?: (contract: string) => void;
 }) {
   return (
-    <DataTable tableId="oiStockLive" rows={rows} columns={COLUMNS} rowKey={r => r.contract} initialSort={{ key: 'vol', dir: 'desc' }} maxHeight="60vh"
+    <DataTable tableId="oiStockLive" rows={rows} columns={COLUMNS} rowKey={r => r.contract} initialSort={{ key: 'value', dir: 'desc' }} maxHeight="60vh"
       onRowClick={onOpenContract ? r => onOpenContract(r.contract) : undefined}
       csv={false} toolbar={<span className="text-[11px] text-gray-400" title={stale ? `${stale.toLocaleString()} contracts last traded in an earlier session and are not ranked` : undefined}>
         Top {rows.length} by volume in the {session ?? 'latest'} session, of {count.toLocaleString()} live contracts{stale ? ` (${stale.toLocaleString()} last traded earlier, not ranked)` : ''}
+        {' · '}total value ${Math.round(rows.reduce((t, r) => t + (r.last != null && r.vol != null ? r.last * r.vol * 100 : 0), 0)).toLocaleString()}
       </span>} />
   );
 }

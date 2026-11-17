@@ -7,6 +7,24 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-11-17 (live volume rows and value) — Up to 2,000 rows, new "Value $" column
+
+- **What changed:** `app/api/oi-tracker/live/[symbol]/route.ts` (`TOP` 200 -> 2000; the table already pages 200 at a time with "Show more", so the first paint is unchanged), `components/oi/LiveVolumeTable.tsx` (new **Value $** column = last price x volume x 100, sortable and filterable like the other number columns; the toolbar line also shows the total value of the listed contracts).
+- **Why 200 was the limit:** the route cut the ranked list at 200 (`TOP`). The chain read itself is capped at 6 pages of 1,000 contracts, so very large chains (SPY and similar) can still have contracts that are never read; that cap is unchanged.
+- **Assumption:** "ltp x volume" is shown with the 100-share multiplier (premium traded in dollars, same as the OI tracker's Chg OI $). Without it the number would be 100x smaller; say if you want the plain product.
+- **Default sort (same day, on request):** the table now opens sorted by **Value $**, highest first (was Volume). The server still picks the contracts by volume (top 2,000), so a high-value contract with very low volume outside that list would not appear.
+- **Scope:** the OI tracker's stock popup uses the same table but its own route, still top 100 (unchanged); it gets the new column and total.
+- **Verified:** `npx tsc --noEmit` and eslint clean. **Not verified:** in a browser, the payload size/latency at 2,000 rows (estimated, not measured), and which symbols hit the 6,000-contract read cap.
+
+---
+
+## 2026-11-17 (news pictures) — Picture on the left of every news row, with a fallback tile
+
+- **What changed:** `components/stock/tabs/NewsTab.tsx` (new exported `NewsThumb`: the article's own feed image on the left, or a neutral newspaper tile when the feed has none or the image fails to load; 64x48 on phones, 96x64 from `sm` up, so the row height is unchanged and the text keeps its width), `app/page.tsx` (landing card uses it, 64x48), `lib/news.ts` (prefers the feed's `small` image over `thumb`; the 96x64 slot looked soft with `thumb`). Before this, rows without an image had no picture and the stock tab hid it on phones.
+- **Verified:** `npx tsc --noEmit` and eslint clean. **Not verified:** in a browser; whether the `small` images load as expected for most articles (only checked in code).
+
+---
+
 ## 2026-11-17 (live volume columns) — Expiry, Strike and Type columns with filters on the Live volume table
 
 - **What changed:** `components/oi/LiveVolumeTable.tsx` only. Three new columns parsed from the OCC contract (`parseOcc`): **Expiry** (date from/to filter), **Strike** (min/max filter, accepts 1.5m style numbers) and **Type** (text filter: type `call` or `put`). The old combined **Contract** column stays but is now off by default (turn it on in ⚙ Columns); sorting, CSV export and the Columns menu work for the new ones like the rest.

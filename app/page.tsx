@@ -12,7 +12,7 @@ import { FEATURE_EARNINGS, hasFeature } from '@/lib/features';
 import { fmtShortDate, fmtNextDate, earningsTimeShort, daysUntilLabel } from '@/components/watchlists/watchlistShared';
 import type { EarningsBadge, EarningsEvent } from '@/types/earnings';
 import type { NewsItem } from '@/types/news';
-import { timeAgo, NEWS_POLL_MS } from '@/components/stock/tabs/NewsTab';
+import { timeAgo, NEWS_POLL_MS, NewsThumb } from '@/components/stock/tabs/NewsTab';
 import type { ExtendedQuote } from '@/lib/quote';
 import ExtendedMove from '@/components/ui/ExtendedMove';
 
@@ -418,11 +418,8 @@ export default function Home() {
               <div className="grid md:grid-cols-2 md:divide-x divide-gray-100">
                 {news.map(n => (
                   <article key={n.id} className="flex gap-3 px-4 py-2.5 border-b border-gray-100">
-                    {n.imageUrl && (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={n.imageUrl} alt="" loading="lazy" referrerPolicy="no-referrer" className="w-16 h-12 object-cover rounded bg-gray-100 shrink-0" />
-                    )}
-                    <div className="min-w-0">
+                    <NewsThumb url={n.imageUrl} size="sm" />
+                    <div className="min-w-0 flex-1">
                       <h3 className="text-[13px] font-semibold text-gray-900 leading-snug line-clamp-2">
                         {n.url ? <a href={n.url} target="_blank" rel="noopener noreferrer" className="hover:text-blue-700">{n.headline}</a> : n.headline}
                       </h3>

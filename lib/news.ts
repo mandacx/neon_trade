@@ -36,7 +36,7 @@ const excerptsOn = () => NEWS_EXCERPT_MAX > 0;
 
 function toItem(a: NewsArticleFull, withExcerpt: boolean): NewsItem {
   const ex = withExcerpt && a.content ? newsExcerpt(a.content, NEWS_EXCERPT_TARGET, NEWS_EXCERPT_MAX) : null;
-  const img = a.images.find(i => i.size === 'thumb') ?? a.images.find(i => i.size === 'small') ?? a.images[0];
+  const img = a.images.find(i => i.size === 'small') ?? a.images.find(i => i.size === 'thumb') ?? a.images[0];
   return {
     id: a.id,
     headline: plainText(a.headline),
