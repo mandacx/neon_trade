@@ -11,7 +11,12 @@ export interface LiveOption {
 }
 
 const COLUMNS: Column<LiveOption>[] = [
-  { key: 'contract', label: 'Contract', type: 'text', value: r => r.contract, render: r => {
+  // Separate Expiry / Strike / Type columns, each with its own filter (date range, min-max, "call" / "put").
+  { key: 'expiry', label: 'Expiry', type: 'date', value: r => parseOcc(r.contract)?.expiry ?? null, render: r => { const o = parseOcc(r.contract); return o ? <ExpiryCell expiry={o.expiry} /> : '—'; } },
+  { key: 'strike', label: 'Strike', type: 'number', value: r => parseOcc(r.contract)?.strike ?? null, render: r => { const o = parseOcc(r.contract); return o ? <b>{fmtStrike(o.strike)}</b> : '—'; } },
+  { key: 'optType', label: 'Type', type: 'text', value: r => parseOcc(r.contract)?.optType ?? null, render: r => { const o = parseOcc(r.contract); return o ? <TypeBadge t={o.optType} /> : '—'; }, title: 'Filter: type call or put' },
+  // The combined cell is still available (off by default now that its three parts have columns).
+  { key: 'contract', label: 'Contract', type: 'text', defaultOff: true, value: r => r.contract, render: r => {
     const o = parseOcc(r.contract);
     return o ? <span className="flex items-center gap-1.5"><ExpiryCell expiry={o.expiry} /><b>{fmtStrike(o.strike)}</b><TypeBadge t={o.optType} /></span> : r.contract;
   } },
@@ -28,7 +33,7 @@ const COLUMNS: Column<LiveOption>[] = [
  * Contracts ranked by volume in the latest session (older bars are not ranked; lib/oiLive.ts). Used by the OI tracker's stock modal and the stock
  * page's Open Interest tab; both share the saved column choice (`oiStockLive`).
  */
-export default function LiveVolumeTable({ symbol, rows, count, session, stale = 0, onOpenContract }: {
+export default function LiveVolumeTable({ rows, count, session, stale = 0, onOpenContract }: {
   symbol: string;
   rows: LiveOption[];
   /** Live contracts in the chain (before taking the top by volume). */
@@ -42,7 +47,7 @@ export default function LiveVolumeTable({ symbol, rows, count, session, stale = 
   return (
     <DataTable tableId="oiStockLive" rows={rows} columns={COLUMNS} rowKey={r => r.contract} initialSort={{ key: 'vol', dir: 'desc' }} maxHeight="60vh"
       onRowClick={onOpenContract ? r => onOpenContract(r.contract) : undefined}
-      csvName={`${symbol}-live-volume`} toolbar={<span className="text-[11px] text-gray-400" title={stale ? `${stale.toLocaleString()} contracts last traded in an earlier session and are not ranked` : undefined}>
+      csv={false} toolbar={<span className="text-[11px] text-gray-400" title={stale ? `${stale.toLocaleString()} contracts last traded in an earlier session and are not ranked` : undefined}>
         Top {rows.length} by volume in the {session ?? 'latest'} session, of {count.toLocaleString()} live contracts{stale ? ` (${stale.toLocaleString()} last traded earlier, not ranked)` : ''}
       </span>} />
   );

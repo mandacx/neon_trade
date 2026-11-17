@@ -7,6 +7,14 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-11-17 (live volume columns) — Expiry, Strike and Type columns with filters on the Live volume table
+
+- **What changed:** `components/oi/LiveVolumeTable.tsx` only. Three new columns parsed from the OCC contract (`parseOcc`): **Expiry** (date from/to filter), **Strike** (min/max filter, accepts 1.5m style numbers) and **Type** (text filter: type `call` or `put`). The old combined **Contract** column stays but is now off by default (turn it on in ⚙ Columns); sorting, CSV export and the Columns menu work for the new ones like the rest.
+- **Scope:** the same table is used by the stock page's Open Interest → Live volume view and the OI tracker's stock modal, so both get the columns (they share the saved column choice `oiStockLive`).
+- **Verified:** `npx tsc --noEmit` and eslint on the file clean. **Not verified:** in a browser (needs a Pro session), including that users with a saved column choice see the new columns.
+- **CSV export removed from this table** (same day, on request): `DataTable` gets an optional `csv` prop (default true, so every other table keeps its button); `LiveVolumeTable` passes `csv={false}`.
+- **Note:** the table lists the top contracts by volume (server cap), so a filter narrows that list; it does not fetch other contracts.
+
 ## 2026-11-17 (idea alerts) — Company name in every alert; update emails carry the original idea with the updates at the end
 
 - **Request (interpreted, not confirmed):** "evaluate the symbol keyed in and include that in the notifications" was read as: resolve the typed symbol to its company/fund name, show it in the publish preview, and include it in the alerts. If more was meant (e.g. a live price in the alert), say so.

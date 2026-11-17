@@ -104,7 +104,7 @@ export function FilterPopover<T>({ col, filter, onChange, onClose }: { col: Colu
 }
 
 export default function DataTable<T>({
-  rows, columns: allColumns, rowKey, initialSort, onRowClick, rowClassName, toolbar, emptyText = 'No rows match.', csvName, tableId,
+  rows, columns: allColumns, rowKey, initialSort, onRowClick, rowClassName, toolbar, emptyText = 'No rows match.', csvName, csv = true, tableId,
   maxHeight = '70vh', pageSize = 200, searchPlaceholder = 'Search all columns…', dense = true, stickyFirst = false,
 }: {
   rows: T[];
@@ -116,6 +116,8 @@ export default function DataTable<T>({
   toolbar?: React.ReactNode;
   emptyText?: string;
   csvName?: string;
+  /** Show the CSV export button (default true). */
+  csv?: boolean;
   maxHeight?: string;
   pageSize?: number;
   searchPlaceholder?: string;
@@ -206,8 +208,10 @@ export default function DataTable<T>({
           {sorted.length.toLocaleString()} of {rows.length.toLocaleString()} rows
         </span>
         {tableId && <ColumnsMenu metas={metas} {...prefs.menu} />}
+        {csv && (
         <button onClick={exportCsv} disabled={sorted.length === 0}
           className="text-[11px] font-semibold text-gray-600 border border-gray-200 rounded px-2 py-1 hover:bg-gray-50 disabled:opacity-40">CSV</button>
+        )}
       </div>
       <div className={`overflow-auto ${prefs.hideUntilReady}`} style={{ maxHeight }}>
         <table className="w-full text-sm">
