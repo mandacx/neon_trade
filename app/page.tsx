@@ -418,7 +418,7 @@ export default function Home() {
               <div className="grid md:grid-cols-2 md:divide-x divide-gray-100">
                 {news.map(n => (
                   <article key={n.id} className="flex gap-3 px-4 py-2.5 border-b border-gray-100">
-                    <NewsThumb url={n.imageUrl} size="sm" />
+                    <NewsThumb url={n.imageUrl} size="sm" symbol={n.symbols[0]} />
                     <div className="min-w-0 flex-1">
                       <h3 className="text-[13px] font-semibold text-gray-900 leading-snug line-clamp-2">
                         {n.url ? <a href={n.url} target="_blank" rel="noopener noreferrer" className="hover:text-blue-700">{n.headline}</a> : n.headline}

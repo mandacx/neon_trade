@@ -18,16 +18,29 @@ export function timeAgo(iso: string, now = Date.now()): string {
   return new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+/** Soft tile colours; a ticker always gets the same one (hash of its letters), so a stock's rows look alike. */
+const TILE_COLORS = [
+  'bg-blue-100 text-blue-700', 'bg-emerald-100 text-emerald-700', 'bg-violet-100 text-violet-700', 'bg-amber-100 text-amber-800',
+  'bg-rose-100 text-rose-700', 'bg-cyan-100 text-cyan-700', 'bg-indigo-100 text-indigo-700', 'bg-lime-100 text-lime-800',
+];
+const tileColor = (s: string) => TILE_COLORS[[...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % TILE_COLORS.length];
+
 /**
- * Small picture on the left of a news row: the article's own image when the feed has one (or when it fails to load,
- * a neutral newspaper tile, so every row has the same shape and the text column keeps the same width).
+ * Small picture on the left of a news row: the article's own image when the feed has one. When it has none (the feed currently
+ * carries none), or it fails to load, a tile with the stock's ticker letters, so every row has the same shape and the text
+ * keeps the same width. Without a ticker, a neutral newspaper tile.
  */
-export function NewsThumb({ url, size }: { url: string | null; size: 'sm' | 'md' }) {
+export function NewsThumb({ url, size, symbol }: { url: string | null; size: 'sm' | 'md'; symbol?: string | null }) {
   const [failed, setFailed] = useState(false);
   const box = size === 'md' ? 'w-16 h-12 sm:w-24 sm:h-16' : 'w-16 h-12';
   if (url && !failed) {
     // eslint-disable-next-line @next/next/no-img-element
     return <img src={url} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(true)} className={`${box} object-cover rounded-md bg-gray-100 shrink-0`} />;
+  }
+  const t = (symbol ?? '').trim().toUpperCase();
+  if (/^[A-Z][A-Z0-9.\-]{0,9}$/.test(t)) {
+    const txt = t.length <= 3 ? 'text-lg sm:text-xl' : t.length <= 5 ? 'text-sm sm:text-base' : 'text-xs sm:text-sm';
+    return <div aria-hidden className={`${box} rounded-md ${tileColor(t)} flex items-center justify-center shrink-0 font-bold tracking-tight overflow-hidden ${txt}`}>{t}</div>;
   }
   return (
     <div aria-hidden className={`${box} rounded-md bg-gradient-to-br from-slate-100 to-slate-200 text-slate-400 flex items-center justify-center shrink-0`}>
@@ -43,7 +56,7 @@ function NewsCard({ item, current, now }: { item: NewsItem; current: string; now
   const body = item.excerpt ?? item.summary;
   return (
     <article className="flex gap-3 px-3 py-2 border-b border-gray-100 last:border-b-0">
-      <NewsThumb url={item.imageUrl} size="md" />
+      <NewsThumb url={item.imageUrl} size="md" symbol={current} />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-gray-500">
           {item.source && <span className="font-semibold capitalize text-gray-600">{item.source}</span>}

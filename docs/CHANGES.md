@@ -21,6 +21,7 @@ anything not tested as *unverified*.
 ## 2026-11-17 (news pictures) — Picture on the left of every news row, with a fallback tile
 
 - **What changed:** `components/stock/tabs/NewsTab.tsx` (new exported `NewsThumb`: the article's own feed image on the left, or a neutral newspaper tile when the feed has none or the image fails to load; 64x48 on phones, 96x64 from `sm` up, so the row height is unchanged and the text keeps its width), `app/page.tsx` (landing card uses it, 64x48), `lib/news.ts` (prefers the feed's `small` image over `thumb`; the 96x64 slot looked soft with `thumb`). Before this, rows without an image had no picture and the stock tab hid it on phones.
+- **Live feed check (2026-11-17):** none of 600+ items for AAPL/TSLA and 250 for NVDA/F/KO, the 12 landing symbols or the unfiltered feed had an image (all `fiscal.ai`; Benzinga items, which had images on 11-16, were absent; cause unknown, unverified). So the fallback is what shows today: it is now a **tile with the stock's ticker letters** (colour from a hash of the ticker; the current stock on the stock tab, the first tagged symbol on the landing card; newspaper icon only when there is no ticker). Not checked: whether earnings ingestion, which reads Benzinga headlines from the same feed, is affected.
 - **Verified:** `npx tsc --noEmit` and eslint clean. **Not verified:** in a browser; whether the `small` images load as expected for most articles (only checked in code).
 
 ---
