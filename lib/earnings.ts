@@ -21,7 +21,7 @@
  */
 import { sql } from '@/lib/db';
 import { acquireLease, releaseLease } from '@/lib/jobLease';
-import { parseEarningsHeadline, symbolsForResult, easternDateAndSession } from '@/lib/earningsParse';
+import { parseEarningsHeadline, parseFiscalSummary, symbolsForResult, easternDateAndSession } from '@/lib/earningsParse';
 import { fetchNewsPage, type NewsArticle } from '@/lib/marketdata';
 import { getScannerSymbols } from '@/lib/usUniverse';
 import type { EarningsBadge, EarningsEvent, EarningsOutcome, EarningsRangeRow, EarningsResult, EarningsSummary, EarningsTime } from '@/types/earnings';
@@ -188,7 +188,8 @@ interface ResultRow {
   salesActual: number | null;
   salesEstimate: number | null;
   salesOutcome: EarningsOutcome | null;
-  source: 'alpaca_news' | 'alphavantage';
+  /** 'alpaca_fiscal' = actuals only, read from the feed's results summaries when the results headlines are absent. */
+  source: 'alpaca_news' | 'alpaca_fiscal' | 'alphavantage';
   headline: string | null;
   newsId: number | null;
 }
@@ -254,7 +255,8 @@ async function upsertResults(input: ResultRow[]): Promise<number> {
       sales_actual       = CASE WHEN n.source = 'alpaca_news' THEN COALESCE(n.sales_actual, EXCLUDED.sales_actual) ELSE COALESCE(EXCLUDED.sales_actual, n.sales_actual) END,
       sales_estimate     = CASE WHEN n.source = 'alpaca_news' THEN COALESCE(n.sales_estimate, EXCLUDED.sales_estimate) ELSE COALESCE(EXCLUDED.sales_estimate, n.sales_estimate) END,
       sales_outcome      = CASE WHEN n.source = 'alpaca_news' THEN COALESCE(n.sales_outcome, EXCLUDED.sales_outcome) ELSE COALESCE(EXCLUDED.sales_outcome, n.sales_outcome) END,
-      source             = CASE WHEN n.source = 'alpaca_news' OR EXCLUDED.source = 'alpaca_news' THEN 'alpaca_news' ELSE 'alphavantage' END,
+      source             = CASE WHEN n.source = 'alpaca_news' OR EXCLUDED.source = 'alpaca_news' THEN 'alpaca_news'
+                                WHEN n.source = 'alpaca_fiscal' OR EXCLUDED.source = 'alpaca_fiscal' THEN 'alpaca_fiscal' ELSE 'alphavantage' END,
       headline           = COALESCE(n.headline, EXCLUDED.headline),
       news_id            = COALESCE(n.news_id, EXCLUDED.news_id),
       fetched_at         = now()
@@ -379,7 +381,8 @@ export async function* newsPages(opts: { start: string; end?: string; symbols?: 
   let token: string | null = null;
   let pages = 0;
   do {
-    const page = await fetchNewsPage({ start: opts.start, end: opts.end, symbols: opts.symbols, pageToken: token });
+    // Content is needed by the summary fallback (resultRowsFromFiscal); the headline parser ignores it.
+    const page = await fetchNewsPage({ start: opts.start, end: opts.end, symbols: opts.symbols, pageToken: token, includeContent: true });
     yield page.news;
     token = page.nextPageToken;
     pages++;
@@ -421,11 +424,65 @@ export function resultRowsFromNews(articles: NewsArticle[], tracked: Set<string>
   return { rows, corrections };
 }
 
+/**
+ * Fallback rows: actuals only (EPS, sales; USD) read from the feed's short results summaries (`fiscal.ai` items), for
+ * reports whose results headline never arrived. No estimate, surprise or beat/miss is ever set here. Several summaries
+ * of one report (the press release and the financial-results item) are merged field by field. Exported for tests.
+ */
+export function resultRowsFromFiscal(articles: NewsArticle[], tracked: Set<string>): ResultRow[] {
+  const out: ResultRow[] = [];
+  for (const a of articles) {
+    if (a.source !== 'fiscal.ai') continue;
+    const parsed = parseFiscalSummary(a.headline, a.content || a.summary || '');
+    if (!parsed) continue;
+    const { date, session } = easternDateAndSession(a.created_at);
+    for (const symbol of symbolsForResult(a.symbols, tracked)) {
+      out.push({
+        symbol, reportedDate: date, reportTime: session, period: parsed.period, fiscalDateEnding: null,
+        epsActual: parsed.epsActual, epsEstimate: null, epsSurprisePct: null, epsOutcome: null, epsAdjusted: parsed.epsAdjusted,
+        salesActual: parsed.salesActual, salesEstimate: null, salesOutcome: null,
+        source: 'alpaca_fiscal', headline: a.headline.slice(0, 500), newsId: a.id,
+      });
+    }
+  }
+  // One report per symbol within 3 days: keep the earliest row, fill its gaps from the later ones.
+  out.sort((x, y) => x.symbol.localeCompare(y.symbol) || x.reportedDate.localeCompare(y.reportedDate) || x.newsId! - y.newsId!);
+  const merged: ResultRow[] = [];
+  for (const r of out) {
+    const prev = merged[merged.length - 1];
+    if (prev && prev.symbol === r.symbol && daysBetween(prev.reportedDate, r.reportedDate) <= 3) {
+      if (prev.epsActual === null && r.epsActual !== null) { prev.epsActual = r.epsActual; prev.epsAdjusted = r.epsAdjusted; }
+      if (prev.salesActual === null) prev.salesActual = r.salesActual;
+      prev.period = prev.period ?? r.period;
+    } else merged.push({ ...r });
+  }
+  return merged;
+}
+
+/**
+ * Store the fallback rows, but only for a report the Alpha Vantage calendar knows about (a row within 3 days of the
+ * date): a summary is looser evidence than a results headline, and this keeps an unrelated or late-published item
+ * from creating a report of its own.
+ */
+async function storeFiscalResults(articles: NewsArticle[], tracked: Set<string>): Promise<number> {
+  const candidates = resultRowsFromFiscal(articles, tracked);
+  if (candidates.length === 0) return 0;
+  const known = (await sql`
+    SELECT DISTINCT i.symbol, i.reported_date::text AS d
+    FROM unnest(${candidates.map(r => r.symbol)}::text[], ${candidates.map(r => r.reportedDate)}::date[]) AS i(symbol, reported_date)
+    JOIN public.nt_earnings_calendar c ON c.symbol = i.symbol AND c.report_date BETWEEN i.reported_date - 3 AND i.reported_date + 3
+  `) as Array<{ symbol: string; d: string }>;
+  const ok = new Set(known.map(k => `${k.symbol}|${k.d}`));
+  return upsertResults(candidates.filter(r => ok.has(`${r.symbol}|${r.reportedDate}`)));
+}
+
 /** Store parsed news results (merge + corrections + calendar resolution). */
 export async function storeNewsResults(articles: NewsArticle[], tracked: Set<string>): Promise<number> {
   const { rows, corrections } = resultRowsFromNews(articles, tracked);
-  const stored = await upsertResults(rows);
+  let stored = await upsertResults(rows);
   await applyCorrections(corrections);
+  // Fallback for reports with no results headline; never overrides headline rows (see the upsert's source rules).
+  stored += await storeFiscalResults(articles, tracked);
   if (stored > 0 || corrections.length > 0) await resolveCalendar();
   return stored + corrections.length;
 }
@@ -523,7 +580,7 @@ function toResult(r: any): EarningsResult {
     salesEstimate: num(r.sales_estimate),
     salesOutcome: (r.sales_outcome as EarningsOutcome | null) ?? null,
     // Stored values name the feeds; clients only get the neutral kind.
-    source: r.source === 'alpaca_news' ? 'news' : 'calendar',
+    source: r.source === 'alpaca_news' || r.source === 'alpaca_fiscal' ? 'news' : 'calendar',
   };
 }
 

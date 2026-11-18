@@ -56,7 +56,11 @@ export interface OptionChainContract {
 /** One trading day from the exchange calendar; times are ET wall clock 'HH:MM'. */
 export interface CalendarRow { date: string; open: string; close: string; sessionOpen: string | null; sessionClose: string | null }
 
-export interface NewsArticle { id: number; headline: string; symbols: string[]; created_at: string }
+export interface NewsArticle {
+  id: number; headline: string; symbols: string[]; created_at: string;
+  /** Present only when the page was requested with content (`fetchNewsPage({ includeContent: true })`). */
+  source?: string; summary?: string; content?: string;
+}
 
 /** A news article with the fields a reader needs. `content` is the publisher's HTML (never render it raw). */
 export interface NewsArticleFull extends NewsArticle {

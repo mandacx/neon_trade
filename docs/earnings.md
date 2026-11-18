@@ -29,6 +29,8 @@ A typical results headline looks like this:
 IBM Q2 Adj. EPS $2.93 Beats $2.86 Estimate, Sales $17.162B Beat $16.860B Estimate
 ```
 
+**Fallback when the results headlines are missing (2026-11-17).** The feed's other source (`fiscal.ai`) publishes one short AI-written summary per results release. `parseFiscalSummary` (`lib/earningsParse.ts`, fixtures in `scripts/test-earnings-fiscal.mjs`) reads **actual EPS and sales only** (USD only; GAAP vs adjusted recorded; ambiguous, foreign-currency, prior-period, forward-looking and annual figures stay null). Rows are saved with `source = 'alpaca_fiscal'`, with no estimate, surprise or beat/miss, only for a report the calendar knows (within 3 days), and a results-headline row always replaces them. Details and limits: `docs/CHANGES.md`, 2026-11-17 "earnings fallback".
+
 **Why not Alpha Vantage `EARNINGS` (per-symbol history)?** We tried it and dropped it. It costs one call per symbol (about 600) against 25 a day, so a backfill takes weeks. Its `estimatedEPS` is also unreliable: for IBM Q2 it equalled the actual, while Benzinga's consensus was $2.86. About 112 rows from that experiment remain, marked `source='alphavantage'`; the merge rules keep them consistent.
 
 **Why not `public.securities.next/last_earnings_date`?** That table belongs to the sister app (neon_nifty). Those columns were filled once from yfinance in April 2026 and are stale. Never write to them.

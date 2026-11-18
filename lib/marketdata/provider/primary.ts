@@ -616,8 +616,8 @@ export async function fetchCalendar(start: string, end: string): Promise<Calenda
 }
 
 /** One page of news headlines (newest last with sort=asc). Throws on HTTP failure. */
-export async function fetchNewsPage(opts: { start: string; end?: string; symbols?: string[]; pageToken?: string | null }): Promise<{ news: NewsArticle[]; nextPageToken: string | null }> {
-  const params = new URLSearchParams({ start: opts.start, limit: '50', sort: 'asc', include_content: 'false' });
+export async function fetchNewsPage(opts: { start: string; end?: string; symbols?: string[]; pageToken?: string | null; includeContent?: boolean }): Promise<{ news: NewsArticle[]; nextPageToken: string | null }> {
+  const params = new URLSearchParams({ start: opts.start, limit: '50', sort: 'asc', include_content: opts.includeContent ? 'true' : 'false' });
   if (opts.end) params.set('end', opts.end);
   if (opts.symbols?.length) params.set('symbols', opts.symbols.join(','));
   if (opts.pageToken) params.set('page_token', opts.pageToken);

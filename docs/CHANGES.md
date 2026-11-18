@@ -7,6 +7,24 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-11-17 (earnings fallback) — Actuals-only results from the feed's results summaries
+
+- **Why:** the results headlines the earnings cron parses (Benzinga, via the Alpaca news feed) stopped arriving. Verified 2026-11-17: 11 results rows were stored for 11-16 (fetched 21:32 UTC) and none for 11-17; the live feed (400 items from midnight UTC, all symbols) held only `source: fiscal.ai` items, none a results headline, and the 11-16 symbols' results headlines were gone from it too; neither `include_content` nor `exclude_contentless` (Alpaca's only documented filters) brings them back. Cause unknown (plan, licensing or feed change at Alpaca; unverified), so Alpaca support has to be asked. HD, DIS, NVDA, JD and others reported 11-17 with no stored result.
+- **What changed:** `lib/earningsParse.ts` (new pure `parseFiscalSummary(headline, content)`), `lib/earnings.ts` (`resultRowsFromFiscal`, `storeFiscalResults`, called from `storeNewsResults`; news pages now request content; new `source = 'alpaca_fiscal'`; upsert source rules; `toResult` maps it to the neutral `news` kind), `lib/marketdata/provider/primary.ts` + `types.ts` (`fetchNewsPage({ includeContent })`, optional `source/summary/content` on `NewsArticle`), `scripts/test-earnings-fiscal.mjs` (fixtures from real items).
+- **Design:** the feed's other source publishes one AI-written summary per results release (headline "X Reports Third Quarter 2026 Financial Results", free-text content). The fallback reads **actuals only**: EPS and sales, USD only. It never sets an estimate, surprise or beat/miss (those stay empty, and the Earnings page already renders that). Rules (all conservative; anything unclear stays null):
+  - the headline must read as a results release and not as an analyst note, date/call announcement, meeting, trial, etc.;
+  - any non-USD currency in the text => reported, but no figures (Baidu, XPeng);
+  - prior-period comparisons ("up from $3.62"), forward-looking sentences (guidance, outlook, "expects") and, in a quarterly release, annual totals are skipped; dividends and buybacks per share are never EPS;
+  - adjusted EPS is preferred over GAAP and recorded in `eps_adjusted`; a loss is negative; "GAAP and non-GAAP EPS of $a and $b, respectively" is left null; per-ADS figures are skipped;
+  - sales: the largest current-period figure (a segment is never larger than the total); amounts need a unit (billion/million).
+  - Several summaries of one report (press release + financial-results item) are merged field by field. A row is stored only when the AV calendar has that symbol within 3 days of the date.
+  - **Precedence:** a results-headline row always wins. If the headlines return, their values replace the fallback's and the row becomes `alpaca_news`; a fallback never overwrites a headline row.
+- **Verified:** `node scripts/test-earnings-fiscal.mjs` (real summaries incl. HD, TSN, ARMK, NVDA, HTFL, MBGL, AMAT, XPEV, BIDU) and `test-earnings-parse.mjs` pass; `npx tsc --noEmit` and eslint clean. A read-only dry run against the live feed and calendar (11-12 to 11-17: 196 articles, 53 result items) found three parsing bugs (a dividend read as NVDA's EPS, a lost sign on HTFL's adjusted loss, AMAT's annual revenue) which are fixed and covered by fixtures; the calendar-join SQL ran against the live database in that dry run.
+- **Not verified:** a real cron run writing rows (nothing was written to the database); the 30-hour scan with content for ~2,300 symbols (payload and run time under the 50 s budget); accuracy beyond the fixtures (the summaries are AI-written, so a wrong figure is possible; spot-check the first days); whether Benzinga returns.
+- **Follow-ups:** ask Alpaca support about the missing source; trigger `/api/cron/earnings?force=true` after deploy to backfill today's reports; consider a proper estimates source (FMP or Finnhub, key needed) if the gap lasts.
+
+---
+
 ## 2026-11-17 (live volume rows and value) — Up to 2,000 rows, new "Value $" column
 
 - **What changed:** `app/api/oi-tracker/live/[symbol]/route.ts` (`TOP` 200 -> 2000; the table already pages 200 at a time with "Show more", so the first paint is unchanged), `components/oi/LiveVolumeTable.tsx` (new **Value $** column = last price x volume x 100, sortable and filterable like the other number columns; the toolbar line also shows the total value of the listed contracts).
