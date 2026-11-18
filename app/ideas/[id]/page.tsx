@@ -173,7 +173,7 @@ export default function IdeaPage() {
       {idea.status !== 'draft' && idea.status !== 'scheduled' && <TakeThis idea={idea} />}
 
       <div className="bg-white border border-gray-200 rounded-xl p-2 sm:p-3">
-        <IdeaChart plan={{ symbol: idea.symbol, entryLow: idea.entryLow, entryHigh: idea.entryHigh, targets: idea.targets, stop: idea.stop, from: (idea.publishedAt ?? idea.createdAt).slice(0, 10) }} />
+        <IdeaChart plan={{ symbol: idea.symbol, direction: idea.direction, entryLow: idea.entryLow, entryHigh: idea.entryHigh, targets: idea.targets, stop: idea.stop, from: (idea.publishedAt ?? idea.createdAt).slice(0, 10) }} events={o?.events ?? []} />
       </div>
 
       {o && (

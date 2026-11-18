@@ -7,8 +7,9 @@
  *  1. Only sessions after the publish date count (the publish day's own bar may pre-date the idea).
  *  2. ENTRY: the bar's range overlaps the entry zone. Entry price is the worst fill in the zone for the
  *     trader (long: zone high, short: zone low), so R is never flattered by a better fill.
- *     If price runs to the first target, or through the stop, without touching the zone, the idea never
- *     entered: `not_triggered` (not a win).
+ *     Until it enters, the idea just waits: running to the first target or through the stop without touching
+ *     the zone does not end it (changed 2026-11-18). Only the enter-by date, the valid-until date or a publisher
+ *     cancel end an un-entered idea (`not_triggered` / `cancelled`; not a win).
  *  3. STOP FIRST on an ambiguous bar: if one bar touches both the stop and a target, the stop is assumed
  *     to have come first. On the entry bar the same rule applies. After the entry bar, a gap through the
  *     stop fills at the open (worse than the stop); a target fills at the target price, never better.
@@ -89,8 +90,7 @@ function sessionsBetween(bars: ScoreBar[], from: string, to: string): number {
  * `intraday` (only read when `plan.entryBasis === 'm15'`): completed regular-session 15-minute bars from the publish time
  * to now. The ENTRY is the first bar that closes inside the zone; the entry day's stop and targets are then judged on the
  * 15-minute bars after the entry bar (the day's high and low include moves from before the entry), and later days on
- * `bars` as before. Before entry, a bar that closes through the stop or at/past target 1 without a close in the zone ends
- * the idea as `not_triggered`.
+ * `bars` as before. Before entry nothing but a close in the zone (or the enter-by / valid-until date, or a cancel) decides.
  */
 export function scoreIdea(plan: ScorePlan, bars: ScoreBar[], closure: ScoreClosure | null, asOf: string, intraday: ScoreIntradayBar[] = []): ScoreResult {
   const long = plan.direction !== 'short';
@@ -153,11 +153,9 @@ export function scoreIdea(plan: ScorePlan, bars: ScoreBar[], closure: ScoreClosu
     for (const b of ibars) {
       // Past the enter-by date nothing can enter any more (the idea is ended as not triggered below).
       if (entryBy && b.date > entryBy) break;
+      // Waiting: price being beyond target 1 or the stop does NOT end an un-entered idea (changed 2026-11-18); only the
+      // enter-by / valid-until dates or a publisher cancel do. The idea enters whenever a close lands in the zone.
       if (b.close >= plan.entryLow && b.close <= plan.entryHigh) { entryBar = b; break; }
-      const ranToTarget = long ? b.close >= plan.targets[0] : b.close <= plan.targets[0];
-      const hitStop = long ? b.close <= plan.stop : b.close >= plan.stop;
-      if (ranToTarget) { neverEntered = { date: b.date, why: 'closed at or past the first target without a close inside the entry zone' }; break; }
-      if (hitStop) { neverEntered = { date: b.date, why: 'closed through the stop without a close inside the entry zone' }; break; }
     }
     list = [];
     if (entryBar) {
@@ -175,14 +173,8 @@ export function scoreIdea(plan: ScorePlan, bars: ScoreBar[], closure: ScoreClosu
     if (!entered) {
       if (entryBy && b.date > entryBy) { neverEntered = { date: entryBy, why: 'the enter-by date passed without entering the zone' }; break; }
       const touches = b.low <= plan.entryHigh && b.high >= plan.entryLow;
-      if (!touches) {
-        // Ran away or broke down without ever touching the zone: the idea never entered.
-        const ranToTarget = long ? b.low > plan.entryHigh && b.high >= plan.targets[0] : b.high < plan.entryLow && b.low <= plan.targets[0];
-        const hitStop = long ? b.high < plan.entryLow && b.low <= plan.stop : b.low > plan.entryHigh && b.high >= plan.stop;
-        if (ranToTarget) { neverEntered = { date: b.date, why: 'ran to the first target without touching the entry zone' }; break; }
-        if (hitStop) { neverEntered = { date: b.date, why: 'fell through the stop without touching the entry zone' }; break; }
-        continue;
-      }
+      // Not touching the zone, even after running to target 1 or through the stop, keeps the idea waiting (changed 2026-11-18).
+      if (!touches) continue;
       entered = true;
       enteredOn = b.date;
       events.push({ type: 'triggered', date: b.date, price: entry });

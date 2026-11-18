@@ -31,8 +31,9 @@ t('publish-day bar is ignored', () => {
 
 t('pending: not entered, still valid', () => {
   const r = scoreIdea(long, [bar('2026-01-06', 108, 110, 107, 109)], null, '2026-01-07');
-  // ran to 110 >= T1 without touching the zone -> never entered
-  assert.equal(r.outcome, 'not_triggered');
+  // ran to 110 >= T1 without touching the zone: still waiting (2026-11-18), not ended
+  assert.equal(r.outcome, 'pending');
+  assert.equal(r.final, false);
   const p = scoreIdea(long, [bar('2026-01-06', 104, 105, 103, 104)], null, '2026-01-07');
   assert.equal(p.outcome, 'pending');
   assert.equal(p.final, false);
@@ -98,10 +99,14 @@ t('valid-until passes without entering: not triggered', () => {
   assert.equal(r.final, true);
 });
 
-t('broke below the stop without touching the zone: not triggered', () => {
-  const r = scoreIdea(long, [bar('2026-01-06', 99, 99.5, 96, 97)], null, ASOF);
-  // high 99.5 is inside the zone (100-102)? no: high < entryLow, so no touch; low <= stop
-  assert.equal(r.outcome, 'not_triggered');
+t('broke below the stop without touching the zone: keeps waiting until valid-until (2026-11-18)', () => {
+  // high 99.5 < entryLow, so no touch; low <= stop. Before: not_triggered. Now: pending while still valid.
+  const r = scoreIdea(long, [bar('2026-01-06', 99, 99.5, 96, 97)], null, '2026-01-07');
+  assert.equal(r.outcome, 'pending');
+  assert.equal(r.final, false);
+  // ...and it enters when the price later comes back into the zone
+  const e = scoreIdea(long, [bar('2026-01-06', 99, 99.5, 96, 97), bar('2026-01-07', 99, 103, 98, 102)], null, '2026-01-07');
+  assert.equal(e.enteredOn, '2026-01-07');
 });
 
 t('expired while in trade: marked to the last close', () => {
@@ -561,11 +566,15 @@ t('m15: bars that started before publishing are ignored', () => {
   assert.equal(r2.enteredOn, day); // a bar after the publish time that closes in the zone enters on the publish day
 });
 
-t('m15: closing at or past target 1 (or through the stop) without a close in the zone = never entered', () => {
+t('m15: closing at or past target 1 (or through the stop) without a close in the zone keeps waiting; a later close in the zone enters', () => {
   const a = scoreIdea(M, [], null, '2026-01-06', [ib('2026-01-06', '15:00', 107, 108, 106.5, 107.5)]);
-  assert.equal(a.outcome, 'not_triggered');
+  assert.equal(a.outcome, 'pending');
   const b = scoreIdea(M, [], null, '2026-01-06', [ib('2026-01-06', '15:00', 99, 99.5, 97, 97.5)]);
-  assert.equal(b.outcome, 'not_triggered');
+  assert.equal(b.outcome, 'pending');
+  // the NVDA case: published far above the zone and T1, then price comes down into the zone
+  const c = scoreIdea(M, [], null, '2026-01-07', [ib('2026-01-06', '15:00', 107, 108, 106.5, 107.5), ib('2026-01-07', '15:00', 104, 104.5, 100.5, 101)]);
+  assert.equal(c.outcome, 'open');
+  assert.equal(c.enteredOn, '2026-01-07');
 });
 
 t('m15: valid-until passing without a close in the zone = not_triggered; a publisher cancel before entry = cancelled', () => {
@@ -596,9 +605,9 @@ t('m15: short mirrors long (entry = zone low, stop above, gap above the stop fil
   const win = scoreIdea(MS, [], null, '2026-01-05', [...enter, ib(day, '15:30', 101, 101.5, 95.5, 96), ib(day, '15:45', 96, 96.5, 91.5, 92)]);
   assert.equal(win.outcome, 'target_hit');
   near(win.r, 1.5, 1e-9, 'T1 at 96 = 1R, T2 at 92 = 2R');
-  // a short that closes at or below target 1 without ever closing in the zone never entered; one that closes above the stop likewise
-  assert.equal(scoreIdea(MS, [], null, '2026-01-06', [ib(day, '15:00', 96, 97, 95, 95.5)]).outcome, 'not_triggered');
-  assert.equal(scoreIdea(MS, [], null, '2026-01-06', [ib(day, '15:00', 105, 106, 104.5, 105)]).outcome, 'not_triggered');
+  // a short that closes at or below target 1 (or above the stop) without a close in the zone keeps waiting
+  assert.equal(scoreIdea(MS, [], null, '2026-01-06', [ib(day, '15:00', 96, 97, 95, 95.5)]).outcome, 'pending');
+  assert.equal(scoreIdea(MS, [], null, '2026-01-06', [ib(day, '15:00', 105, 106, 104.5, 105)]).outcome, 'pending');
 });
 
 t('m15: the idea in the field (ISRG short 440-445, stop 468): 450 = waiting, a 15-minute close of 444.95 enters', () => {

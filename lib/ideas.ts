@@ -82,6 +82,8 @@ export interface IdeaOutcomeView {
   daysHeld: number | null;
   evaluatedThrough: string | null;
   basis: string;
+  /** The scorer's dated events (triggered, target_hit, stopped, expired, ...): `at` is the ISO instant when known (15-minute entry / exits). Drawn as chart markers. */
+  events?: Array<{ type: string; date: string; price: number | null; detail?: string; at?: string }>;
 }
 
 export interface IdeaUpdateView { id: string; type: string; body: string; payload: Record<string, unknown>; createdAt: string; effectiveOn: string }
@@ -128,7 +130,7 @@ const IDEA_COLS = `i.id, i.publisher_id, i.symbol, i.direction, i.horizon, i.sta
   o.exit_on::text AS o_exit_on, o.exit_price::float8 AS o_exit_price, o.targets_hit AS o_targets_hit,
   o.targets_total AS o_targets_total, o.r_multiple::float8 AS o_r, o.pct_return::float8 AS o_pct,
   o.mae_pct::float8 AS o_mae, o.mfe_pct::float8 AS o_mfe, o.days_to_t1 AS o_dt1, o.days_held AS o_held,
-  o.evaluated_through::text AS o_through, o.basis AS o_basis`;
+  o.evaluated_through::text AS o_through, o.basis AS o_basis, o.events AS o_events`;
 const IDEA_FROM = `public.nt_trade_ideas i LEFT JOIN public.nt_idea_outcomes o ON o.idea_id = i.id`;
 
 function toView(r: any, access: IdeaAccess): IdeaView {
@@ -160,6 +162,7 @@ function toView(r: any, access: IdeaAccess): IdeaView {
           exitPrice: num(r.o_exit_price), targetsHit: r.o_targets_hit, targetsTotal: r.o_targets_total, r: num(r.o_r),
           pctReturn: num(r.o_pct), maePct: num(r.o_mae), mfePct: num(r.o_mfe), daysToT1: r.o_dt1, daysHeld: r.o_held,
           evaluatedThrough: r.o_through, basis: r.o_basis,
+          events: Array.isArray(r.o_events) ? r.o_events : [],
         }
       : null,
   };
@@ -734,7 +737,7 @@ export async function evaluateIdeas(opts: { all?: boolean; ideaId?: string; dead
   if (opts.ideaId) { args.push(opts.ideaId); where += ` AND i.id = $1`; }
   else if (!opts.all) where += ` AND i.status IN ('live','triggered')`;
   const ideas = await sql(`SELECT i.id, i.symbol, i.direction, i.horizon, i.title, i.status, i.entry_low::float8 AS entry_low, i.entry_high::float8 AS entry_high,
-    i.targets, i.stop::float8 AS stop, i.published_on::text AS published_on, i.published_at, i.valid_until::text AS valid_until, i.entry_by::text AS entry_by, o.entered_on::text AS o_entered_on
+    i.targets, i.stop::float8 AS stop, i.published_on::text AS published_on, i.published_at, i.valid_until::text AS valid_until, i.entry_by::text AS entry_by, o.entered_on::text AS o_entered_on, o.outcome AS o_outcome, o.evaluated_through::text AS o_evaluated_through
     FROM public.nt_trade_ideas i LEFT JOIN public.nt_idea_outcomes o ON o.idea_id = i.id WHERE ${where} ORDER BY i.id`, args);
 
   for (const idea of ideas as any[]) {
@@ -755,7 +758,10 @@ export async function evaluateIdeas(opts: { all?: boolean; ideaId?: string; dead
       let intraday: ScoreIntradayBar[] = [];
       if (entryBasis === 'm15' && publishedAt) {
         // From the publish time; once an entry day is stored (and we are not rebuilding) only that day onwards is needed.
-        const fromMs = !opts.all && idea.o_entered_on ? Math.max(Date.parse(publishedAt), etInstantMs(idea.o_entered_on, '04:00')) : Date.parse(publishedAt);
+        // An idea still waiting for its zone (no entry yet, can wait a year) resumes from the last day it evaluated:
+        // every earlier bar was already checked and none closed in the zone (that day is re-read, its last bar may have been partial).
+        const resumeOn = idea.o_entered_on ?? (idea.o_outcome === 'pending' ? idea.o_evaluated_through : null);
+        const fromMs = !opts.all && resumeOn ? Math.max(Date.parse(publishedAt), etInstantMs(resumeOn, '04:00')) : Date.parse(publishedAt);
         const capMs = idea.valid_until ? Math.min(Date.now(), etInstantMs(idea.valid_until, '23:59')) : Date.now();
         try {
           intraday = await getCompleted15mBars(idea.symbol, new Date(fromMs).toISOString(), capMs);

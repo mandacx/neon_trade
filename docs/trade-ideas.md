@@ -126,8 +126,9 @@ Mechanical, never self-reported. Fixtures: `node scripts/test-idea-scoring.mjs`.
 
 1. Only sessions **after** the publish date count (the publish day's bar may pre-date the idea).
 2. **Entry:** a bar whose range overlaps the entry zone. Entry price is the **worst fill in the zone** (long: zone high,
-   short: zone low), so R is never flattered. Price that runs to target 1 (or through the stop) without touching the zone
-   means the idea never entered: `not_triggered`, not a win.
+   short: zone low), so R is never flattered. Until it enters, an idea just **waits**: price running to target 1 (or through
+   the stop) without touching the zone does **not** end it (changed 2026-11-18). Only the enter-by date, the valid-until
+   date or a publisher cancel end an un-entered idea (`not_triggered` / `cancelled`, not a win).
 3. **Stop first** when one bar touches both the stop and a target, including on the entry bar. After the entry bar a gap
    through the stop fills at the open (worse than the stop); targets fill at the target price, never better.
 4. **Ladder:** the position splits equally across targets; each target booked at its price; the remainder exits at the
@@ -160,7 +161,7 @@ in desk statistics, no alerts, independent of "I took this" (R and % only, no mo
 |---|---|---|
 | `awaiting_entry` | not entered, price outside the zone (distance to the nearest zone edge shown) | no |
 | `in_zone` | not entered, price inside the zone (15-minute basis: the idea enters when a completed 15-minute candle closes inside it, checked every 15 minutes; daily basis: on a completed session that touches it) | no |
-| `ran_past_target` | not entered, price at or beyond target 1 | no |
+| `ran_past_target` | not entered, price at or beyond target 1 (the idea keeps waiting for the zone) | no |
 | `in_trade` | entered per the official outcome | yes |
 | `beyond_stop` | price beyond the stop (entered or not) | only if entered, unclamped |
 | `unavailable` | no price, or an invalid plan | no |
@@ -179,7 +180,7 @@ in desk statistics, no alerts, independent of "I took this" (R and % only, no mo
 Requested 2026-11-11: do not wait for the daily bar; an idea is entered when the price is in the zone at the end of a 15-minute candle.
 
 - **Entry:** the first **completed regular-session 15-minute bar that starts at or after the publish time and closes inside the entry zone** (`entryLow <= close <= entryHigh`). A wick into the zone that closes outside does not enter. Same rule for shorts. The entry price stays the **worst fill in the zone** (long: zone high, short: zone low) so R is never flattered; the `triggered` event carries `at`, the close time of the entry bar.
-- **Never entered:** before entry, a bar that closes at or beyond target 1, or through the stop, without a close in the zone ends the idea as `not_triggered`. Valid-until passing without an entry is `not_triggered`; a publisher cancel before entry is `cancelled`.
+- **Never entered:** before entry the idea waits, whatever price does (a close at or beyond target 1, or through the stop, no longer ends it; changed 2026-11-18, it used to end as `not_triggered`). The enter-by date or valid-until passing without an entry is `not_triggered`; a publisher cancel before entry is `cancelled`. A waiting idea resumes its 15-minute read from the last evaluated day (not from the publish time) unless rebuilt with `force`.
 - **After entry:** the entry day's stop and targets are judged on the 15-minute bars **after** the entry bar (stop first within a bar; a 15-minute bar opening through the stop fills at its open). The entry day's daily high/low are not used (they include moves before the entry). Later days use complete daily bars as before (a gap fills at the open). Exit events carry `at` when they come from 15-minute bars.
 - **Data:** `getCompleted15mBars` reads the 15-minute bars from the facade, keeps only bars whose 15 minutes have elapsed and that fall inside the regular session of a trading day (the calendar gives holidays and early closes). A failed read counts as an error for that idea and is retried; it is never read as "no entry yet". Intraday bars are single-venue (IEX): closes are real-time, highs and lows can miss other venues' prints.
 - **Cadence:** `ideas-cron` runs at :02, :17, :32 and :47 (two minutes after each candle closes). Once an entry day is stored, only that day onwards is fetched (unless the outcome is rebuilt with `?force=true`).
@@ -213,7 +214,7 @@ are listed under coverage.
 | Route | Who | What |
 |---|---|---|
 | `/ideas` | any idea term | board: Open / Closed tabs, filters (horizon, direction, symbol), idea cards, locked-term upgrade strips, alert feed with email opt-in |
-| `/ideas/[id]` | any idea term | frozen plan, **live mark card for open ideas (provisional)**, chart (candles with entry zone, targets and stop drawn, interval buttons and a crosshair OHLC/volume readout; the interval is the stock chart's saved `chart.settings`; link to the full stock page), tracked result, rationale, option strategy, timeline; publishers get the append-only update form |
+| `/ideas/[id]` | any idea term | frozen plan, **live mark card for open ideas (provisional)**, chart (candles with entry zone, targets and stop drawn, interval buttons and a crosshair OHLC/volume readout; the interval is the stock chart's saved `chart.settings`; link to the full stock page; once the idea has traded, markers show the entry, each target and the exit on their candles, plus a "Trade:" line with dates / times), tracked result, rationale, option strategy, timeline; publishers get the append-only update form |
 | `/ideas/mine` | any idea term | **My trades**: your own recorded trades (open ones marked to the latest price, closed ones at your exit), the desk's result beside yours, and followed vs not followed |
 | `/ideas/performance` | any idea term | desk stats, coverage banner, equity curve in R, breakdowns, closed-ideas table, metric definitions |
 | `/ideas/publish` | `publish_ideas` or admin | composer (live reward:risk readout), preview of what each plan tier gets plus the alert payload, drafts, publish now **or schedule**, own-ideas list, "Run tracker now". Lives under `/ideas`, not `/admin`, because analysts later will not be admins. |

@@ -85,8 +85,8 @@ export function useBoardLive(enabled: boolean) {
 function entryText(m: LiveMark): string {
   switch (m.state) {
     case 'in_zone': return 'Price is in the entry zone';
-    case 'ran_past_target': return 'Ran past target 1 without entering';
-    case 'beyond_stop': return 'Beyond the stop, not entered';
+    case 'ran_past_target': return 'Past target 1, waiting for the zone';
+    case 'beyond_stop': return 'Beyond the stop, waiting for the zone';
     default:
       return m.zone && m.zone.side !== 'inside'
         ? `${m.zone.distancePts.toFixed(2)} pts (${m.zone.distancePct.toFixed(1)}%) ${m.zone.side} the entry zone`

@@ -7,6 +7,23 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-11-18 (chart markers) — Trade Ideas: entry, target and exit markers on the idea chart
+
+- **Why (user request):** show when an idea entered and exited on its chart (example: ISRG entered 11/11, exited 11/13).
+- **Changed:** `lib/ideas.ts` (`IdeaOutcomeView.events`, read from `nt_idea_outcomes.events`; `IDEA_COLS` selects `o.events`, so the list endpoints carry it too), `components/ideas/IdeaChart.tsx` (new `events` prop; markers: Entered at the entry price (arrow, blue), T1/T2.. (green circle), Stopped / Expired / Closed early with price (red / gray square); a "Trade:" line under the chart with the same facts, with the ET time when known), `app/ideas/[id]/page.tsx` (passes direction and `outcome.events`), `docs/trade-ideas.md`.
+- **Placement:** daily interval = the event's session candle. Intraday intervals = the candle that contains the event's instant (a 15-minute entry is stamped at its bar's close), or, for date-only events (daily-bar exits), the first (entry) / last (exit) candle of that session. Events outside the loaded intraday window (`INTRADAY_DAYS`) are not drawn but stay in the text line. Never-entered and cancelled ideas have nothing to mark.
+- **Verified:** `npx tsc --noEmit` clean, eslint 0 errors; ISRG's stored events (read-only DB query) have the expected shape: `triggered` at 2026-11-11T16:15Z, price 440, and `expired` on 2026-11-13, price 443.59.
+- **Not verified:** in a browser (marker positions and text, overlap of several markers on one candle, the intraday mapping).
+
+## 2026-11-18 — Trade Ideas: an un-entered idea waits for its zone (no more "ran past T1 / through the stop")
+
+- **Why (user request):** NVDA idea #3 (long, zone 95–110, T1 135, stop 85, valid until 2027-12-18, ref price 155.49) was published 02:18Z and scored `not_triggered` at 14:47Z the same day ("closed at or past the first target without a close inside the entry zone"), and the outcome email went out. Wanted: stay live until the price comes into the zone; outcomes only after an entry.
+- **Changed:** `lib/ideaScoring.ts` (both bases: the 15-minute loop and the daily loop no longer end an un-entered idea when price is at/past T1 or through the stop; only enter-by, valid-until or a cancel do), `lib/ideas.ts` (`evaluateIdeas`: an idea with outcome `pending` resumes its 15-minute read from `evaluated_through` instead of the publish time, since it can now wait a year; a rebuild with `all` still reads everything), `components/ideas/LiveMark.tsx` / `LiveChip.tsx` (wording says it keeps waiting), `scripts/test-idea-scoring.mjs` (4 old assertions flipped to `pending`, +1 NVDA-style case: published above T1, enters later), `docs/trade-ideas.md`.
+- **Verified:** `node scripts/test-idea-scoring.mjs` (72 checks pass), `scripts/test-idea-alerts.mjs` (31 pass), `npx tsc --noEmit` clean. DB read-only: idea #3 is `expired` with outcome `not_triggered` and one `not_triggered` event.
+- **Not verified:** a live tracker run with the new rule; the resume-from-`evaluated_through` read against the real 15-minute feed (if the daily bars were ever ahead of the intraday bars the resume could skip days; not seen).
+- **Behaviour change to know:** ideas already finished as `not_triggered` for this reason are not re-opened by a normal run (the tracker only picks `live`/`triggered`); a `force` rebuild would re-score them as pending. **Idea #3 itself was NOT changed** (its `not_triggered` event is append-only and was already emailed): decision pending on whether to revive it or republish.
+- **Follow-ups:** the publish preview should still warn when price is already beyond T1 or the zone is far from the last close (it only warns on distance); the "never triggered" email text says "before the idea expired", fine now that only dates end it.
+
 ## 2026-11-17 (earnings fallback) — Actuals-only results from the feed's results summaries
 
 - **Why:** the results headlines the earnings cron parses (Benzinga, via the Alpaca news feed) stopped arriving. Verified 2026-11-17: 11 results rows were stored for 11-16 (fetched 21:32 UTC) and none for 11-17; the live feed (400 items from midnight UTC, all symbols) held only `source: fiscal.ai` items, none a results headline, and the 11-16 symbols' results headlines were gone from it too; neither `include_content` nor `exclude_contentless` (Alpaca's only documented filters) brings them back. Cause unknown (plan, licensing or feed change at Alpaca; unverified), so Alpaca support has to be asked. HD, DIS, NVDA, JD and others reported 11-17 with no stored result.

@@ -114,11 +114,11 @@ function describe(m: LiveMarkData): string | null {
         ? 'Not entered yet. Price is inside the entry zone; the idea enters when a 15-minute candle closes inside it (checked every 15 minutes).'
         : 'Not entered yet. Price is inside the entry zone; the tracker enters on a completed session that touches it.';
     case 'ran_past_target':
-      return 'Not entered yet. Price is already past target 1 without entering.';
+      return 'Not entered yet. Price is past target 1; the idea keeps waiting for a close inside the entry zone.';
     case 'beyond_stop':
       return m.entered
         ? 'Price is beyond the stop. The official result is set when the daily bar is scored.'
-        : 'Not entered yet. Price is beyond the stop.';
+        : 'Not entered yet. Price is beyond the stop; the idea keeps waiting for a close inside the entry zone.';
     default: return null;
   }
 }

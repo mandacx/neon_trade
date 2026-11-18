@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   createChart, ColorType, LineStyle, TickMarkType,
-  type CandlestickData, type HistogramData, type IChartApi, type ISeriesApi, type MouseEventParams, type Time,
+  type CandlestickData, type HistogramData, type IChartApi, type ISeriesApi, type MouseEventParams, type SeriesMarker, type Time,
 } from 'lightweight-charts';
 import { CHART_INTERVALS, type ChartInterval } from '@/lib/chartPrefs';
 import { useChartPrefs } from '@/components/charts/useChartPrefs';
@@ -18,7 +18,18 @@ export interface ChartPlan {
   stop: number;
   /** Start the daily chart a little before this date (YYYY-MM-DD). */
   from: string;
+  direction?: string;
 }
+
+/** A tracked event (lib/ideaScoring.ts): drawn as a marker on its candle. `at` = ISO instant when the scorer knows it. */
+export interface ChartEvent { type: string; date: string; price: number | null; detail?: string; at?: string }
+
+const fmtTimeET = (iso: string) => new Date(iso).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' });
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const shortDay = (d: string) => `${MONTHS[Number(d.slice(5, 7)) - 1]} ${Number(d.slice(8, 10))}`;
+const EXIT_LABEL: Record<string, string> = { stopped: 'Stopped', expired: 'Expired', closed_by_publisher: 'Closed early' };
+/** Events that become markers: the trade itself. Never-entered / cancelled ideas have no trade to mark. */
+const isTradeEvent = (e: ChartEvent) => e.type === 'triggered' || e.type === 'target_hit' || e.type in EXIT_LABEL;
 
 const TZ = 'America/New_York'; // exchange time, like the stock chart
 const addDays = (d: string, n: number) => new Date(Date.parse(`${d}T12:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
@@ -39,7 +50,7 @@ const px = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, 
  * It is the charting library on the app's own OHLC route, not a streaming widget, so what you see is the plan as
  * published (docs/trade-ideas.md). Intraday history is the recent window only (no scroll-back loading here).
  */
-export default function IdeaChart({ plan, height = 360 }: { plan: ChartPlan; height?: number }) {
+export default function IdeaChart({ plan, events = [], height = 360 }: { plan: ChartPlan; events?: ChartEvent[]; height?: number }) {
   const ref = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
@@ -156,6 +167,56 @@ export default function IdeaChart({ plan, height = 360 }: { plan: ChartPlan; hei
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, interval, plan.symbol, plan.from, plan.entryLow, plan.entryHigh, plan.stop, plan.targets.length, height]);
 
+  // Entry / target / exit markers on the candle where each happened. Daily: the event's session. Intraday: the bar that
+  // contains the event's instant (a 15-minute entry is stamped at the bar's close), or for date-only events the
+  // first (entry) / last (exit) bar of that session. Events outside the loaded window are simply not drawn.
+  const tradeEvents = events.filter(isTradeEvent);
+  const eventsKey = JSON.stringify(tradeEvents);
+  useEffect(() => {
+    const candles = candleRef.current;
+    if (!candles) return;
+    if (state !== 'ready') { try { candles.setMarkers([]); } catch { /* chart gone */ } return; }
+    const long = plan.direction !== 'short';
+    const list = [...barsRef.current.values()];
+    const dayOf = (t: number) => new Date(t * 1000).toLocaleDateString('en-CA', { timeZone: TZ });
+    const markers: SeriesMarker<Time>[] = [];
+    for (const e of tradeEvents) {
+      let time: Time | null = null;
+      if (!intraday) {
+        if (barsRef.current.has(e.date)) time = e.date as Time;
+      } else if (e.at) {
+        const ms = Date.parse(e.at) - 1000;
+        let hit: number | null = null;
+        for (const b of list) { const t = Number(b.time); if (t * 1000 <= ms) hit = t; else break; }
+        if (hit != null && dayOf(hit) === dayOf(ms / 1000)) time = hit as Time;
+      } else {
+        const day = list.filter(b => dayOf(Number(b.time)) === e.date);
+        const pick = e.type === 'triggered' ? day[0] : day[day.length - 1];
+        if (pick) time = pick.time;
+      }
+      if (time == null) continue;
+      const price = e.price != null ? px(e.price) : '';
+      if (e.type === 'triggered') {
+        markers.push({ time, position: long ? 'belowBar' : 'aboveBar', shape: long ? 'arrowUp' : 'arrowDown', color: '#2563eb', text: `Entered ${price}`.trim() });
+      } else if (e.type === 'target_hit') {
+        markers.push({ time, position: long ? 'aboveBar' : 'belowBar', shape: 'circle', color: '#16a34a', text: e.detail ?? 'Target' });
+      } else {
+        const stop = e.type === 'stopped';
+        markers.push({ time, position: long === stop ? 'belowBar' : 'aboveBar', shape: 'square', color: stop ? '#dc2626' : '#6b7280', text: `${EXIT_LABEL[e.type]} ${price}`.trim() });
+      }
+    }
+    markers.sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0));
+    try { candles.setMarkers(markers); } catch { /* chart gone */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eventsKey, state, interval, plan.direction]);
+
+  // The same facts as text, so they stay visible when a marker's candle is outside the loaded window.
+  const summary = tradeEvents.map(e => {
+    const when = `${shortDay(e.date)}${e.at ? ` ${fmtTimeET(e.at)} ET` : ''}`;
+    const p = e.price != null ? ` @ ${px(e.price)}` : '';
+    return e.type === 'triggered' ? `Entered ${when}${p}` : e.type === 'target_hit' ? `${e.detail ?? 'Target'} ${when}${p}` : `${EXIT_LABEL[e.type]} ${when}${p}`;
+  });
+
   const change = shown ? shown.close - shown.open : 0;
   const up = change >= 0;
 
@@ -200,6 +261,11 @@ export default function IdeaChart({ plan, height = 360 }: { plan: ChartPlan; hei
           </div>
         )}
       </div>
+      {summary.length > 0 && (
+        <p className="px-1 pt-1.5 text-[11px] text-gray-600">
+          <span className="font-semibold text-gray-700">Trade:</span> {summary.join(' · ')}
+        </p>
+      )}
     </div>
   );
 }
