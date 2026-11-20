@@ -90,7 +90,7 @@ export async function getLatestStockData(symbol: string, standardOnly: ExpirySco
       return null;
     }
 
-    return sanitizeStockData(result[0]);
+    return (await carryLevels([sanitizeStockData(result[0])]))[0];
   } catch (error) {
     console.error('Error fetching stock data:', error);
     throw error;
@@ -135,7 +135,7 @@ export async function getHistoricalStockData(
       ORDER BY trade_date ASC
     `;
 
-    return result.map(row => sanitizeStockData(row));
+    return await carryLevels(result.map(row => sanitizeStockData(row)));
   } catch (error) {
     console.error('Error fetching historical data:', error);
     throw error;
@@ -214,7 +214,7 @@ export async function getStockDataAsOf(symbol: string, asOf: string, expiryDate?
       return null;
     }
 
-    return sanitizeStockData(result[0]);
+    return (await carryLevels([sanitizeStockData(result[0])]))[0];
   } catch (error) {
     console.error('Error fetching stock data as-of:', error);
     throw error;
@@ -258,7 +258,7 @@ export async function getAllStocksLatest(): Promise<StockData[]> {
       ORDER BY s.symbol
     `;
 
-    return result.map(row => sanitizeStockData(row));
+    return await carryLevels(result.map(row => sanitizeStockData(row)));
   } catch (error) {
     console.error('Error fetching all stocks:', error);
     throw error;
@@ -296,7 +296,7 @@ export async function getAllStocksByDate(date: string): Promise<StockData[]> {
       ORDER BY symbol
     `;
 
-    return result.map((row: any) => sanitizeStockData(row as StockData));
+    return await carryLevels(result.map((row: any) => sanitizeStockData(row as StockData)));
   } catch (error) {
     console.error('Error fetching stocks by date:', error);
     throw error;
@@ -408,7 +408,7 @@ export async function getAllStocksByDateAndExpiry(tradeDate: string, expiryDate:
       ORDER BY symbol
     `;
 
-    return result.map((row: any) => sanitizeStockData(row as StockData));
+    return await carryLevels(result.map((row: any) => sanitizeStockData(row as StockData)));
   } catch (error) {
     console.error('Error fetching stocks by date and expiry:', error);
     throw error;
@@ -494,7 +494,7 @@ export async function getStockDataByExpiry(symbol: string, expiryDate: string): 
       return null;
     }
 
-    return sanitizeStockData(result[0] as StockData);
+    return (await carryLevels([sanitizeStockData(result[0] as StockData)]))[0];
   } catch (error) {
     console.error('Error fetching stock data by expiry:', error);
     throw error;
@@ -502,47 +502,58 @@ export async function getStockDataByExpiry(symbol: string, expiryDate: string): 
 }
 
 /**
- * Level rows the loader failed to calculate continue from the previous good day (lib/levelFill.ts has the rule). Rows
- * must belong to one symbol; any order is fine for a single row, otherwise ascending by trade date. The previous good
- * row before the earliest date is looked up (max 60 days back) only for expiries whose first row needs a fill, so a clean
- * window costs no extra query. Adds `carriedFrom` (the trade date the levels came from, or null) to every row.
+ * Level rows the loader failed to calculate continue from the previous good day (lib/levelFill.ts has the rule). Works
+ * for one symbol or many: rows are grouped by symbol + expiry and, within a group, must be ascending by trade date
+ * (the multi-symbol readers return one row per group). The previous good row before each group's first row is looked
+ * up (max 60 days back, one query for all groups) only for groups whose first row needs a fill, so a clean result costs
+ * no extra query. Adds `carriedFrom` (the trade date the levels came from, or null) to every row. A failed lookup
+ * serves the rows as stored.
  */
-export async function withCarriedLevels<T extends StockData>(symbol: string, rows: T[]): Promise<Array<T & { carriedFrom: string | null }>> {
+export async function carryLevels<T extends StockData>(rows: T[]): Promise<Array<T & { carriedFrom: string | null }>> {
   if (rows.length === 0) return [];
-  const firstByExpiry = new Map<string, T>();
-  for (const r of rows) if (!firstByExpiry.has(r.EXPIRY_DT)) firstByExpiry.set(r.EXPIRY_DT, r);
-  const expiries = [...firstByExpiry].filter(([, r]) => needsFill(r)).map(([e]) => e);
+  const keyOf = (r: { SYMBOL?: string; EXPIRY_DT: string }) => `${r.SYMBOL ?? ''}|${r.EXPIRY_DT}`;
+  const firstByKey = new Map<string, T>();
+  for (const r of rows) {
+    const k = keyOf(r);
+    const f = firstByKey.get(k);
+    if (!f || r.TRADE_DATE < f.TRADE_DATE) firstByKey.set(k, r);
+  }
+  const need = [...firstByKey.values()].filter(needsFill);
   const seeds = new Map<string, StockData>();
-  if (expiries.length > 0) {
-    const before = [...firstByExpiry.values()].map(r => r.TRADE_DATE).sort()[0];
+  if (need.length > 0) {
     try {
       const found = await sql`
-        SELECT DISTINCT ON (expiry_dt)
-          symbol as "SYMBOL",
-          expiry_dt::text as "EXPIRY_DT",
-          trade_date::text as "TRADE_DATE",
-          COALESCE(put_int, 0) as "PUT_INT",
-          COALESCE(call_int, 0) as "CALL_INT",
-          COALESCE(comb_int, 0) as "PUT_CALL_INT",
-          COALESCE(call_low, 0) as call_low,
-          COALESCE(put_high, 0) as "put_HIGH",
-          COALESCE(call_high, 0) as "call_HIGH",
-          COALESCE(put_low, 0) as "put_LOW"
-        FROM public.eod_usmkts_price
-        WHERE symbol = ${symbol.toUpperCase()}
-          AND expiry_dt = ANY(${expiries}::date[])
-          AND trade_date < ${before}::date
-          AND trade_date >= ${before}::date - 60
-          AND put_low > 0 AND put_int > 0 AND comb_int > 0 AND call_int > 0 AND call_high > 0
-        ORDER BY expiry_dt, trade_date DESC
+        SELECT
+          k.sym as "SYMBOL",
+          k.exp::text as "EXPIRY_DT",
+          s.trade_date::text as "TRADE_DATE",
+          s.put_int as "PUT_INT",
+          s.call_int as "CALL_INT",
+          s.comb_int as "PUT_CALL_INT",
+          s.call_low as call_low,
+          s.put_high as "put_HIGH",
+          s.call_high as "call_HIGH",
+          s.put_low as "put_LOW"
+        FROM unnest(${need.map(r => r.SYMBOL)}::text[], ${need.map(r => r.EXPIRY_DT)}::date[], ${need.map(r => r.TRADE_DATE)}::date[]) AS k(sym, exp, td)
+        CROSS JOIN LATERAL (
+          SELECT trade_date, put_int, call_int, comb_int, call_low, put_high, call_high, put_low
+          FROM public.eod_usmkts_price p
+          WHERE p.symbol = k.sym
+            AND p.expiry_dt = k.exp
+            AND p.trade_date < k.td
+            AND p.trade_date >= k.td - 60
+            AND p.put_low > 0 AND p.put_int > 0 AND p.comb_int > 0 AND p.call_int > 0 AND p.call_high > 0
+          ORDER BY p.trade_date DESC
+          LIMIT 1
+        ) s
       `;
-      for (const f of found) seeds.set(f.EXPIRY_DT, sanitizeStockData(f));
+      for (const f of found) seeds.set(keyOf(f as any), sanitizeStockData(f));
     } catch (error) {
       // The carry-forward is a repair; if its lookup fails the rows are served as stored.
       console.error('Error fetching prior levels:', error);
     }
   }
-  return fillLevelRows(rows, seeds);
+  return fillLevelRows(rows, seeds, keyOf);
 }
 
 /**
@@ -591,7 +602,7 @@ export async function getNearestExpiryLatestForSymbols(symbols: string[], standa
       )
       SELECT * FROM ranked WHERE rn = 1
     `;
-    return result.map((row: any) => sanitizeStockData(row));
+    return await carryLevels(result.map((row: any) => sanitizeStockData(row)));
   } catch (error) {
     console.error('Error fetching nearest-expiry latest data for symbols:', error);
     return [];
@@ -638,7 +649,7 @@ export async function getStockDataForSymbolsAtExpiry(symbols: string[], expiryDa
       )
       SELECT * FROM ranked WHERE rn = 1
     `;
-    return result.map((row: any) => sanitizeStockData(row));
+    return await carryLevels(result.map((row: any) => sanitizeStockData(row)));
   } catch (error) {
     console.error('Error fetching stock data for symbols at expiry:', error);
     return [];

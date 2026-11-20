@@ -80,4 +80,16 @@ ok('inputs are not mutated', () => {
   assert.equal(JSON.stringify(d18), before);
 });
 
+ok('multi-symbol readers: groups keyed by symbol + expiry never borrow from each other', () => {
+  const keyOf = r => `${r.SYMBOL}|${r.EXPIRY_DT}`;
+  const soxl = { SYMBOL: 'SOXL', ...d18 };
+  const wm = { SYMBOL: 'WM', ...row('2026-11-18', 0, 330, 330, 330, 0, 0, 0) };
+  const seeds = new Map([['SOXL|2026-12-18', { SYMBOL: 'SOXL', ...d17 }]]);
+  const out = fillLevelRows([soxl, wm], seeds, keyOf);
+  assert.equal(out[0].PUT_INT, 54.83); // SOXL continues
+  assert.equal(out[0].carriedFrom, '2026-11-17');
+  assert.equal(out[1].PUT_INT, 330); // WM has no earlier good row: left as stored, nothing borrowed from SOXL
+  assert.equal(out[1].carriedFrom, null);
+});
+
 console.log(`\n${n} groups passed`);

@@ -203,6 +203,10 @@ async function getSectorBreakdown(latestDate: string | null, prevDate: string | 
         MAX(COALESCE(call_high, 0)) as call_high
       FROM public.eod_usmkts_price
       WHERE trade_date = ${latestDate}
+        -- Not the loader's failed calculations (lib/levelFill.ts isFailedLevelRow): a middle level empty, or the three
+        -- middle levels collapsed to one placeholder strike with an outer level empty. MAX would pick the placeholder.
+        AND COALESCE(put_int, 0) > 0 AND COALESCE(comb_int, 0) > 0 AND COALESCE(call_int, 0) > 0
+        AND NOT (put_int = comb_int AND comb_int = call_int AND (COALESCE(put_low, 0) <= 0 OR COALESCE(call_high, 0) <= 0))
       GROUP BY symbol
     `,
       sql`

@@ -53,17 +53,22 @@ export function needsFill(r: LevelFields): boolean {
 type Last = { levels: LevelFields; from: string };
 
 /**
- * Fills a list of rows in ascending trade-date order, tracking each expiry on its own (`seeds` = the latest good row
- * before the first one, per expiry). Returns new rows, same order, each with `carriedFrom`: the trade date the values
+ * Fills a list of rows in ascending trade-date order, tracking each `keyOf` group on its own (default: the expiry; the
+ * multi-symbol readers use symbol + expiry). `seeds` = the latest good row before the first one, per key. Returns new rows, same order, each with `carriedFrom`: the trade date the values
  * were taken from, or null when the row is untouched.
  */
-export function fillLevelRows<T extends LevelRow>(rows: T[], seeds: Map<string, LevelRow> = new Map()): Array<T & { carriedFrom: string | null }> {
+export function fillLevelRows<T extends LevelRow>(
+  rows: T[],
+  seeds: Map<string, LevelRow> = new Map(),
+  keyOf: (r: LevelRow) => string = r => r.EXPIRY_DT,
+): Array<T & { carriedFrom: string | null }> {
   const last = new Map<string, Last>();
   for (const [expiry, s] of seeds) {
     if (!isFailedLevelRow(s)) last.set(expiry, { levels: pick(s), from: s.TRADE_DATE });
   }
   return rows.map(row => {
-    const prev = last.get(row.EXPIRY_DT);
+    const key = keyOf(row);
+    const prev = last.get(key);
     let out: T & { carriedFrom: string | null } = { ...row, carriedFrom: null };
     if (prev && needsFill(row)) {
       if (isFailedLevelRow(row)) {
@@ -74,7 +79,7 @@ export function fillLevelRows<T extends LevelRow>(rows: T[], seeds: Map<string, 
         if (Object.keys(patch).length) out = { ...row, ...patch, carriedFrom: prev.from };
       }
     }
-    if (!isFailedLevelRow(out)) last.set(row.EXPIRY_DT, { levels: pick(out), from: out.carriedFrom ?? row.TRADE_DATE });
+    if (!isFailedLevelRow(out)) last.set(key, { levels: pick(out), from: out.carriedFrom ?? row.TRADE_DATE });
     return out;
   });
 }

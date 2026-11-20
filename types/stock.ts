@@ -21,6 +21,8 @@ export interface StockData {
   CALL_OI: number;
   PUT_OI: number;
   OI_DIFF: number;
+  /** Set when the levels were continued from an earlier good day (lib/levelFill.ts): that trade date, else null. */
+  carriedFrom?: string | null;
 }
 
 // Level calculation result

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getLatestStockData, getHistoricalStockData, getStockDataByExpiry, getStockDataAsOf, withCarriedLevels, sql } from '@/lib/db';
+import { getLatestStockData, getHistoricalStockData, getStockDataByExpiry, getStockDataAsOf, carryLevels, sql } from '@/lib/db';
 import { calculateLevels, findClosestLevel } from '@/lib/calculations';
 import { formatPercentage } from '@/lib/utils';
 import { getDayBars, referenceClose } from '@/lib/dayBars';
@@ -109,7 +109,9 @@ export async function GET(
             AND trade_date <= ${to}
           ORDER BY trade_date ASC
         `;
-        historicalData = result.map((row: any) => ({
+        // Levels the loader failed to calculate continue from the previous good day (lib/levelFill.ts). The
+        // lib/db.ts readers do this themselves; this query is inline, so it is applied here.
+        historicalData = await carryLevels(result.map((row: any) => ({
           SYMBOL: row.SYMBOL,
           EXPIRY_DT: row.EXPIRY_DT,
           TRADE_DATE: row.TRADE_DATE,
@@ -129,13 +131,10 @@ export async function GET(
           OPEN: 0,
           HIGH: 0,
           LOW: 0,
-        }));
+        })));
       } else {
         historicalData = await getHistoricalStockData(symbol, from, to, stdOnly);
       }
-
-      // Levels the loader failed to calculate continue from the previous good day (lib/levelFill.ts).
-      historicalData = await withCarriedLevels(symbol, historicalData);
 
       const dayBars = await barsPromise;
       const processedData = historicalData.map(rawData => {
@@ -281,9 +280,8 @@ export async function GET(
         });
       }
 
-      // A failed calculation continues from the previous good day (lib/levelFill.ts); `carriedFrom` says which day.
-      const [filled] = await withCarriedLevels(symbol, [stockData]);
-      stockData = filled;
+      // The lib/db.ts readers continue a failed calculation from the previous good day (lib/levelFill.ts);
+      // `carriedFrom` says which day.
       const levels = calculateLevels(stockData);
       const closest = findClosestLevel(levels);
 
@@ -294,7 +292,7 @@ export async function GET(
           tradeDate: stockData.TRADE_DATE,
           expiryDate: stockData.EXPIRY_DT,
           close: stockData.CLOSE,
-          carriedFrom: filled.carriedFrom,
+          carriedFrom: stockData.carriedFrom ?? null,
           levels: {
             put_low: stockData.put_LOW,
             put_int: stockData.PUT_INT,
