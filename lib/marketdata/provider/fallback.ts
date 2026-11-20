@@ -5,6 +5,7 @@
 import axios, { type AxiosInstance } from 'axios';
 import type { Bar, OptionChainContract, Snapshot } from '../types';
 import type { ChartInterval } from '../intervals';
+import { mapReportedQuarters, type ReportedQuarter } from './feedMap.ts';
 
 const TRADIER_API_URL = process.env.TRADIER_API_URL || 'https://api.tradier.com/v1';
 const TRADIER_API_KEY = process.env.TRADIER_API_KEY || '';
@@ -385,6 +386,23 @@ export async function getOptionExpirations(symbol: string): Promise<string[]> {
   const res = await tradierClient.get('/markets/options/expirations', { params: { symbol: symbol.toUpperCase(), includeAllRoots: true }, timeout: 5000 });
   const d = res.data?.expirations?.date;
   return (!d ? [] : Array.isArray(d) ? d : [d]).filter((x: unknown): x is string => typeof x === 'string').sort();
+}
+
+/**
+ * Latest reported quarter's EPS per symbol (period end + basic / diluted EPS), from the beta fundamentals financials table
+ * (verified live 2026-11-19: HTTP 200, a batch of 9 symbols accepted for the calendar endpoint; the financials batch is
+ * unverified). No news, no estimate, no revenue and no announcement date. The table can lag a release, so an
+ * old `asOf` just means "not updated yet". Throws on HTTP failure; symbols with no data are absent from the map.
+ */
+export async function getReportedQuarters(symbols: string[]): Promise<Map<string, ReportedQuarter>> {
+  const out = new Map<string, ReportedQuarter>();
+  const base = TRADIER_API_URL.replace(/\/v1\/?$/, '');
+  for (let i = 0; i < symbols.length; i += 20) {
+    const chunk = symbols.slice(i, i + 20).map(s => s.toUpperCase());
+    const res = await tradierClient.get(`${base}/beta/markets/fundamentals/financials`, { params: { symbols: chunk.join(',') }, timeout: 8000 });
+    for (const [sym, q] of mapReportedQuarters(res.data)) out.set(sym, q);
+  }
+  return out;
 }
 
 /** 'YYYY-MM-DD HH:mm' in US/Eastern, the clock Tradier's timesales start/end use. */

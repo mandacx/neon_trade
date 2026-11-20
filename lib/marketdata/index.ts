@@ -8,12 +8,13 @@
  * never this file.
  *
  *  - primary  : stock/option bars and snapshots, calendar, news
- *  - fallback : symbol search, the live option chain (quotes, greeks, open interest) and its expiries,
+ *  - feed     : per-symbol news (read first for named symbols) and the per-symbol earnings calendar (newsFeed.ts)
+ *  - fallback : symbol search, reported EPS (no news at this vendor), the live option chain (quotes, greeks, open interest) and its expiries,
  *               and daily/intraday bars and live quotes (getIndexSnapshots) for the indices the primary
  *               has none for (SPX, NDX; no volume)
  *  - crypto   : live quotes and candles for the crypto levels page (getCryptoTickers, getCryptoBars)
  */
-export type { Bar, Snapshot, OptionSnapshot, OptionChainContract, CalendarRow, NewsArticle, NewsArticleFull } from './types';
+export type { Bar, Snapshot, OptionSnapshot, OptionChainContract, CalendarRow, NewsArticle, NewsArticleFull, ReportedQuarter, EarningsFigures } from './types';
 export type { ChartInterval } from './intervals';
 export { isIntradayInterval } from './intervals';
 
@@ -36,9 +37,11 @@ export {
   getOptionChainSnapshots,
   fetchCalendar,
   fetchNewsPage,
-  fetchLatestNews,
 } from './provider/primary';
 export type { DailyClose, PacedBarsResult } from './provider/primary';
+
+// News and earnings figures, with the source order decided in one place (see newsFeed.ts).
+export { fetchLatestNews, fetchSymbolHeadlines, fetchEarningsFigures, hasEarningsFeed, FeedRateLimited } from './newsFeed';
 
 export {
   getBarsForChart as getFallbackBars,
@@ -51,6 +54,7 @@ export {
   getOptionChainContracts,
   getOptionExpirations,
   getExtendedHoursLast,
+  getReportedQuarters,
 } from './provider/fallback';
 
 export { getCryptoTickers, getCryptoBars } from './provider/crypto';

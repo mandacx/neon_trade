@@ -22,7 +22,11 @@
 import { sql } from '@/lib/db';
 import { acquireLease, releaseLease } from '@/lib/jobLease';
 import { parseEarningsHeadline, parseFiscalSummary, symbolsForResult, easternDateAndSession } from '@/lib/earningsParse';
-import { fetchNewsPage, type NewsArticle } from '@/lib/marketdata';
+import { pickFeedActuals, pickFallbackEps } from '@/lib/earningsFeed';
+import {
+  fetchNewsPage, fetchSymbolHeadlines, fetchEarningsFigures, hasEarningsFeed, FeedRateLimited, getReportedQuarters,
+  type NewsArticle,
+} from '@/lib/marketdata';
 import { getScannerSymbols } from '@/lib/usUniverse';
 import type { EarningsBadge, EarningsEvent, EarningsOutcome, EarningsRangeRow, EarningsResult, EarningsSummary, EarningsTime } from '@/types/earnings';
 
@@ -188,11 +192,23 @@ interface ResultRow {
   salesActual: number | null;
   salesEstimate: number | null;
   salesOutcome: EarningsOutcome | null;
-  /** 'alpaca_fiscal' = actuals only, read from the feed's results summaries when the results headlines are absent. */
-  source: 'alpaca_news' | 'alpaca_fiscal' | 'alphavantage';
+  /**
+   * Result tiers, best first (a better tier is never overwritten by a worse one; see the upsert's source rules):
+   *  - headline tier: 'webull_news' (secondary feed) and 'alpaca_news' (primary feed): EPS and sales vs consensus, parsed
+   *    from a results headline;
+   *  - 'alpaca_fiscal': actuals only, read from the primary feed's results summaries;
+   *  - structured tier, actuals only: 'webull_cal' (secondary earnings calendar), 'tradier_fin' (fallback vendor EPS);
+   *  - 'alphavantage': the retired history backfill.
+   */
+  source: ResultSource;
   headline: string | null;
   newsId: number | null;
 }
+
+type ResultSource = 'alpaca_news' | 'webull_news' | 'alpaca_fiscal' | 'webull_cal' | 'tradier_fin' | 'alphavantage';
+
+/** A news id that is not an exact JS integer cannot be stored faithfully in `news_id`: leave it null (the headline is kept). */
+const safeNewsId = (id: number): number | null => (Number.isSafeInteger(id) ? id : null);
 
 /**
  * Insert or merge reported quarters. A row lands on an existing report for
@@ -247,16 +263,20 @@ async function upsertResults(input: ResultRow[]): Promise<number> {
       report_time        = CASE WHEN EXCLUDED.source = 'alphavantage' THEN COALESCE(EXCLUDED.report_time, n.report_time) ELSE COALESCE(n.report_time, EXCLUDED.report_time) END,
       fiscal_date_ending = COALESCE(EXCLUDED.fiscal_date_ending, n.fiscal_date_ending),
       period             = COALESCE(n.period, EXCLUDED.period),
-      eps_actual         = CASE WHEN n.source = 'alpaca_news' THEN COALESCE(n.eps_actual, EXCLUDED.eps_actual) ELSE COALESCE(EXCLUDED.eps_actual, n.eps_actual) END,
-      eps_estimate       = CASE WHEN n.source = 'alpaca_news' THEN COALESCE(n.eps_estimate, EXCLUDED.eps_estimate) ELSE COALESCE(EXCLUDED.eps_estimate, n.eps_estimate) END,
-      eps_surprise_pct   = CASE WHEN n.source = 'alpaca_news' THEN COALESCE(n.eps_surprise_pct, EXCLUDED.eps_surprise_pct) ELSE COALESCE(EXCLUDED.eps_surprise_pct, n.eps_surprise_pct) END,
-      eps_outcome        = CASE WHEN n.source = 'alpaca_news' THEN COALESCE(n.eps_outcome, EXCLUDED.eps_outcome) ELSE COALESCE(EXCLUDED.eps_outcome, n.eps_outcome) END,
-      eps_adjusted       = CASE WHEN n.source = 'alpaca_news' THEN COALESCE(n.eps_adjusted, EXCLUDED.eps_adjusted) ELSE COALESCE(EXCLUDED.eps_adjusted, n.eps_adjusted) END,
-      sales_actual       = CASE WHEN n.source = 'alpaca_news' THEN COALESCE(n.sales_actual, EXCLUDED.sales_actual) ELSE COALESCE(EXCLUDED.sales_actual, n.sales_actual) END,
-      sales_estimate     = CASE WHEN n.source = 'alpaca_news' THEN COALESCE(n.sales_estimate, EXCLUDED.sales_estimate) ELSE COALESCE(EXCLUDED.sales_estimate, n.sales_estimate) END,
-      sales_outcome      = CASE WHEN n.source = 'alpaca_news' THEN COALESCE(n.sales_outcome, EXCLUDED.sales_outcome) ELSE COALESCE(EXCLUDED.sales_outcome, n.sales_outcome) END,
-      source             = CASE WHEN n.source = 'alpaca_news' OR EXCLUDED.source = 'alpaca_news' THEN 'alpaca_news'
-                                WHEN n.source = 'alpaca_fiscal' OR EXCLUDED.source = 'alpaca_fiscal' THEN 'alpaca_fiscal' ELSE 'alphavantage' END,
+      eps_actual         = CASE WHEN n.source IN ('alpaca_news', 'webull_news') THEN COALESCE(n.eps_actual, EXCLUDED.eps_actual) ELSE COALESCE(EXCLUDED.eps_actual, n.eps_actual) END,
+      eps_estimate       = CASE WHEN n.source IN ('alpaca_news', 'webull_news') THEN COALESCE(n.eps_estimate, EXCLUDED.eps_estimate) ELSE COALESCE(EXCLUDED.eps_estimate, n.eps_estimate) END,
+      eps_surprise_pct   = CASE WHEN n.source IN ('alpaca_news', 'webull_news') THEN COALESCE(n.eps_surprise_pct, EXCLUDED.eps_surprise_pct) ELSE COALESCE(EXCLUDED.eps_surprise_pct, n.eps_surprise_pct) END,
+      eps_outcome        = CASE WHEN n.source IN ('alpaca_news', 'webull_news') THEN COALESCE(n.eps_outcome, EXCLUDED.eps_outcome) ELSE COALESCE(EXCLUDED.eps_outcome, n.eps_outcome) END,
+      eps_adjusted       = CASE WHEN n.source IN ('alpaca_news', 'webull_news') THEN COALESCE(n.eps_adjusted, EXCLUDED.eps_adjusted) ELSE COALESCE(EXCLUDED.eps_adjusted, n.eps_adjusted) END,
+      sales_actual       = CASE WHEN n.source IN ('alpaca_news', 'webull_news') THEN COALESCE(n.sales_actual, EXCLUDED.sales_actual) ELSE COALESCE(EXCLUDED.sales_actual, n.sales_actual) END,
+      sales_estimate     = CASE WHEN n.source IN ('alpaca_news', 'webull_news') THEN COALESCE(n.sales_estimate, EXCLUDED.sales_estimate) ELSE COALESCE(EXCLUDED.sales_estimate, n.sales_estimate) END,
+      sales_outcome      = CASE WHEN n.source IN ('alpaca_news', 'webull_news') THEN COALESCE(n.sales_outcome, EXCLUDED.sales_outcome) ELSE COALESCE(EXCLUDED.sales_outcome, n.sales_outcome) END,
+      source             = CASE WHEN n.source IN ('alpaca_news', 'webull_news') THEN n.source
+                                WHEN EXCLUDED.source IN ('alpaca_news', 'webull_news') THEN EXCLUDED.source
+                                WHEN n.source = 'alpaca_fiscal' OR EXCLUDED.source = 'alpaca_fiscal' THEN 'alpaca_fiscal'
+                                WHEN n.source IN ('webull_cal', 'tradier_fin') THEN n.source
+                                WHEN EXCLUDED.source IN ('webull_cal', 'tradier_fin') THEN EXCLUDED.source
+                                ELSE 'alphavantage' END,
       headline           = COALESCE(n.headline, EXCLUDED.headline),
       news_id            = COALESCE(n.news_id, EXCLUDED.news_id),
       fetched_at         = now()
@@ -273,7 +293,7 @@ async function applyCorrections(rows: ResultRow[]): Promise<void> {
         eps_actual = ${r.epsActual}, eps_estimate = ${r.epsEstimate}, eps_surprise_pct = ${r.epsSurprisePct},
         eps_outcome = ${r.epsOutcome}, eps_adjusted = ${r.epsAdjusted}, sales_actual = ${r.salesActual},
         sales_estimate = ${r.salesEstimate}, sales_outcome = ${r.salesOutcome}, period = COALESCE(${r.period}, period),
-        source = 'alpaca_news', headline = ${r.headline}, news_id = ${r.newsId}, fetched_at = now()
+        source = ${r.source}, headline = ${r.headline}, news_id = ${r.newsId}, fetched_at = now()
       WHERE symbol = ${r.symbol} AND reported_date BETWEEN ${r.reportedDate}::date - 3 AND ${r.reportedDate}::date + 3
     `;
   }
@@ -390,7 +410,9 @@ export async function* newsPages(opts: { start: string; end?: string; symbols?: 
 }
 
 /** Turn news articles into result rows for tracked symbols. Exported for the backfill script. */
-export function resultRowsFromNews(articles: NewsArticle[], tracked: Set<string>): { rows: ResultRow[]; corrections: ResultRow[] } {
+export function resultRowsFromNews(
+  articles: NewsArticle[], tracked: Set<string>, source: 'alpaca_news' | 'webull_news' = 'alpaca_news',
+): { rows: ResultRow[]; corrections: ResultRow[] } {
   const rows: ResultRow[] = [];
   const corrections: ResultRow[] = [];
   for (const a of articles) {
@@ -414,9 +436,9 @@ export function resultRowsFromNews(articles: NewsArticle[], tracked: Set<string>
         salesActual: parsed.salesActual,
         salesEstimate: parsed.salesEstimate,
         salesOutcome: parsed.salesOutcome,
-        source: 'alpaca_news',
+        source,
         headline: a.headline.slice(0, 500),
-        newsId: a.id,
+        newsId: safeNewsId(a.id),
       };
       (parsed.correction ? corrections : rows).push(row);
     }
@@ -477,8 +499,10 @@ async function storeFiscalResults(articles: NewsArticle[], tracked: Set<string>)
 }
 
 /** Store parsed news results (merge + corrections + calendar resolution). */
-export async function storeNewsResults(articles: NewsArticle[], tracked: Set<string>): Promise<number> {
-  const { rows, corrections } = resultRowsFromNews(articles, tracked);
+export async function storeNewsResults(
+  articles: NewsArticle[], tracked: Set<string>, source: 'alpaca_news' | 'webull_news' = 'alpaca_news',
+): Promise<number> {
+  const { rows, corrections } = resultRowsFromNews(articles, tracked, source);
   let stored = await upsertResults(rows);
   await applyCorrections(corrections);
   // Fallback for reports with no results headline; never overrides headline rows (see the upsert's source rules).
@@ -535,6 +559,123 @@ export async function catchUpPendingFromNews(opts: { deadline?: number } = {}): 
 }
 
 // ---------------------------------------------------------------------------
+// Step 2a — results headlines from the secondary feed (read first; per symbol, so only for reports that are due)
+// ---------------------------------------------------------------------------
+
+/** The feed is queried one symbol at a time, so a run only asks about reports that are due, at most this many symbols. */
+const FEED_SYMBOLS_PER_RUN = 100;
+const FEED_CONCURRENCY = 3;
+
+/**
+ * Symbols whose calendar date is today or up to `backDays` days back and which have no stored result yet, in random order
+ * so a cap never starves the same symbols (the cron runs every 15 minutes; resolved symbols drop out of the list).
+ */
+async function dueSymbols(limit: number, backDays: number): Promise<string[]> {
+  const today = todayET();
+  const rows = (await sql`
+    SELECT symbol FROM public.nt_earnings_calendar
+    WHERE status IN ('scheduled', 'pending_results')
+      AND report_date BETWEEN ${addDays(today, -backDays)}::date AND ${today}::date
+    GROUP BY symbol ORDER BY random() LIMIT ${limit}
+  `) as Array<{ symbol: string }>;
+  return rows.map(r => r.symbol);
+}
+
+/**
+ * Read each due symbol's newest headlines from the secondary feed and store the results headlines among them (the same
+ * parser, merge and calendar rules as the primary feed; rows are tagged 'webull_news'). Stops at the deadline and on the
+ * first HTTP 429 (the account limit is shared). Failures of single symbols are counted, never thrown.
+ */
+export async function syncResultsFromFeed(
+  opts: { deadline?: number; pages?: number; backDays?: number; limit?: number } = {},
+): Promise<Record<string, unknown>> {
+  if (!hasEarningsFeed()) return { skipped: 'secondary feed keys not set' };
+  const symbols = await dueSymbols(opts.limit ?? FEED_SYMBOLS_PER_RUN, opts.backDays ?? 3);
+  if (symbols.length === 0) return { due: 0 };
+  const tracked = new Set(await getEarningsIngestSymbols());
+  const articles: NewsArticle[] = [];
+  let failed = 0;
+  let rateLimited = false;
+  for (let i = 0; i < symbols.length && !rateLimited; i += FEED_CONCURRENCY) {
+    if (opts.deadline && Date.now() > opts.deadline) break;
+    const settled = await Promise.allSettled(symbols.slice(i, i + FEED_CONCURRENCY).map(s => fetchSymbolHeadlines(s, opts.pages ?? 1)));
+    for (const r of settled) {
+      if (r.status === 'fulfilled') articles.push(...r.value);
+      else { failed++; if (r.reason instanceof FeedRateLimited) rateLimited = true; }
+    }
+  }
+  const results = articles.length ? await storeNewsResults(articles, tracked, 'webull_news') : 0;
+  return { due: symbols.length, articles: articles.length, results, failed, ...(rateLimited ? { rateLimited: true } : {}) };
+}
+
+// ---------------------------------------------------------------------------
+// Step 3 — structured actuals (EPS, sales) for reports that still have no result: secondary earnings calendar first,
+// then the fallback vendor's reported EPS. Actuals only: no estimate, surprise or beat/miss is ever set here.
+// ---------------------------------------------------------------------------
+
+const STRUCTURED_SYMBOLS_PER_RUN = 60;
+function actualsRow(symbol: string, reportedDate: string, period: string | null, eps: number | null, sales: number | null, source: 'webull_cal' | 'tradier_fin'): ResultRow {
+  return {
+    symbol, reportedDate, reportTime: null, period, fiscalDateEnding: null,
+    epsActual: eps, epsEstimate: null, epsSurprisePct: null, epsOutcome: null, epsAdjusted: null,
+    salesActual: sales, salesEstimate: null, salesOutcome: null, source, headline: null, newsId: null,
+  };
+}
+
+export async function syncStructuredActuals(opts: { deadline?: number } = {}): Promise<Record<string, unknown>> {
+  const today = todayET();
+  const pending = (await sql`
+    SELECT symbol, MAX(report_date)::text AS report_date FROM public.nt_earnings_calendar
+    WHERE (status = 'pending_results' OR (status = 'scheduled' AND report_date < ${today}::date))
+      AND report_date >= ${addDays(today, -14)}::date
+    GROUP BY symbol ORDER BY random() LIMIT ${STRUCTURED_SYMBOLS_PER_RUN}
+  `) as Array<{ symbol: string; report_date: string }>;
+  if (pending.length === 0) return { pending: 0 };
+
+  const rows: ResultRow[] = [];
+  const left = new Map(pending.map(p => [p.symbol, p.report_date]));
+  let rateLimited = false;
+  let feedFailed = 0;
+
+  if (hasEarningsFeed()) {
+    for (let i = 0; i < pending.length && !rateLimited; i += FEED_CONCURRENCY) {
+      if (opts.deadline && Date.now() > opts.deadline) break;
+      const batch = pending.slice(i, i + FEED_CONCURRENCY);
+      const settled = await Promise.allSettled(batch.map(p => fetchEarningsFigures(p.symbol)));
+      settled.forEach((r, k) => {
+        if (r.status === 'rejected') { feedFailed++; if (r.reason instanceof FeedRateLimited) rateLimited = true; return; }
+        const hit = pickFeedActuals(r.value, batch[k].report_date);
+        if (!hit) return;
+        rows.push(actualsRow(batch[k].symbol, batch[k].report_date, hit.period, hit.eps, hit.sales, 'webull_cal'));
+        left.delete(batch[k].symbol);
+      });
+    }
+  }
+  const fromFeed = rows.length;
+
+  let fallbackFailed = false;
+  if (left.size > 0 && !(opts.deadline && Date.now() > opts.deadline)) {
+    try {
+      const quarters = await getReportedQuarters([...left.keys()]);
+      for (const [symbol, reportDate] of left) {
+        const q = quarters.get(symbol);
+        const eps = q ? pickFallbackEps(q, reportDate) : null;
+        if (eps !== null) rows.push(actualsRow(symbol, reportDate, null, eps, null, 'tradier_fin'));
+      }
+    } catch {
+      fallbackFailed = true;
+    }
+  }
+
+  const stored = await upsertResults(rows);
+  if (stored > 0) await resolveCalendar();
+  return {
+    pending: pending.length, fromFeed, fromFallback: rows.length - fromFeed, stored,
+    ...(feedFailed ? { feedFailed } : {}), ...(rateLimited ? { rateLimited: true } : {}), ...(fallbackFailed ? { fallbackFailed: true } : {}),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Orchestration (one cron invocation)
 // ---------------------------------------------------------------------------
 
@@ -552,8 +693,16 @@ export async function processEarnings(plan: EarningsRunPlan, deadline: number): 
   };
   try {
     if (plan.calendar) await attempt('calendar', () => syncCalendar({ force: plan.forceCalendar }));
-    if (plan.news) await attempt('news', () => syncResultsFromNews({ deadline: deadline - 15_000 }));
-    if (plan.catchUp) await attempt('catchUp', () => catchUpPendingFromNews({ deadline }));
+    // Source order: the secondary feed first (only reports that are due), then the primary feed's rolling scan.
+    if (plan.news) {
+      await attempt('feed', () => syncResultsFromFeed({ deadline: deadline - 25_000 }));
+      await attempt('news', () => syncResultsFromNews({ deadline: deadline - 15_000 }));
+    }
+    if (plan.catchUp) {
+      await attempt('feedCatchUp', () => syncResultsFromFeed({ deadline: deadline - 25_000, pages: 2, backDays: 14 }));
+      await attempt('catchUp', () => catchUpPendingFromNews({ deadline: deadline - 12_000 }));
+      await attempt('structured', () => syncStructuredActuals({ deadline }));
+    }
   } finally {
     await releaseLease('earnings');
   }
@@ -580,7 +729,7 @@ function toResult(r: any): EarningsResult {
     salesEstimate: num(r.sales_estimate),
     salesOutcome: (r.sales_outcome as EarningsOutcome | null) ?? null,
     // Stored values name the feeds; clients only get the neutral kind.
-    source: r.source === 'alpaca_news' || r.source === 'alpaca_fiscal' ? 'news' : 'calendar',
+    source: r.source === 'alphavantage' ? 'calendar' : 'news',
   };
 }
 
@@ -658,7 +807,7 @@ export function earningsBadge(summary: EarningsSummary | null | undefined, expir
  */
 export async function getEarningsCoverageStart(): Promise<string | null> {
   try {
-    const rows = await sql`SELECT MIN(reported_date)::text AS d FROM public.nt_earnings WHERE source = 'alpaca_news'`;
+    const rows = await sql`SELECT MIN(reported_date)::text AS d FROM public.nt_earnings WHERE source IN ('alpaca_news', 'webull_news')`;
     return (rows[0] as { d: string | null } | undefined)?.d ?? null;
   } catch {
     return null;

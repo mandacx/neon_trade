@@ -21,7 +21,10 @@ Results should land **the same day** they're published.
 | Need | Source | Cost |
 |---|---|---|
 | Upcoming dates + EPS estimate | **Alpha Vantage `EARNINGS_CALENDAR`**: one CSV listing every symbol's next report in the coming 3 months | 1 call/day (free tier allows 25) |
-| Results (EPS, sales, consensus, beat/miss) | **Alpaca News API**: Benzinga publishes a results headline about 10 minutes after each release | None beyond the existing Alpaca key |
+| Results (EPS, sales, consensus, beat/miss) | **Benzinga results headlines**, read first from the secondary news feed (per symbol, `WEBULL_API_KEY` / `WEBULL_API_SECRET`), then from the Alpaca News API (its 30 h scan) | None beyond the keys |
+| Results, actuals only (EPS, sales), when no headline arrives | The secondary feed's per-symbol earnings calendar, then Tradier's reported EPS | Evening / weekend catch-up runs only |
+
+**Source order (2026-11-19, `docs/CHANGES.md` "news and earnings feed"):** (1) `syncResultsFromFeed`: for symbols whose calendar date is today or up to 3 days back (14 in catch-up) with no result yet, at most 100 a run, read the newest headlines and store the results headlines (rows tagged `webull_news`); (2) the Alpaca scan as before (`alpaca_news`, `alpaca_fiscal`); (3) `syncStructuredActuals` for reports still without a result: `webull_cal` (USD EPS and revenue from the feed's earnings calendar, only when the row's expected date is within 3 days of the report) then `tradier_fin` (diluted EPS of the quarter that ended 7-75 days before the report date). Step 3 never sets an estimate, surprise or beat/miss. A headline-tier row is never overwritten by a lower tier, and a later headline replaces a step-3 row's values. Tradier has no news endpoint. Dates still come only from Alpha Vantage (neither extra source gives BMO/AMC). Pure rules: `lib/earningsFeed.ts`; fixtures: `node scripts/test-feed-map.mjs`.
 
 A typical results headline looks like this:
 
@@ -79,9 +82,9 @@ The Railway service `earnings-cron` calls the route every 15 minutes. The **rout
 
 | ET window | Step |
 |---|---|
-| Weekdays 06:30–19:30 | `syncCalendar()` (first run of the UTC day; later runs see it's done and skip the call) + `syncResultsFromNews()` (rolling 30h of news for all tracked symbols, one `symbols=` request, paged) |
-| Weekdays 20:00–23:00 | `catchUpPendingFromNews()` — re-query news for symbols whose date passed with no result (last 14 days) |
-| Weekends 09:00–12:00 | catch-up again (late Friday headlines) |
+| Weekdays 06:30–19:30 | `syncCalendar()` (first run of the UTC day; later runs see it's done and skip the call) + `syncResultsFromFeed()` (due symbols, secondary feed) + `syncResultsFromNews()` (rolling 30h of news for all tracked symbols, one `symbols=` request, paged) |
+| Weekdays 20:00–23:00 | `syncResultsFromFeed({ pages: 2, backDays: 14 })` + `catchUpPendingFromNews()` — re-query news for symbols whose date passed with no result (last 14 days) + `syncStructuredActuals()` |
+| Weekends 09:00–12:00 | the same catch-up (late Friday headlines) |
 | Anything else | returns immediately, no DB access |
 
 Each run follows the same rules:

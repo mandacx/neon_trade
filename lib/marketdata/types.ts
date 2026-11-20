@@ -60,6 +60,17 @@ export interface NewsArticle {
   id: number; headline: string; symbols: string[]; created_at: string;
   /** Present only when the page was requested with content (`fetchNewsPage({ includeContent: true })`). */
   source?: string; summary?: string; content?: string;
+  /** The provider's exact id as text, when its ids do not fit a JS number (`id` is then rounded: a list key, never a lookup key). */
+  ref?: string;
+}
+
+/** One reported quarter's EPS from the structured fallback (period end, not the announcement date). */
+export interface ReportedQuarter { asOf: string; epsBasic: number | null; epsDiluted: number | null }
+
+/** One row of a symbol's earnings calendar with estimate and (once reported) actual. `expectedDate` is 'YYYY-MM-DD'. */
+export interface EarningsFigures {
+  fiscalYear: number | null; fiscalPeriod: number | null; expectedDate: string | null; currency: string | null;
+  epsActual: number | null; epsEstimate: number | null; salesActual: number | null; salesEstimate: number | null;
 }
 
 /** A news article with the fields a reader needs. `content` is the publisher's HTML (never render it raw). */
