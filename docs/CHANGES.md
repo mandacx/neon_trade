@@ -7,6 +7,13 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-11-20 (feed backfill) — the feed step also upgrades headline-less `alpaca_fiscal` results
+
+- **What:** `dueSymbols` in `lib/earnings.ts` now also returns symbols whose only stored result in the window is `source = 'alpaca_fiscal'` (a fiscal.ai one-liner: no beat/miss, no estimates), so the Benzinga results headline from the feed can replace it. Before this, only symbols with no result at all were read, so the 39 `alpaca_fiscal` rows from 2026-11-12..20 would never have been upgraded.
+- **Why:** found while backfilling last week's reports: 77 results in the last 8 days, 38 `alpaca_news` (35 with an outcome) and 39 `alpaca_fiscal` (0 with an outcome); 13 calendar rows (12 scheduled, 1 pending) had no result.
+- **Verified:** the new SQL runs on the live database (48 symbols for 3 days back, 62 for 14, read-only); `tsc` clean. Result of the forced production run is in the entry below once recorded.
+- **Not verified:** the effect on the cron's request volume at peak (up to 100 symbols per run, unchanged cap); a symbol with no Benzinga headline stays in the list for its whole window.
+
 ## 2026-11-19 (news and earnings feed) — Webull (Benzinga) read first for news and results; Tradier for reported EPS
 
 - **Why (user request):** use the Benzinga news from the Webull API as the first source for news and earnings, then Tradier. Licensing/redistribution terms were set aside by the owner (not checked; the docs pages read contained no commercial-use clause).

@@ -572,11 +572,19 @@ const FEED_CONCURRENCY = 3;
  */
 async function dueSymbols(limit: number, backDays: number): Promise<string[]> {
   const today = todayET();
+  // Also symbols whose only stored result in the window is the headline-less 'alpaca_fiscal' one-liner (no beat/miss, no
+  // estimates): the feed's results headline upgrades such a row, and the symbol drops out once it has.
   const rows = (await sql`
-    SELECT symbol FROM public.nt_earnings_calendar
-    WHERE status IN ('scheduled', 'pending_results')
-      AND report_date BETWEEN ${addDays(today, -backDays)}::date AND ${today}::date
-    GROUP BY symbol ORDER BY random() LIMIT ${limit}
+    SELECT symbol FROM (
+      SELECT symbol FROM public.nt_earnings_calendar
+      WHERE status IN ('scheduled', 'pending_results')
+        AND report_date BETWEEN ${addDays(today, -backDays)}::date AND ${today}::date
+      UNION
+      SELECT symbol FROM public.nt_earnings
+      WHERE source = 'alpaca_fiscal'
+        AND reported_date BETWEEN ${addDays(today, -backDays)}::date AND ${today}::date
+    ) d
+    ORDER BY random() LIMIT ${limit}
   `) as Array<{ symbol: string }>;
   return rows.map(r => r.symbol);
 }
