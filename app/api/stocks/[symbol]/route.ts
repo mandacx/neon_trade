@@ -4,6 +4,7 @@ import { processStockData } from '@/lib/calculations';
 import { formatPercentage } from '@/lib/utils';
 import { getSessionUser, getUserContextFor } from '@/lib/appUsers';
 import { getSecuritiesMeta } from '@/lib/securitiesFilters';
+import { liveCompanyName } from '@/lib/liveName';
 import { levelGate, levelAccessFor, LEVEL_POINT_RATE } from '@/lib/levelAccess';
 import { recordHit, rateLimitKey, rateLimitHeaders } from '@/lib/rateLimit';
 import { applyTieredLimit } from '@/lib/rateLimitConfig';
@@ -71,14 +72,16 @@ export async function GET(
     const sec = secRows[symbol.toUpperCase()];
     // Returned at the top level rather than inside `data` so the header still
     // gets a name in broker-only mode, where `data` is null.
-    const security = sec
+    // Still no name in any of our tables: take it from the market-data search (cached, capped at 1.5 s).
+    const liveName = sec?.name ? null : await liveCompanyName(symbol);
+    const security = sec || liveName
       ? {
-          name: sec.name ?? null,
-          sector: sec.sector ?? null,
-          industry: sec.industry ?? null,
-          marketCap: sec.market_cap == null ? null : Number(sec.market_cap),
-          marketCapTier: sec.market_cap_tier ?? null,
-          exchange: sec.exchange ?? null,
+          name: sec?.name ?? liveName,
+          sector: sec?.sector ?? null,
+          industry: sec?.industry ?? null,
+          marketCap: sec?.market_cap == null ? null : Number(sec.market_cap),
+          marketCapTier: sec?.market_cap_tier ?? null,
+          exchange: sec?.exchange ?? null,
         }
       : null;
 

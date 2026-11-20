@@ -3,6 +3,7 @@ import { sql, getAvailableDates } from '@/lib/db';
 import { calculateLevels, findClosestLevel } from '@/lib/calculations';
 import { ETF_SYMBOLS } from '@/lib/curatedWatchlists';
 import { getDailyBarsRevalidated } from '@/lib/marketdata';
+import { getSecuritiesMeta } from '@/lib/securitiesFilters';
 
 // The DISTINCT / window-function / GROUP BY queries below scan a large slice
 // of eod_usmkts_price rather than filtering to one symbol, so they're the
@@ -49,9 +50,10 @@ async function getIndexData() {
 async function getSecuritiesNames(symbols: string[]): Promise<Record<string, string>> {
   if (symbols.length === 0) return {};
   try {
-    const rows = await sql`SELECT symbol, name FROM public.securities WHERE symbol = ANY(${symbols})`;
+    // Same name fallback as everywhere else (securities, scanner universe, level symbols), one query.
+    const meta = await getSecuritiesMeta(symbols);
     const map: Record<string, string> = {};
-    rows.forEach((r: any) => { if (r.name) map[r.symbol] = r.name; });
+    Object.entries(meta).forEach(([sym, r]: [string, any]) => { if (r?.name) map[sym] = r.name; });
     return map;
   } catch { return {}; }
 }

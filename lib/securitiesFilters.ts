@@ -67,13 +67,25 @@ export async function getSecuritiesFilterOptions() {
 export async function getSecuritiesMeta(symbols: string[]) {
   if (symbols.length === 0) return {};
   try {
+    // The name falls back, in one statement (no extra request), from public.securities (a separate app's
+    // table that lacks some symbols, e.g. PNR) to the scanner universe, then the level symbols list. Every
+    // other field still comes from securities only.
     const rows = await sql`
-      SELECT symbol, name, sector, industry, market_cap_tier, market_cap, exchange, indices
-      FROM public.securities
-      WHERE symbol = ANY(${symbols})
+      SELECT q.symbol,
+        COALESCE(NULLIF(btrim(s.name), ''),
+          NULLIF(btrim((SELECT u.name FROM public.nt_us_universe u WHERE u.symbol = q.symbol)), ''),
+          NULLIF(btrim((SELECT y.company_name FROM public.us_symbols y WHERE y.symbol = q.symbol LIMIT 1)), '')) AS name,
+        s.sector, s.industry, s.market_cap_tier, s.market_cap, s.exchange, s.indices
+      FROM unnest(${symbols}::text[]) AS q(symbol)
+      LEFT JOIN LATERAL (
+        SELECT * FROM public.securities WHERE symbol = q.symbol ORDER BY last_refreshed DESC LIMIT 1
+      ) s ON true
     `;
     const map: Record<string, any> = {};
-    rows.forEach((r: any) => { map[r.symbol] = r; });
+    rows.forEach((r: any) => {
+      // A symbol found in none of the tables stays absent, as before.
+      if (r.name != null || r.sector != null || r.industry != null || r.market_cap != null || r.exchange != null) map[r.symbol] = r;
+    });
     return map;
   } catch {
     return {};

@@ -19,6 +19,7 @@ export async function companyNames(symbols: string[]): Promise<Map<string, strin
   };
   await read(`SELECT symbol, name FROM public.nt_us_universe WHERE symbol = ANY($1::text[]) AND name IS NOT NULL`);
   if (out.size < syms.length) await read(`SELECT DISTINCT ON (symbol) symbol, name FROM public.securities WHERE symbol = ANY($1::text[]) AND name IS NOT NULL`);
+  if (out.size < syms.length) await read(`SELECT symbol, company_name AS name FROM public.us_symbols WHERE symbol = ANY($1::text[]) AND company_name IS NOT NULL`);
   return out;
 }
 

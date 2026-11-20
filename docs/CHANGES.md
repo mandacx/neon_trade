@@ -7,6 +7,17 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-11-20 (company names) — a name for every symbol: one-query fallback, nightly fill, live lookup on the stock page
+
+- **Problem:** pages read the name from `public.securities` (yfinance-sourced, 644 rows, last refreshed 2026-10-21), which lacks some symbols (PNR; 59 of 683 level symbols on the latest date, plus 6 rows with an empty name). Names for them exist in `nt_us_universe` (clean, weekly) and `us_symbols.company_name` (typed by admins; has typos such as "Clesetica").
+- **Changed:**
+  - `lib/securitiesFilters.ts` `getSecuritiesMeta`: name = `securities.name`, else `nt_us_universe.name`, else `us_symbols.company_name`, in the same statement (no extra request). Sector, industry, market cap, exchange still come from `securities` only. This feeds the stock page, watchlist quotes, quadrant, scan alerts, earnings and home earnings. `app/api/home/data/route.ts` `getSecuritiesNames` now calls it. `lib/companyNames.ts` (Trade Ideas) gained `us_symbols` as a third source.
+  - `lib/symbolNames.ts` (new) + a step in `/api/cron/market-catalog` (weekday mornings, response key `symbolNames`): fills blank `us_symbols.company_name` from the universe (SQL only), then, for symbols still unnamed everywhere, one market-data search each (max 10 a run, exact ticker only). Never overwrites a name, leaves `updated_at` alone.
+  - `lib/liveName.ts` (new) + `/api/stocks/[symbol]`: when no table names the symbol, the name comes from the market-data search (cached 24 h per instance, misses 1 h, 1.5 s cap). Only the single-stock route does this; list pages never call the vendor.
+- **Why `us_symbols` and not `securities` / `nt_us_universe`:** `securities` belongs to another app (its `id` / `market_id` are NOT NULL, how its loader assigns them is unknown); inserting into `nt_us_universe` would add non-scanner symbols to a table the scanner, bar warming and search read.
+- **Verified:** `tsc` and eslint (0 errors). On the live database (read-only): the new query returns PNR "Pentair plc", AAL, SPX, SOFI by fallback, AAPL unchanged, an unknown symbol absent; every level symbol on the latest date now has a name (was 59 missing, 1 with none: SPX, now "CBOE S&P 500 INDEX S&P 500" from `us_symbols`); the sync selects ran: 4 blanks to copy (ASND, ENS, CBRS, MRCY).
+- **Not verified:** the cron step's writes (not run; the 4 blanks above are filled on its first run), the live vendor lookup and the stock page in a browser, `next build`. Sector/industry/cap filters still skip symbols missing from `securities`. The cron runs weekdays 8:30-11:30 CT (not nightly, no new Railway service); failed lookups retry each run (max 10 calls).
+
 ## 2026-11-20 (admin level requests) — symbol links to the stock chart
 
 - **Changed:** `components/admin/LevelSymbolsAdmin.tsx`: the symbol in pending requests, the tracked table and the decided list is now a link to `/stock/<symbol>` (new tab), so an admin can look at the chart before approving.

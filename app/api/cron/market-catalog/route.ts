@@ -3,6 +3,7 @@ import { isAuthorizedCron } from '@/lib/cronAuth';
 import { catchUpMarketCatalog } from '@/lib/marketCatalog';
 import { captureOptionBars } from '@/lib/optionVolume';
 import { warmDailyBars } from '@/lib/dailyBars';
+import { syncSymbolNames } from '@/lib/symbolNames';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -73,7 +74,15 @@ export async function GET(request: NextRequest) {
       console.error('[cron/market-catalog] option volume capture failed', error);
       optionVolume = { error: error instanceof Error ? error.message : 'Unknown error' };
     }
-    return NextResponse.json({ success: true, data: results, dailyBars, optionVolume });
+    let symbolNames: unknown;
+    try {
+      symbolNames = await syncSymbolNames({ deadline: started + 55_000 });
+      console.log('[cron/market-catalog] symbol names', JSON.stringify(symbolNames));
+    } catch (error) {
+      console.error('[cron/market-catalog] symbol names failed', error);
+      symbolNames = { error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+    return NextResponse.json({ success: true, data: results, dailyBars, optionVolume, symbolNames });
   } catch (error) {
     console.error('[cron/market-catalog] catch-up failed', error);
     return NextResponse.json(
