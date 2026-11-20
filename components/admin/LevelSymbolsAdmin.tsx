@@ -65,7 +65,7 @@ export default function LevelSymbolsAdmin() {
         <div className="space-y-2">
           {data?.pending.map(r => (
             <div key={r.id} className="flex flex-wrap items-center gap-2 border border-gray-100 rounded-lg p-2">
-              <span className="font-semibold text-gray-900 w-16">{r.symbol}</span>
+              <a href={`/stock/${encodeURIComponent(r.symbol)}`} target="_blank" rel="noopener noreferrer" title="Open the stock chart in a new tab" className="font-semibold text-blue-600 hover:underline w-16">{r.symbol} ↗</a>
               <span className="text-xs text-gray-500 flex-1 min-w-[12rem]">
                 {r.requesterEmail ?? 'unknown user'} · {fmt(r.requestedAt)}{r.note ? ` · “${r.note}”` : ''}
               </span>
@@ -104,7 +104,7 @@ export default function LevelSymbolsAdmin() {
             <tbody>
               {data?.tracked.rows.map(t => (
                 <tr key={t.symbol} className="border-t border-gray-100">
-                  <td className="px-2 py-1.5 font-semibold">{t.symbol}</td>
+                  <td className="px-2 py-1.5 font-semibold"><a href={`/stock/${encodeURIComponent(t.symbol)}`} target="_blank" rel="noopener noreferrer" title="Open the stock chart in a new tab" className="text-blue-600 hover:underline">{t.symbol}</a></td>
                   <td className="px-2 py-1.5 text-gray-600 truncate max-w-[18rem]">{t.companyName}</td>
                   <td className="px-2 py-1.5 text-right tabular-nums">
                     <button className="hover:underline" title="Edit strike size" onClick={() => { const v = window.prompt(`Strike size for ${t.symbol}`, String(t.strikeSize ?? DEFAULT_STRIKE)); if (v !== null) act(`s${t.symbol}`, () => call(`/api/admin/level-symbols/${encodeURIComponent(t.symbol)}`, 'PATCH', { action: 'strike', strikeSize: v })); }}>{t.strikeSize ?? '—'}</button>
@@ -128,7 +128,7 @@ export default function LevelSymbolsAdmin() {
         <section className="bg-white border border-gray-200 rounded-xl p-4">
           <h2 className="text-sm font-bold text-gray-900 mb-2">Recently decided</h2>
           <ul className="text-xs text-gray-600 space-y-1">
-            {data.decided.map(r => <li key={r.id}><span className="font-semibold text-gray-900">{r.symbol}</span> {r.status} · {r.requesterEmail ?? 'unknown user'} · {fmt(r.decidedAt)}{r.decisionNote ? ` · ${r.decisionNote}` : ''}</li>)}
+            {data.decided.map(r => <li key={r.id}><a href={`/stock/${encodeURIComponent(r.symbol)}`} target="_blank" rel="noopener noreferrer" className="font-semibold text-blue-600 hover:underline">{r.symbol}</a> {r.status} · {r.requesterEmail ?? 'unknown user'} · {fmt(r.decidedAt)}{r.decisionNote ? ` · ${r.decisionNote}` : ''}</li>)}
           </ul>
         </section>
       )}
