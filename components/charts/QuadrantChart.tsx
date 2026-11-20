@@ -14,7 +14,7 @@ import {
 } from 'recharts';
 import { QuadrantStock } from '@/types/stock';
 import { getLevelColor, getLevelDisplayName, formatCurrency, formatPercentage } from '@/lib/utils';
-import { altLevelColor } from '@/lib/levelCompare';
+import { altLevelColor, altLevelRuleColor } from '@/lib/levelCompare';
 
 interface QuadrantChartProps {
   data: QuadrantStock[];
@@ -90,6 +90,20 @@ function clampDomain(
   if (min < dmin) return [dmin, dmin + range];
   if (max > dmax) return [dmax - range, dmax];
   return [min, max];
+}
+
+// Pan limit for dragging: keeps the window's size but lets it slide past the data edges by up to
+// half of itself, so the view can be dragged in every direction even when fully zoomed out
+// (clampDomain would pin a full-size window in place).
+function clampPan(
+  [min, max]: [number, number],
+  [dmin, dmax]: [number, number],
+): [number, number] {
+  const range = max - min;
+  const lo = dmin - range / 2;
+  const hi = dmax - range / 2;
+  const start = Math.min(hi, Math.max(lo, min));
+  return [start, start + range];
 }
 
 // Scale dot radius logarithmically from market cap
@@ -295,10 +309,10 @@ export default function QuadrantChart({ data, onStockClick, height = 600, title 
     if (!isDragging) setIsDragging(true);
     const ddx = (dx / plotW) * (d.x[1] - d.x[0]);
     const ddy = (dy / plotH) * (d.y[1] - d.y[0]);
-    setXDomain(clampDomain([d.x[0] - ddx, d.x[1] - ddx], DEFAULT_X));
+    setXDomain(clampPan([d.x[0] - ddx, d.x[1] - ddx], DEFAULT_X));
     // Y axis is not inverted (higher y = higher on screen), so dragging down moves
     // the window up in data terms: the opposite sign to X.
-    setYDomain(clampDomain([d.y[0] + ddy, d.y[1] + ddy], DEFAULT_Y));
+    setYDomain(clampPan([d.y[0] + ddy, d.y[1] + ddy], DEFAULT_Y));
   };
   const endDrag = (e?: React.PointerEvent) => {
     if (e) pointersRef.current.delete(e.pointerId); else pointersRef.current.clear();
@@ -384,11 +398,15 @@ export default function QuadrantChart({ data, onStockClick, height = 600, title 
             {d.altLevels?.length > 0 && (() => {
               // Put High / Call Low text: red when Put/Call Int is above both, green when below both.
               const val = (n: string) => d.altLevels.find((l: any) => l.name === n)?.price ?? 0;
-              const tone = altLevelColor(d.levels.find((l: any) => l.name === 'put_call_int')?.price ?? 0, val('put_high'), val('call_low'));
+              const lv = (n: string) => d.levels.find((l: any) => l.name === n)?.price ?? 0;
+              const baseTone = altLevelColor(lv('put_call_int'), val('put_high'), val('call_low'));
               return (
               <>
                 <p className="text-[10px] uppercase tracking-wide text-gray-400 pt-1 mt-1 border-t border-gray-100">Alt levels</p>
-                {d.altLevels.map((level: any) => (
+                {d.altLevels.map((level: any) => {
+                  // Call Low red when below Put Int, Put High green when above Call Int; else the Put/Call Int rule.
+                  const tone = altLevelRuleColor(level.name, lv('put_int'), lv('call_int'), val('put_high'), val('call_low')) ?? baseTone;
+                  return (
                   <div key={level.name} className="flex justify-between gap-4">
                     <span style={{ color: tone ?? getLevelColor(level.name) }}>{getLevelDisplayName(level.name)}</span>
                     <div className="flex gap-2 text-right" style={tone ? { color: tone } : undefined}>
@@ -396,7 +414,8 @@ export default function QuadrantChart({ data, onStockClick, height = 600, title 
                       <span className={tone ? '' : 'text-gray-500'}>{formatPercentage(level.value)}</span>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </>
               );
             })()}

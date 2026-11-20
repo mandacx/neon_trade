@@ -4,7 +4,7 @@
  * CLAUDE.md), so a row with any needed level at 0 never matches.
  */
 
-export type LevelCompare = '' | 'aboveBoth' | 'belowBoth' | 'belowPutHigh' | 'aboveCallLow' | 'putHighAboveCallInt';
+export type LevelCompare = '' | 'aboveBoth' | 'belowBoth' | 'belowPutHigh' | 'aboveCallLow' | 'putHighAboveCallInt' | 'callLowBelowPutInt';
 
 export const LEVEL_COMPARE_OPTIONS: { value: LevelCompare; label: string }[] = [
   { value: '', label: 'Any' },
@@ -13,14 +13,16 @@ export const LEVEL_COMPARE_OPTIONS: { value: LevelCompare; label: string }[] = [
   { value: 'belowPutHigh', label: 'Put/Call Int below Put High' },
   { value: 'aboveCallLow', label: 'Put/Call Int above Call Low' },
   { value: 'putHighAboveCallInt', label: 'Put High above Call Int' },
+  { value: 'callLowBelowPutInt', label: 'Call Low below Put Int' },
 ];
 
 export function isLevelCompare(v: string | null): v is Exclude<LevelCompare, ''> {
   return LEVEL_COMPARE_OPTIONS.some(o => o.value && o.value === v);
 }
 
-export function levelCompareMatches(f: Exclude<LevelCompare, ''>, pci: number, putHigh: number, callLow: number, callInt: number): boolean {
+export function levelCompareMatches(f: Exclude<LevelCompare, ''>, pci: number, putHigh: number, callLow: number, callInt: number, putInt = 0): boolean {
   if (f === 'putHighAboveCallInt') return putHigh > 0 && callInt > 0 && putHigh > callInt;
+  if (f === 'callLowBelowPutInt') return callLow > 0 && putInt > 0 && callLow < putInt;
   if (!(pci > 0)) return false;
   switch (f) {
     case 'aboveBoth': return putHigh > 0 && callLow > 0 && pci > putHigh && pci > callLow;
@@ -41,5 +43,18 @@ export const ALT_LEVEL_GREEN = '#16a34a';
 export function altLevelColor(pci: number, putHigh: number, callLow: number): string | null {
   if (levelCompareMatches('aboveBoth', pci, putHigh, callLow, 0)) return ALT_LEVEL_RED;
   if (levelCompareMatches('belowBoth', pci, putHigh, callLow, 0)) return ALT_LEVEL_GREEN;
+  return null;
+}
+
+/**
+ * Per-level colour for the quadrant tooltip: Call Low is red when it is below Put Int, Put High is
+ * green when it is above Call Int. Takes priority over `altLevelColor` for that level only; null
+ * when the rule does not hold or a level has no data (0).
+ */
+export function altLevelRuleColor(
+  name: 'put_high' | 'call_low', putInt: number, callInt: number, putHigh: number, callLow: number,
+): string | null {
+  if (name === 'call_low' && levelCompareMatches('callLowBelowPutInt', 0, putHigh, callLow, callInt, putInt)) return ALT_LEVEL_RED;
+  if (name === 'put_high' && levelCompareMatches('putHighAboveCallInt', 0, putHigh, callLow, callInt, putInt)) return ALT_LEVEL_GREEN;
   return null;
 }

@@ -308,7 +308,7 @@ function QuadrantPageInner() {
                     </div>
                   )}
                   <div>
-                    <label className={labelClass} title="Compares the Put/Call Int, Put High, Call Low and Call Int levels. Stocks missing a needed level are excluded.">Level compare</label>
+                    <label className={labelClass} title="Compares the Put/Call Int, Put Int, Put High, Call Low and Call Int levels. Stocks missing a needed level are excluded.">Level compare</label>
                     <select value={levelCompare} onChange={e => setLevelCompare(e.target.value)} className={selectClass}>
                       {LEVEL_COMPARE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                     </select>

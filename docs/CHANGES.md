@@ -7,6 +7,19 @@ anything not tested as *unverified*.
 
 ---
 
+## 2026-11-20 (admin level requests) — symbol links to the stock chart
+
+- **Changed:** `components/admin/LevelSymbolsAdmin.tsx`: the symbol in pending requests, the tracked table and the decided list is now a link to `/stock/<symbol>` (new tab), so an admin can look at the chart before approving.
+- **Verified:** `npx tsc --noEmit` (below).
+- **Not verified:** in a browser.
+
+## 2026-11-20 (quadrant pan) — drag pans the quadrant in all directions without zooming first
+
+- **Cause:** pointer-drag panning already existed, but `clampDomain` returns the full default window whenever the window is as large as the data, so at the default zoom a drag had nowhere to go.
+- **Changed:** `components/charts/QuadrantChart.tsx`: new `clampPan`, used only by the drag handler. It keeps the window size and lets it slide past the data edges by up to half its size on each axis (X and Y). Zoom, wheel and pinch still use `clampDomain`; Reset restores the default view (it enables as soon as the view moves).
+- **Verified:** `npx tsc --noEmit` (see below).
+- **Not verified:** in a browser (feel of the drag, touch drag, that a click on a dot still opens the stock after the change); the empty area past the zones is plain white.
+
 ## 2026-11-20 (quadrant) — "Call Low below Put Int" filter; Call Low red / Put High green in the tooltip
 
 - **Requested:** another quadrant filter for Call Low below Put Int; show Call Low in red when that holds, and Put High in green when Put High is above Call Int (that filter already existed as "Put High above Call Int").

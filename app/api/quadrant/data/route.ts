@@ -169,7 +169,7 @@ export async function GET(request: NextRequest) {
       const raw = new Map(stocksData.map(d => [`${d.SYMBOL}|${d.EXPIRY_DT}`, d]));
       filteredStocks = filteredStocks.filter(stock => {
         const d = raw.get(`${stock.symbol}|${stock.expiryDate}`);
-        return !!d && levelCompareMatches(levelCompare, d.PUT_CALL_INT, d.put_HIGH, d.call_low, d.CALL_INT);
+        return !!d && levelCompareMatches(levelCompare, d.PUT_CALL_INT, d.put_HIGH, d.call_low, d.CALL_INT, d.PUT_INT);
       });
     }
 
