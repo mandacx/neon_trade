@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getLatestStockData, getHistoricalStockData, getStockDataByExpiry, getStockDataAsOf, sql } from '@/lib/db';
+import { getLatestStockData, getHistoricalStockData, getStockDataByExpiry, getStockDataAsOf, withCarriedLevels, sql } from '@/lib/db';
 import { calculateLevels, findClosestLevel } from '@/lib/calculations';
 import { formatPercentage } from '@/lib/utils';
 import { getDayBars, referenceClose } from '@/lib/dayBars';
@@ -134,6 +134,9 @@ export async function GET(
         historicalData = await getHistoricalStockData(symbol, from, to, stdOnly);
       }
 
+      // Levels the loader failed to calculate continue from the previous good day (lib/levelFill.ts).
+      historicalData = await withCarriedLevels(symbol, historicalData);
+
       const dayBars = await barsPromise;
       const processedData = historicalData.map(rawData => {
         // The stored CLOSE of load date D is session D-1's close, so the levels were a day behind the candle
@@ -193,6 +196,7 @@ export async function GET(
           date: data.TRADE_DATE,
           close: data.CLOSE,
           ...barFields,
+          carriedFrom: data.carriedFrom ?? null,
           levels: {
             put_low: data.put_LOW,
             put_int: data.PUT_INT,
@@ -277,6 +281,9 @@ export async function GET(
         });
       }
 
+      // A failed calculation continues from the previous good day (lib/levelFill.ts); `carriedFrom` says which day.
+      const [filled] = await withCarriedLevels(symbol, [stockData]);
+      stockData = filled;
       const levels = calculateLevels(stockData);
       const closest = findClosestLevel(levels);
 
@@ -287,6 +294,7 @@ export async function GET(
           tradeDate: stockData.TRADE_DATE,
           expiryDate: stockData.EXPIRY_DT,
           close: stockData.CLOSE,
+          carriedFrom: filled.carriedFrom,
           levels: {
             put_low: stockData.put_LOW,
             put_int: stockData.PUT_INT,

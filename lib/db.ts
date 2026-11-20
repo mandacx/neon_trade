@@ -2,6 +2,7 @@ import { neon } from '@neondatabase/serverless';
 import { catalogTradeDates, catalogExpiries } from '@/lib/marketCatalog';
 import { StockData } from '@/types/stock';
 import { HOLIDAY_SHIFTED_EXPIRIES, normalizeScope as scopeOf, type ExpiryScope } from '@/lib/expiryAccess';
+import { fillLevelRows, needsFill } from '@/lib/levelFill';
 
 if (!process.env.DATABASE_URL) {
   throw new Error('DATABASE_URL environment variable is not set');
@@ -498,6 +499,50 @@ export async function getStockDataByExpiry(symbol: string, expiryDate: string): 
     console.error('Error fetching stock data by expiry:', error);
     throw error;
   }
+}
+
+/**
+ * Level rows the loader failed to calculate continue from the previous good day (lib/levelFill.ts has the rule). Rows
+ * must belong to one symbol; any order is fine for a single row, otherwise ascending by trade date. The previous good
+ * row before the earliest date is looked up (max 60 days back) only for expiries whose first row needs a fill, so a clean
+ * window costs no extra query. Adds `carriedFrom` (the trade date the levels came from, or null) to every row.
+ */
+export async function withCarriedLevels<T extends StockData>(symbol: string, rows: T[]): Promise<Array<T & { carriedFrom: string | null }>> {
+  if (rows.length === 0) return [];
+  const firstByExpiry = new Map<string, T>();
+  for (const r of rows) if (!firstByExpiry.has(r.EXPIRY_DT)) firstByExpiry.set(r.EXPIRY_DT, r);
+  const expiries = [...firstByExpiry].filter(([, r]) => needsFill(r)).map(([e]) => e);
+  const seeds = new Map<string, StockData>();
+  if (expiries.length > 0) {
+    const before = [...firstByExpiry.values()].map(r => r.TRADE_DATE).sort()[0];
+    try {
+      const found = await sql`
+        SELECT DISTINCT ON (expiry_dt)
+          symbol as "SYMBOL",
+          expiry_dt::text as "EXPIRY_DT",
+          trade_date::text as "TRADE_DATE",
+          COALESCE(put_int, 0) as "PUT_INT",
+          COALESCE(call_int, 0) as "CALL_INT",
+          COALESCE(comb_int, 0) as "PUT_CALL_INT",
+          COALESCE(call_low, 0) as call_low,
+          COALESCE(put_high, 0) as "put_HIGH",
+          COALESCE(call_high, 0) as "call_HIGH",
+          COALESCE(put_low, 0) as "put_LOW"
+        FROM public.eod_usmkts_price
+        WHERE symbol = ${symbol.toUpperCase()}
+          AND expiry_dt = ANY(${expiries}::date[])
+          AND trade_date < ${before}::date
+          AND trade_date >= ${before}::date - 60
+          AND put_low > 0 AND put_int > 0 AND comb_int > 0 AND call_int > 0 AND call_high > 0
+        ORDER BY expiry_dt, trade_date DESC
+      `;
+      for (const f of found) seeds.set(f.EXPIRY_DT, sanitizeStockData(f));
+    } catch (error) {
+      // The carry-forward is a repair; if its lookup fails the rows are served as stored.
+      console.error('Error fetching prior levels:', error);
+    }
+  }
+  return fillLevelRows(rows, seeds);
 }
 
 /**
